@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,interactive-widget=resizes-content">
+<title>htmlOS</title>
+<style>
+/* ブートローダ / インストーラ専用の最小スタイル。OS本体のスタイルは /sys/style.css にあります */
+html,body{height:100%;margin:0}
+body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono","Noto Sans Mono CJK JP",Menlo,Consolas,monospace;overflow:hidden}
+#boot{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;overflow:auto}
+#boot.inst{background:#1c3f94}
+.bl-box{width:min(620px,100%);border:1px solid #9aa0a6;background:#000;padding:0}
+.bl-head{background:#9aa0a6;color:#000;padding:2px 10px;text-align:center}
+.bl-list{padding:10px}
+.bl-item{display:block;width:100%;text-align:left;background:none;border:0;color:inherit;font:inherit;padding:3px 8px;cursor:pointer}
+@media (pointer:coarse){.bl-item{padding:11px 8px}.in-btn{padding:10px 18px}}
+.bl-item.sel{background:#d6d8dc;color:#000}
+.bl-item:focus-visible{outline:1px dashed #fff}
+.bl-foot{padding:8px 10px;border-top:1px solid #444;color:#9aa0a6;white-space:pre-wrap}
+.in-box{width:min(560px,100%);background:#c9ccd1;color:#111;box-shadow:10px 10px 0 rgba(0,0,0,.45)}
+.in-head{background:#8f1d1d;color:#fff;padding:3px 12px}
+.in-body{padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.in-body p{margin:0}
+.in-row{display:flex;flex-direction:column;gap:2px}
+.in-row input[type=text],.in-row input[type=password]{font:inherit;font-size:16px;padding:4px 6px;border:1px solid #333;background:#fff;color:#000;border-radius:0}
+.in-radio{display:flex;gap:16px;flex-wrap:wrap}
+.in-btns{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
+.in-btn{font:inherit;padding:3px 14px;border:1px solid #111;background:#e6e7ea;color:#111;cursor:pointer}
+.in-btn:hover,.in-btn:focus-visible{background:#8f1d1d;color:#fff;outline:none}
+.in-err{color:#8f1d1d;min-height:1.5em}
+.in-log{background:#000;color:#d6d8dc;padding:8px;height:180px;overflow:auto;white-space:pre-wrap}
+#boot.post-scr{align-items:stretch;justify-content:flex-start}
+.post-wrap{flex:1;display:flex;flex-direction:column;gap:14px;min-height:100%}
+.post-head{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.post-headtext b{color:#fff;font-size:16px}
+.bios-logo{font-weight:700;font-size:40px;line-height:1;color:#fff;border:2px solid #d6d8dc;padding:8px 12px;letter-spacing:.05em}
+.bios-logo b{color:#5fa8f5}
+.post{white-space:pre-wrap;line-height:1.6;flex:1}
+.post b{color:#fff}
+.post .ok,.dim.ok{color:#7ee787}
+.post .warn{color:#f5c211}
+.dim{color:#8b93a1}
+.post-hint{align-self:flex-start;background:none;border:0;color:#9aa0a6;font:inherit;padding:8px 0;cursor:pointer;text-align:left}
+.post-hint.on{color:#fff}
+.post-quiet{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px}
+.post-quiet .bios-logo{font-size:64px;padding:14px 22px}
+.post-qname{color:#fff;letter-spacing:.3em}
+.post-dots{color:#5fa8f5;letter-spacing:.2em}
+#boot.bios-scr{background:#00003a}
+.bs{width:min(780px,100%);background:#b4b4b4;color:#000;border:2px solid #e8e8e8;display:flex;flex-direction:column}
+.bs-title{background:#0b2a8a;color:#fff;text-align:center;padding:3px}
+.bs-tabs{background:#0b2a8a;display:flex;padding:0 8px}
+.bs-tab{font:inherit;border:0;background:none;color:#cfd6ff;padding:4px 16px;cursor:pointer}
+.bs-tab.on{background:#b4b4b4;color:#0b2a8a;font-weight:700}
+.bs-body{display:flex;min-height:300px}
+.bs-items{flex:1;min-width:0;padding:12px 10px;border-right:2px solid #0b2a8a;display:flex;flex-direction:column;gap:2px}
+.bs-item{display:flex;justify-content:space-between;gap:12px;width:100%;box-sizing:border-box;text-align:left;font:inherit;border:0;background:none;color:#0b2a8a;padding:3px 8px;cursor:pointer}
+.bs-item.sel{background:#0b2a8a;color:#fff}
+.bs-info{color:#222;cursor:default}
+.bs-val{text-align:right;overflow-wrap:anywhere}
+.bs-help{width:36%;box-sizing:border-box;padding:12px 10px;color:#0b2a8a;white-space:pre-wrap}
+.bs-note{margin-top:12px;color:#8f1d1d}
+.bs-foot{background:#0b2a8a;color:#fff;padding:4px 10px;font-size:12.5px;white-space:pre-wrap}
+@media (max-width:560px){.bs-body{flex-direction:column}.bs-items{border-right:0;border-bottom:2px solid #0b2a8a}.bs-help{width:100%}}
+@media (pointer:coarse){.bs-item,.bs-tab{padding-top:10px;padding-bottom:10px}}
+.panic{width:min(720px,100%);white-space:pre-wrap}
+.panic b{color:#ff6b6b}
+</style>
+</head>
+<body>
+<div id="boot"></div>
+<!--SYSFILES-->
+<script>
+/* ============================================================
+   htmlOS ブートローダ & インストーラ
+   このHTMLは「インストールメディア兼ブートローダ」です。
+   OS本体(/sys以下)はLocalStorage上のファイルシステムに展開され、
+   起動時はLocalStorageから読み込んで実行します。
+   ============================================================ */
+(function () {
+  'use strict';
+  var MEDIA_VERSION = '__VERSION__';
+  var P = 'htmlos:';
+
+  // ---- ストレージ (LocalStorageが使えない環境ではRAMディスクで動く)
+  var ls = null, ram = false;
+  try { ls = window.localStorage; ls.setItem(P + 'probe', '1'); ls.removeItem(P + 'probe'); } catch (e) { ls = null; }
+  if (!ls) {
+    ram = true;
+    var mem = new Map();
+    ls = {
+      getItem: function (k) { return mem.has(k) ? mem.get(k) : null; },
+      setItem: function (k, v) { mem.set(k, String(v)); },
+      removeItem: function (k) { mem.delete(k); },
+      key: function (i) { return Array.from(mem.keys())[i]; },
+      get length() { return mem.size; }
+    };
+  }
+  var store = {
+    ram: ram,
+    get: function (k) { return ls.getItem(P + k); },
+    set: function (k, v) { ls.setItem(P + k, v); },
+    del: function (k) { ls.removeItem(P + k); },
+    keys: function (prefix) {
+      var out = [], pre = P + (prefix || '');
+      for (var i = 0; i < ls.length; i++) { var k = ls.key(i); if (k && k.indexOf(pre) === 0) out.push(k.slice(P.length)); }
+      return out;
+    },
+    // OSの中身を全部消す。BIOS設定（キー bios）は基板側のものなので残す
+    wipe: function () { this.keys().forEach(function (k) { if (k !== 'bios') ls.removeItem(P + k); }); }
+  };
+
+  // ---- インストールメディアの中身
+  var media = {};
+  document.querySelectorAll('script[type="text/x-htmlos"]').forEach(function (s) {
+    media[s.getAttribute('data-path')] = s.textContent.replace(/^\n/, '');
+  });
+
+  // ---- パスワードハッシュ
+  function toHex(buf) { return Array.from(new Uint8Array(buf)).map(function (x) { return x.toString(16).padStart(2, '0'); }).join(''); }
+  function cyrb(s) {
+    var h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+    for (var i = 0; i < s.length; i++) { var c = s.charCodeAt(i); h1 = Math.imul(h1 ^ c, 2654435761); h2 = Math.imul(h2 ^ c, 1597334677); }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return (h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0');
+  }
+  async function hash(pw, salt, alg) {
+    salt = salt || Math.random().toString(36).slice(2, 10);
+    var s = salt + ':' + pw;
+    if (alg !== 'cyrb' && window.crypto && crypto.subtle) {
+      try { return 'sha256$' + salt + '$' + toHex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s))); } catch (e) { /* fallthrough */ }
+    }
+    if (alg === 'sha256') return 'unavailable$' + salt + '$';
+    return 'cyrb$' + salt + '$' + cyrb(s);
+  }
+  async function verify(pw, stored) {
+    var p = String(stored || '').split('$');
+    if (p.length !== 3) return false;
+    return (await hash(pw, p[1], p[0])) === stored;
+  }
+
+  // ---- 最小限のファイル書き込み
+  function put(path, node) { store.set('f:' + path, JSON.stringify(node)); }
+  function mkdirp(path) {
+    var parts = path.split('/').filter(Boolean), cur = '';
+    if (store.get('f:/') == null) put('/', { t: 'd', m: Date.now(), o: 'root' });
+    parts.forEach(function (s) { cur += '/' + s; if (store.get('f:' + cur) == null) put(cur, { t: 'd', m: Date.now(), o: 'root' }); });
+  }
+  function writeSys(log) {
+    Object.keys(media).forEach(function (path) {
+      mkdirp(path.slice(0, path.lastIndexOf('/')) || '/');
+      put(path, { t: 'f', c: media[path], m: Date.now(), o: 'root' });
+      if (log) log('展開: ' + path + ' (' + media[path].length + ' 文字)');
+    });
+    var meta = getMeta() || { installedAt: Date.now() };
+    meta.version = MEDIA_VERSION; meta.updatedAt = Date.now();
+    store.set('meta', JSON.stringify(meta));
+  }
+  function getMeta() { try { return JSON.parse(store.get('meta')); } catch (e) { return null; } }
+  function getConfig() { try { return JSON.parse(JSON.parse(store.get('f:/etc/config.json')).c); } catch (e) { return {}; } }
+
+  async function install(user, pw, mode, log, rootPw) {
+    store.wipe();
+    ['/sys/apps', '/etc', '/home', '/tmp', '/bin'].forEach(mkdirp);
+    writeSys(log);
+    put('/etc/passwd', { t: 'f', m: Date.now(), o: 'root', c: JSON.stringify([{ name: user, pw: await hash(pw), admin: true, color: '#3584e4', created: Date.now() },
+      { name: 'root', pw: await hash(rootPw ? rootPw : pw), admin: true, root: true, color: '#c01c28', created: Date.now() }], null, 1) });
+    put('/etc/config.json', { t: 'f', m: Date.now(), o: 'root', c: JSON.stringify({ bootMode: mode, timeout: 3 }, null, 1) });
+    put('/etc/motd', { t: 'f', m: Date.now(), o: 'root', c: 'htmlOS へようこそ。「help」でコマンド一覧、「htui start」でデスクトップを起動します。\n' });
+    log('ユーザー ' + user + ' と root を作成しました');
+  }
+
+  // ---- 画面
+  var scr = document.getElementById('boot');
+  var keyHandler = null;
+  document.addEventListener('keydown', function (e) { if (keyHandler) keyHandler(e); });
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function show(node, cls) { scr.style.display = 'flex'; scr.className = cls || ''; scr.textContent = ''; scr.appendChild(node); }
+
+  function menu() {
+    var meta = getMeta(), cfg = getConfig();
+    var def = cfg.bootMode === 'cui' ? 'cui' : 'gui';
+    var items = [];
+    if (meta.version !== MEDIA_VERSION) items.push({ label: 'システムを ' + meta.version + ' → ' + MEDIA_VERSION + ' に更新して起動', act: function () { writeSys(); boot(def); } });
+    items.push({ label: 'htmlOS を起動（既定: ' + (def === 'gui' ? 'HTUi' : 'jsh') + '）', act: function () { boot(def); } });
+    items.push({ label: 'htmlOS を起動（GUI: HTUi）', act: function () { boot('gui'); } });
+    items.push({ label: 'htmlOS を起動（CUI: jsh）', act: function () { boot('cui'); } });
+    items.push({ label: 'システム修復（/sys をメディアから再展開。データは保持）', act: function () { writeSys(); boot(def); } });
+    items.push({ label: '再インストール（すべて消去）', act: function () { confirmWipe(); } });
+
+    var sel = 0, left = Number(cfg.timeout); if (!(left >= 0)) left = 3;
+    var box = el('div', 'bl-box'), list = el('div', 'bl-list'), foot = el('div', 'bl-foot');
+    box.appendChild(el('div', 'bl-head', 'htmlOS Boot Loader ' + MEDIA_VERSION));
+    box.appendChild(list); box.appendChild(foot);
+    var btns = items.map(function (it, i) {
+      var b = el('button', 'bl-item', it.label); b.type = 'button';
+      b.addEventListener('click', function () { stop(); run(i); });
+      b.addEventListener('mouseenter', function () { sel = i; paint(); });
+      list.appendChild(b); return b;
+    });
+    var timer = null;
+    function paint() {
+      btns.forEach(function (b, i) { b.classList.toggle('sel', i === sel); b.textContent = (i === sel ? '*' : ' ') + items[i].label; });
+      foot.textContent = '↑↓: 選択   Enter: 決定' + (timer ? '\n' + left + ' 秒後に選択中の項目で起動します（キー入力で停止）' : '') +
+        (store.ram ? '\n注意: LocalStorageが使えないためRAMディスクで動作中です（再読み込みで消えます）' : '');
+    }
+    function stop() { if (timer) { clearInterval(timer); timer = null; } }
+    function run(i) { stop(); keyHandler = null; items[i].act(); }
+    keyHandler = function (e) {
+      stop();
+      if (e.key === 'ArrowDown') { sel = (sel + 1) % items.length; e.preventDefault(); }
+      else if (e.key === 'ArrowUp') { sel = (sel + items.length - 1) % items.length; e.preventDefault(); }
+      else if (e.key === 'Enter') { e.preventDefault(); run(sel); return; }
+      paint();
+    };
+    if (left === 0) { run(0); return; }
+    timer = setInterval(function () { left--; if (left <= 0) run(sel); else paint(); }, 1000);
+    show(box); paint();
+  }
+
+  function confirmWipe() {
+    var box = el('div', 'in-box'), body = el('div', 'in-body'), btns = el('div', 'in-btns');
+    box.appendChild(el('div', 'in-head', '再インストール'));
+    body.appendChild(el('p', '', 'LocalStorage上のhtmlOS（全ユーザー・全ファイル・設定）を消去してインストーラを起動します。元に戻せません。'));
+    var no = el('button', 'in-btn', 'やめる'), yes = el('button', 'in-btn', '消去して再インストール');
+    no.onclick = function () { main(); };
+    yes.onclick = function () { store.wipe(); installer(); };
+    btns.appendChild(no); btns.appendChild(yes); body.appendChild(btns); box.appendChild(body);
+    keyHandler = null; show(box, 'inst'); no.focus();
+  }
+
+  function installer() {
+    keyHandler = null;
+    var box = el('div', 'in-box'), body = el('form', 'in-body');
+    box.appendChild(el('div', 'in-head', 'htmlOS ' + MEDIA_VERSION + ' インストーラ'));
+    body.appendChild(el('p', '', 'htmlOS をこのブラウザのLocalStorageにインストールします。最初のユーザー（管理者）を作成してください。何でもできる root アカウントも一緒に作られます（jsh の su で入ります）。'));
+    function row(label, id, type, val) {
+      var r = el('label', 'in-row'); r.appendChild(el('span', '', label));
+      var i = el('input'); i.type = type; i.id = id; i.value = val || ''; i.autocomplete = 'off'; r.appendChild(i); body.appendChild(r); return i;
+    }
+    var name = row('ユーザー名（英小文字・数字・_ -、16文字まで）', 'in-user', 'text', 'user');
+    var pw1 = row('パスワード', 'in-pw1', 'password');
+    var pw2 = row('パスワード（確認）', 'in-pw2', 'password');
+    var rpw = row('root のパスワード（空欄なら上と同じ）', 'in-rpw', 'password');
+    var rr = el('div', 'in-row'); rr.appendChild(el('span', '', '既定の起動モード'));
+    var radios = el('div', 'in-radio');
+    [['gui', 'GUI（HTUi デスクトップ）'], ['cui', 'CUI（jsh コンソール）']].forEach(function (m, i) {
+      var l = el('label'), r = el('input'); r.type = 'radio'; r.name = 'in-mode'; r.value = m[0]; r.id = 'in-mode-' + m[0]; r.checked = i === 0;
+      l.appendChild(r); l.appendChild(document.createTextNode(' ' + m[1])); radios.appendChild(l);
+    });
+    rr.appendChild(radios); body.appendChild(rr);
+    var err = el('div', 'in-err'); body.appendChild(err);
+    var btns = el('div', 'in-btns'), go = el('button', 'in-btn', 'インストール'); go.type = 'submit'; btns.appendChild(go); body.appendChild(btns);
+    box.appendChild(body);
+    body.addEventListener('submit', async function (e) {
+      e.preventDefault();
+      var u = name.value.trim();
+      if (!/^[a-z_][a-z0-9_-]{0,15}$/.test(u)) { err.textContent = 'ユーザー名は英小文字で始め、英小文字・数字・_ - で16文字までにしてください。'; return; }
+      if (pw1.value !== pw2.value) { err.textContent = 'パスワードが一致しません。'; return; }
+      if (u === 'root') { err.textContent = 'root は自動で作られます。別のユーザー名にしてください。'; return; }
+      var mode = body.querySelector('input[name=in-mode]:checked').value, rootPw = rpw.value;
+      var logBox = el('div', 'in-log'); body.textContent = ''; body.appendChild(el('p', '', 'インストール中…')); body.appendChild(logBox);
+      function log(s) { logBox.textContent += s + '\n'; logBox.scrollTop = logBox.scrollHeight; }
+      try {
+        await install(u, pw1.value, mode, log, rootPw);
+        log('完了しました。');
+        var b = el('div', 'in-btns'), ok = el('button', 'in-btn', '起動する'); ok.type = 'button'; ok.onclick = function () { boot(mode); };
+        b.appendChild(ok); body.appendChild(b); ok.focus();
+      } catch (ex) { log('失敗: ' + ex.message + '\nブラウザのストレージが使えない、または空きがない可能性があります。'); }
+    });
+    show(box, 'inst'); name.focus(); name.select();
+  }
+
+  function panic(e) {
+    keyHandler = null;
+    var root = document.getElementById('os-root'); if (root) root.remove();
+    var box = el('div', 'panic');
+    var b = el('b', '', 'Kernel panic — 起動に失敗しました\n\n'); box.appendChild(b);
+    box.appendChild(document.createTextNode(String(e && e.stack || e) + '\n\n/sys 以下のファイルが壊れている可能性があります。\n\n'));
+    var r = el('button', 'in-btn', 'システム修復して起動（データ保持）'); r.onclick = function () { writeSys(); boot(getConfig().bootMode === 'cui' ? 'cui' : 'gui'); };
+    var m = el('button', 'in-btn', 'ブートメニュー'); m.onclick = function () { main(); };
+    box.appendChild(r); box.appendChild(document.createTextNode('  ')); box.appendChild(m);
+    show(box);
+  }
+
+  async function boot(mode) {
+    keyHandler = null;
+    try {
+      var node = JSON.parse(store.get('f:/sys/kernel.js'));
+      BOOT.installedVersion = (getMeta() || {}).version || '?';
+      var old = document.getElementById('os-root'); if (old) old.remove();
+      scr.textContent = '';
+      var st = document.getElementById('htmlos-style'); if (st) st.remove();
+      (0, eval)(node.c + '\n//# sourceURL=hfs:///sys/kernel.js');
+      await window.OS.boot(mode);
+      scr.style.display = 'none'; scr.textContent = '';
+    } catch (e) { panic(e); }
+  }
+
+  function main() {
+    var flag = store.get('bootflag'); if (flag) store.del('bootflag');
+    if (flag === 'reinstall') store.wipe();
+    if (!getMeta() || store.get('f:/sys/kernel.js') == null) { installer(); return; }
+    if (flag === 'repair') { writeSys(); boot(getConfig().bootMode === 'cui' ? 'cui' : 'gui'); return; }
+    if (flag === 'gui' || flag === 'cui') { boot(flag); return; }
+    menu();
+  }
+
+  // ---- BIOS。設定は LocalStorage の "htmlos:bios" に保存する（CMOS の代わり）
+  var BIOS_DEFAULTS = { quiet: false, speed: 'normal', beep: false };
+  function nvram() {
+    var c = {}, k;
+    for (k in BIOS_DEFAULTS) c[k] = BIOS_DEFAULTS[k];
+    try { var v = JSON.parse(store.get('bios') || '{}'); for (k in BIOS_DEFAULTS) if (k in v) c[k] = v[k]; } catch (e) { /* 壊れていたら既定値 */ }
+    return c;
+  }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function usedKB() { var n = 0; store.keys().forEach(function (k) { n += k.length + 7 + (store.get(k) || '').length; }); return Math.round(n / 1024); }
+  function mq(q) { return !!(window.matchMedia && window.matchMedia(q).matches); }
+  function beep() {
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext, ac = new AC(), o = ac.createOscillator(), g = ac.createGain();
+      o.type = 'square'; o.frequency.value = 880; g.gain.value = 0.05; o.connect(g); g.connect(ac.destination);
+      o.start(); o.stop(ac.currentTime + 0.14); setTimeout(function () { ac.close(); }, 500);
+    } catch (e) { /* ブラウザが音を許可しなければ鳴らない */ }
+  }
+  function biosLogo() {
+    var l = el('div', 'bios-logo');
+    l.appendChild(document.createTextNode('<')); l.appendChild(el('b', '', '/')); l.appendChild(document.createTextNode('>'));
+    return l;
+  }
+
+  // POST (Power On Self Test)。最低でも1秒以上表示する。DEL / F2 で SETUP に入る
+  async function post() {
+    var cfg = nvram(), k = cfg.speed === 'slow' ? 2.5 : 1, t0 = Date.now(), wantSetup = false;
+    var wrap = el('div', 'post-wrap'), box = el('div', 'post');
+    var hint = el('button', 'post-hint', 'DEL または F2 : SETUP を起動（ここをタップしても入れます）'); hint.type = 'button';
+    function ask() { wantSetup = true; hint.textContent = 'SETUP を起動します…'; hint.classList.add('on'); }
+    hint.onclick = ask;
+    keyHandler = function (e) { if (e.key === 'Delete' || e.key === 'F2') { e.preventDefault(); ask(); } };
+    var meta = getMeta(), hasOS = !!meta && store.get('f:/sys/kernel.js') != null;
+    function line(text, cls) { var s = el(cls === 'b' ? 'b' : 'span', cls && cls !== 'b' ? cls : '', text); box.appendChild(s); return s; }
+
+    if (cfg.quiet) {
+      // Quiet Boot: ロゴだけ
+      var q = el('div', 'post-quiet'); q.appendChild(biosLogo()); q.appendChild(el('div', 'post-qname', 'htmlBIOS'));
+      var dots = el('div', 'post-dots', ''); q.appendChild(dots);
+      wrap.appendChild(q); wrap.appendChild(hint); show(wrap, 'post-scr');
+      for (var d = 0; d < 6; d++) { dots.textContent = '■'.repeat(d + 1) + '□'.repeat(5 - d); await sleep(200 * k); }
+    } else {
+      var head = el('div', 'post-head'), ht = el('div', 'post-headtext');
+      head.appendChild(biosLogo()); head.appendChild(ht);
+      ht.appendChild(el('b', '', 'htmlBIOS v' + MEDIA_VERSION));
+      ht.appendChild(el('div', '', 'HTML Basic Input/Output System'));
+      ht.appendChild(el('div', 'dim', 'Media: htmlOS.html  /  ' + Object.keys(media).length + ' system files'));
+      wrap.appendChild(head); wrap.appendChild(box); wrap.appendChild(hint); show(wrap, 'post-scr');
+      await sleep(260 * k);
+      line('Main Processor   : ' + (navigator.hardwareConcurrency || '?') + ' logical cores' + (navigator.platform ? '  (' + navigator.platform + ')' : '') + '\n'); await sleep(110 * k);
+      if (navigator.deviceMemory) { line('Device Memory    : ' + navigator.deviceMemory + ' GB\n'); await sleep(90 * k); }
+      line('Storage Test     : ');
+      var cnt = line('0K');
+      for (var n = 0; n <= 5120; n += 256) { cnt.textContent = n + 'K'; await sleep(22 * k); }
+      line(store.ram ? '  RAM disk only\n' : '  OK\n', store.ram ? 'warn' : 'ok'); await sleep(100 * k);
+      line('Display          : ' + window.innerWidth + ' x ' + window.innerHeight + '  @' + (window.devicePixelRatio || 1) + 'x\n'); await sleep(100 * k);
+      var inputs = ['Keyboard']; if (mq('(any-pointer: fine)')) inputs.push('Mouse'); if (navigator.maxTouchPoints > 0) inputs.push('Touch (' + navigator.maxTouchPoints + ' points)');
+      line('Input Devices    : ' + inputs.join(', ') + '\n'); await sleep(100 * k);
+      line('Network          : ' + (navigator.onLine === false ? 'Offline' : 'Online') + '\n\n'); await sleep(140 * k);
+      line('Detecting boot devices ...\n'); await sleep(260 * k);
+      line('  HDD0 : ' + (store.ram ? 'RAM disk (volatile)' : 'LocalStorage [htmlos:]') + '   ' + usedKB() + ' KB / 5120 KB   ');
+      line(hasOS ? 'htmlOS ' + meta.version + '\n' : 'No operating system\n', hasOS ? 'ok' : 'warn'); await sleep(140 * k);
+      line('  CD0  : htmlOS.html (install media)   ');
+      line('htmlOS ' + MEDIA_VERSION + '\n\n', 'ok'); await sleep(160 * k);
+      line('POST completed.  ' + (store.ram ? '1 warning: LocalStorage が使えません（再読み込みで消えます）' : '0 errors') + '\n', store.ram ? 'warn' : '');
+      line(hasOS ? 'Booting from HDD0 ...\n' : 'Booting from CD0 (installer) ...\n');
+    }
+    if (cfg.beep) beep();
+    await sleep(Math.max(350 * k, 1400 - (Date.now() - t0)));
+    keyHandler = null;
+    return wantSetup;
+  }
+
+  // BIOS セットアップ画面
+  function setup() {
+    var cfg = nvram(), tab = 0, sel = 0, timer = null, note = '';
+    var meta = getMeta();
+    var TABS = [
+      { name: 'Main', items: [
+        { info: 'BIOS Version', val: function () { return 'htmlBIOS v' + MEDIA_VERSION; } },
+        { info: 'Install Media', val: function () { return 'htmlOS ' + MEDIA_VERSION + ' (' + Object.keys(media).length + ' files)'; } },
+        { info: 'Installed OS', val: function () { return meta && store.get('f:/sys/kernel.js') != null ? 'htmlOS ' + meta.version : 'なし'; } },
+        { info: 'System Time', val: function () { return new Date().toLocaleString('ja-JP'); } },
+        { info: 'Processor', val: function () { return (navigator.hardwareConcurrency || '?') + ' logical cores'; } },
+        { info: 'Storage', val: function () { return (store.ram ? 'RAM disk' : 'LocalStorage') + '  ' + usedKB() + ' KB / 5120 KB'; } },
+        { info: 'Display', val: function () { return window.innerWidth + ' x ' + window.innerHeight; } }
+      ], help: 'システムの情報です。\nここで変更できる項目はありません。' },
+      { name: 'Boot', items: [
+        { key: 'quiet', label: 'Quiet Boot', opts: [[false, 'Disabled'], [true, 'Enabled']], help: 'Enabled にすると、起動時の自己診断（POST）の文字を出さず、ロゴだけを表示します。' },
+        { key: 'speed', label: 'POST Speed', opts: [['normal', 'Normal'], ['slow', 'Slow']], help: 'POST の表示の速さです。\nSlow にすると、じっくり読める速さで進みます。' },
+        { key: 'beep', label: 'POST Beep', opts: [[false, 'Disabled'], [true, 'Enabled']], help: 'POST が終わったときに「ピッ」と鳴らします。\nブラウザが音を許可していないときは鳴りません（ページを一度クリックしたあとは鳴りやすくなります）。' }
+      ] },
+      { name: 'Exit', items: [
+        { label: 'Save Changes and Exit', act: function () { store.set('bios', JSON.stringify(cfg)); leave(true); }, help: '変更を保存して再起動します。（F10）' },
+        { label: 'Discard Changes and Exit', act: function () { leave(false); }, help: '変更を保存せずに SETUP を終了して、ブートメニューへ進みます。（Esc）' },
+        { label: 'Load Setup Defaults', act: function () { for (var k in BIOS_DEFAULTS) cfg[k] = BIOS_DEFAULTS[k]; note = '既定値を読み込みました（まだ保存していません）'; }, help: 'すべての項目を既定値に戻します。保存するまでは反映されません。' },
+        { label: 'Clear CMOS', act: function () { store.del('bios'); leave(true); }, help: '保存してある BIOS 設定を消して再起動します。htmlOS 本体やファイルは消えません。' }
+      ] }
+    ];
+    function leave(reboot) { if (timer) clearInterval(timer); keyHandler = null; if (reboot) location.reload(); else main(); }
+    function selectable(i) { return !TABS[tab].items[i].info; }
+    function move(d) { var n = TABS[tab].items.length; for (var c = 0; c < n; c++) { sel = (sel + d + n) % n; if (selectable(sel)) return; } }
+    function fire() {
+      var it = TABS[tab].items[sel]; if (!it || it.info) return;
+      if (it.opts) { var i = 0; it.opts.forEach(function (o, j) { if (o[0] === cfg[it.key]) i = j; }); cfg[it.key] = it.opts[(i + 1) % it.opts.length][0]; note = ''; }
+      else if (it.act) it.act();
+    }
+    function setTab(t) { tab = (t + TABS.length) % TABS.length; sel = 0; if (!selectable(0)) move(1); if (!selectable(sel)) sel = -1; note = ''; }
+    function render() {
+      var box = el('div', 'bs'), tabs = el('div', 'bs-tabs'), body = el('div', 'bs-body'), items = el('div', 'bs-items'), help = el('div', 'bs-help');
+      box.appendChild(el('div', 'bs-title', 'htmlBIOS Setup Utility'));
+      TABS.forEach(function (t, i) { var b = el('button', 'bs-tab' + (i === tab ? ' on' : ''), t.name); b.type = 'button'; b.onclick = function () { setTab(i); render(); }; tabs.appendChild(b); });
+      TABS[tab].items.forEach(function (it, i) {
+        var row;
+        if (it.info) { row = el('div', 'bs-item bs-info'); row.appendChild(el('span', '', it.info)); row.appendChild(el('span', 'bs-val', it.val())); }
+        else {
+          row = el('button', 'bs-item' + (i === sel ? ' sel' : '')); row.type = 'button';
+          row.appendChild(el('span', '', it.label));
+          if (it.opts) { var cur = it.opts.filter(function (o) { return o[0] === cfg[it.key]; })[0] || it.opts[0]; row.appendChild(el('span', 'bs-val', '[' + cur[1] + ']')); }
+          row.onclick = function () { sel = i; fire(); if (keyHandler) render(); };
+        }
+        items.appendChild(row);
+      });
+      var cur = TABS[tab].items[sel];
+      help.textContent = (cur && cur.help) || TABS[tab].help || '';
+      if (note) { var nn = el('div', 'bs-note', note); help.appendChild(nn); }
+      body.appendChild(items); body.appendChild(help);
+      box.appendChild(tabs); box.appendChild(body);
+      box.appendChild(el('div', 'bs-foot', '←→ 画面の切替   ↑↓ 項目の選択   Enter 変更・実行   F10 保存して終了   Esc 保存せず終了'));
+      show(box, 'bios-scr');
+    }
+    keyHandler = function (e) {
+      if (e.key === 'ArrowLeft') setTab(tab - 1);
+      else if (e.key === 'ArrowRight') setTab(tab + 1);
+      else if (e.key === 'ArrowUp') move(-1);
+      else if (e.key === 'ArrowDown') move(1);
+      else if (e.key === 'Enter' || e.key === ' ' || e.key === '+' || e.key === '-') fire();
+      else if (e.key === 'F10') { e.preventDefault(); store.set('bios', JSON.stringify(cfg)); leave(true); return; }
+      else if (e.key === 'Escape') { leave(false); return; }
+      else return;
+      e.preventDefault();
+      if (keyHandler) render();
+    };
+    setTab(0); render();
+    timer = setInterval(function () { if (tab === 0 && keyHandler) render(); }, 1000);
+  }
+
+  window.BOOT = { version: MEDIA_VERSION, store: store, media: media, hash: hash, verify: verify, writeSys: writeSys, getMeta: getMeta, menu: main };
+  post().then(function (wantSetup) { if (wantSetup) setup(); else main(); });
+})();
+</script>
+</body>
+</html>
