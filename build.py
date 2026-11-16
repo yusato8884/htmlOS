@@ -2,7 +2,7 @@
 """src/ 以下を1枚の index.html（インストールメディア兼ブートローダ）にまとめる。"""
 import pathlib, sys
 
-VERSION = '1.8.0'
+VERSION = '1.8.1'
 root = pathlib.Path(__file__).parent
 src = root / 'src'
 blocks = []

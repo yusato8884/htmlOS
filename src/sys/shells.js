@@ -22,7 +22,7 @@
 
   // ======================================================== hWin（Windows 風）
   OS.registerSession({
-    id: 'win', name: 'hWin（Windows 風）', desc: '下にタスクバー、左下のスタートボタンからアプリを開く、Windows 風のデスクトップです。',
+    id: 'win', name: 'hWin（Windows 風）', desc: '下にタスクバー、左下のスタートボタンからアプリを開く、Windows 風のデスクトップです。タブレットとスマートフォンでは Windows 8 風のタイル画面になります。',
     build(k) {
       const desk = k.desk(true);
       const tasks = htui.tasks = h('div', { class: 'tb-tasks' });
@@ -31,9 +31,29 @@
       const showDesk = h('button', { class: 'tb-showdesk', type: 'button', title: 'デスクトップを表示', 'aria-label': 'デスクトップを表示', onclick: () => {
         if (htui.wins.some(w => !w.el.classList.contains('hidden'))) htui.goHome(); else htui.wins.forEach(w => w.focus());
       } });
+      // タブレット・スマートフォン用の Windows 8 風スタート画面（タイル）。デスクトップモードでは CSS で隠れる
+      this.tiles = h('div', { class: 'w8-grid' });
+      const who = h('button', { class: 'w8-user', type: 'button', onclick: e => k.menu(e.currentTarget, [
+        { label: '設定', icon: 'gear', act: () => k.run('settings') },
+        { label: '画面モード', icon: OS.modeIcons[OS.uiMode], act: () => { const r = who.getBoundingClientRect(); setTimeout(() => k.menuAt(r.right - 240, r.bottom + 4, k.modeItems()), 0); } },
+        { sep: true }].concat(k.powerItems()), true) }, h('span', null, htui.user), k.avatar(OS.users.get(htui.user), 36));
+      desk.prepend(h('div', { class: 'w8-start' }, h('div', { class: 'w8-head' }, h('h1', null, 'スタート'), who), this.tiles));
       htui.el.append(desk, h('div', { class: 'taskbar' }, start, tasks, h('div', { class: 'tb-tray' }, k.modeButton('tb-btn', { up: true }), clock, showDesk)));
       this.startBtn = start;
     },
+    // タイルを並べ直す（アプリが増減したときにも呼ばれる）
+    onApps() {
+      if (!this.tiles) return;
+      const k = htui.kit, g = this.tiles, WIDE = ['terminal', 'hbrowser', 'hfile', 'settings'];
+      g.textContent = '';
+      const clock = h('div', { class: 'w8-tile w8-wide w8-clock', role: 'img', 'aria-label': '時計' }, h('b'), h('span'));
+      k.clock(clock.firstChild, d => k.pad(d.getHours()) + ':' + k.pad(d.getMinutes()));
+      k.clock(clock.lastChild, d => (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + '日月火水木金土'[d.getDay()] + '曜日');
+      g.append(clock);
+      k.apps().forEach((a, i) => g.append(h('button', { class: 'w8-tile' + (WIDE.includes(a.id) ? ' w8-wide' : ''), type: 'button', title: a.desc || a.name, style: 'background:' + (a.color || '#5e5c64') + ';--i:' + i, onclick: () => k.run(a.id) },
+        OS.icon(a.icon, 40), h('span', { class: 'w8-name' }, a.name))));
+    },
+    onStop() { this.tiles = null; },
     toggleStart() {
       const old = htui.el.querySelector('.startmenu');
       if (old) { old._close(); return; }
@@ -61,7 +81,7 @@
       fill(); htui.el.append(sm);
       if (!OS.touch) q.focus();
     },
-    onKey(e) { if (e.ctrlKey && e.key === 'Escape') { this.toggleStart(); return true; } }
+    onKey(e) { if (e.ctrlKey && e.key === 'Escape') { if (OS.touch) htui.goHome(); else this.toggleStart(); return true; } }
   });
 
   // ======================================================== hShell（GNOME 風）
