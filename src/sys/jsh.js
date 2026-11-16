@@ -267,14 +267,27 @@
           if (OS.htui.running && OS.htui.user) OS.htui.setPrefs({ mode: arg }); else OS.setMode(arg);
           return '画面モード: ' + OS.modeNames[arg] + (arg === 'auto' ? '（' + OS.modeNames[OS.uiMode] + '）' : '');
         }
-        if (sub === 'start') { if (!OS.htui.start(self.user)) throw new Error('HTUi はすでに起動しています'); return; }
+        if (sub === 'sessions') return Object.values(OS.sessions).map(s => s.id.padEnd(7) + s.name + (OS.htui.sessionId === s.id ? '  ← 使用中' : '')).join('\n');
+        if (sub === 'start') {
+          if (arg != null && !OS.sessions[arg]) throw new Error(arg + ': そのようなデスクトップ環境はありません（htui sessions で一覧）');
+          if (!OS.htui.start(self.user, arg)) throw new Error('HTUi はすでに起動しています');
+          return;
+        }
+        if (sub === 'session') {
+          if (arg == null) return OS.htui.sessionId ? 'デスクトップ環境: ' + OS.sessions[OS.htui.sessionId].name : '既定のデスクトップ環境: ' + OS.sessions[OS.hdm.sessionFor(self.user)].name;
+          if (!OS.sessions[arg]) throw new Error(arg + ': そのようなデスクトップ環境はありません（htui sessions で一覧）');
+          OS.hdm.setUserSession(self.user, arg);
+          if (OS.htui.running && OS.htui.user === self.user) { setTimeout(() => OS.htui.switchSession(arg), 0); return OS.sessions[arg].name + ' に切り替えます'; }
+          return '次回から ' + OS.sessions[arg].name + ' で起動します';
+        }
         if (sub === 'stop') { if (!OS.htui.running) throw new Error('HTUi は起動していません'); setTimeout(() => OS.htui.stop(true), 0); return; }
-        if (sub === 'status') return 'HTUi: ' + (OS.htui.running ? '起動中' + (OS.htui.user ? '（' + OS.htui.user + '）' : '（ログイン画面）') : '停止中');
-        throw new Error('htui start | stop | status | mode [auto|desktop|tablet|phone]');
+        if (sub === 'status') return 'HTUi: ' + (OS.htui.running ? '起動中' + (OS.htui.user ? '（' + OS.htui.user + ' ・ ' + OS.sessions[OS.htui.sessionId].name + '）' : '（ログイン画面 hdm）') : '停止中');
+        throw new Error('htui start [環境] | stop | status | sessions | session [環境] | mode [auto|desktop|tablet|phone]');
       };
       htui.start = () => htui('start'); htui.stop = () => htui('stop'); htui.status = () => htui('status');
-      def('htui', 'htui start|stop|status|mode', 'HTUiの起動・終了。htui mode tablet などで画面モード切替', htui);
-      def('startx', 'startx', 'htui start と同じ', () => htui('start'));
+      def('htui', 'htui start [環境]|stop|status|sessions|session [環境]|mode', 'HTUiの起動・終了、デスクトップ環境と画面モードの切替', htui);
+      def('startx', 'startx [環境]', 'htui start と同じ', s => htui('start', s));
+      def('hdm', 'hdm', 'ログイン画面（hdm）を出して HTUi を起動', () => { if (!OS.htui.start()) throw new Error('HTUi はすでに起動しています'); });
       def('ps', 'ps', 'HTUi上のウィンドウ一覧', () => !OS.htui.running ? 'HTUi は起動していません' : ['  PID  APP        TITLE'].concat(OS.htui.wins.map(w => String(w.pid).padStart(5) + '  ' + String(w.app || '-').padEnd(9) + '  ' + w.title)).join('\n'));
       def('kill', 'kill PID', 'ウィンドウを強制終了', pid => { const w = OS.htui.wins.find(x => x.pid === Number(pid)); if (!w) throw new Error(pid + ': そのようなPIDはありません'); w.close(true); });
       def('open', 'open パス', '関連付けられたアプリで開く（HTUiが必要）', p => { const q = A(p); if (fs.isDir(q)) OS.launch('hfile', q); else { fs.read(q); OS.openFile(q); } });

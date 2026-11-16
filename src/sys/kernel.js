@@ -590,7 +590,8 @@
     }
     const apps = fs.list('/sys/apps').filter(n => n.endsWith('.js'));
     const pkgs = OS.pkg.list();
-    const total = 4 + apps.length + pkgs.length; let done = 0;
+    const core = ['/sys/jsh.js', '/sys/htui.js', '/sys/hdm.js', '/sys/shells.js'];
+    const total = 2 + core.length + apps.length + pkgs.length; let done = 0;
     const step = async (s, failed) => {
       tty.print('['); tty.print(failed ? 'FAILED' : '  OK  ', failed ? 'err' : 'ok'); tty.println('] ' + s);
       done++; bar.style.width = Math.min(100, done / total * 100) + '%'; msg.textContent = s;
@@ -599,7 +600,7 @@
     tty.println('htmlOS ' + OS.version + ' を起動しています…');
     await sleep(120);
     await step('LocalStorage ファイルシステムをマウントしました' + (store.ram ? '（RAMディスク: 再読み込みで消えます）' : ''));
-    for (const f of ['/sys/jsh.js', '/sys/htui.js']) { OS.loadFile(f); await step(f + ' を読み込みました'); }
+    for (const f of core) { OS.loadFile(f); await step(f + ' を読み込みました'); }
     for (const n of apps) {
       try { OS.loadFile('/sys/apps/' + n); await step('アプリ ' + n); }
       catch (e) { await step('アプリ ' + n + ': ' + e.message, true); }

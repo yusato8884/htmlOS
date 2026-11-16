@@ -86,6 +86,10 @@
             h('h3', null, '既定の起動モード'),
             h('div', { class: 'st-row' }, radio('gui', 'GUI（HTUi デスクトップ）'), radio('cui', 'CUI（jsh コンソール）')),
             h('p', null, 'CUIで起動しても、jsh で「htui start」と入力すればデスクトップを起動できます。逆に「htui stop」でデスクトップを終了して CUI に戻れます。'),
+            h('h3', null, 'ログイン画面（hdm）の既定のデスクトップ環境'),
+            h('div', { class: 'st-row' }, h('select', { class: 'sel', id: 'st-defses', disabled: !admin, 'aria-label': '既定のデスクトップ環境', onchange: e => { try { OS.config.set('session', e.target.value); ui.toast('既定のデスクトップ環境を変更しました'); } catch (ex) { err(ex); } } },
+              Object.values(OS.sessions).map(s => h('option', { value: s.id, selected: OS.hdm.defaultSession() === s.id }, s.name)))),
+            h('p', null, 'まだ一度もログインしていないユーザーは、この環境で起動します。各ユーザーが最後に選んだ環境は hdm が覚えています。'),
             h('h3', null, 'ブートメニューの待ち時間'),
             h('div', { class: 'st-row' }, t, '秒（0 にするとメニューを出さずに起動します）'),
             h('h3', null, '今すぐ切り替え'),
@@ -101,6 +105,16 @@
             h('div', { class: 'st-swatches' }, OS.htui.wallpapers.map((w, i) => h('button', { class: 'st-sw wp' + ((p.wallpaper | 0) === i ? ' on' : ''), type: 'button', style: 'background:' + w.css, title: w.name, 'aria-label': '壁紙 ' + w.name, onclick: () => { OS.htui.setPrefs({ wallpaper: i }); show('look'); } }))),
             h('h3', null, 'アクセントカラー'),
             h('div', { class: 'st-swatches' }, OS.htui.accents.map(c => h('button', { class: 'st-sw' + ((p.accent || OS.htui.accents[0]) === c ? ' on' : ''), type: 'button', style: 'background:' + c, title: c, 'aria-label': 'アクセントカラー ' + c, onclick: () => { OS.htui.setPrefs({ accent: c }); show('look'); } })),
+            h('h3', null, 'デスクトップ環境'),
+            h('div', { class: 'st-sessions' }, Object.values(OS.sessions).map(s => {
+              const cur = OS.hdm.sessionFor(OS.htui.user) === s.id;
+              return h('label', { class: 'st-card st-ses' + (cur ? ' on' : '') },
+                h('input', { type: 'radio', name: 'st-ses-' + win.pid, id: 'st-ses-' + s.id, checked: cur, onchange: () => { OS.hdm.setUserSession(OS.htui.user, s.id); show('look'); } }),
+                h('span', { class: 'who' }, h('b', null, s.name + (OS.htui.sessionId === s.id ? '（使用中）' : '')), h('small', null, s.desc)));
+            })),
+            OS.hdm.sessionFor(OS.htui.user) !== OS.htui.sessionId
+              ? h('div', { class: 'st-row' }, h('button', { class: 'btn primary', type: 'button', onclick: () => OS.htui.switchSession(OS.hdm.sessionFor(OS.htui.user)) }, '今すぐ切り替える'), '開いているアプリは閉じます（未保存の確認は出ます）。')
+              : h('p', null, '次回ログイン時も、ここで選んだ環境で起動します。ログイン画面（hdm）でも選べます。'),
             h('h3', null, '画面モード'),
             h('div', { class: 'st-row' }, h('select', { class: 'sel', id: 'st-mode', 'aria-label': '画面モード', value: p.mode || 'auto', onchange: e => { OS.htui.setPrefs({ mode: e.target.value }); show('look'); } },
               ['auto', 'desktop', 'tablet', 'phone'].map(m => h('option', { value: m }, OS.modeNames[m]))), '今の表示: ' + OS.modeNames[OS.uiMode]),

@@ -1,5 +1,6 @@
-/* HTUi — HTml UI。ログイン画面・パネル・ウィンドウマネージャ・ダイアログ。
-   jsh から  htui start / htui stop  で起動・終了できます。 */
+/* HTUi — HTml UI。ウィンドウマネージャ・ダイアログと、デスクトップ環境（セッション）の土台。
+   ログイン画面は hdm（/sys/hdm.js）、各デスクトップ環境は /sys/shells.js にあります。
+   jsh から  htui start [セッション] / htui stop  で起動・終了できます。 */
 (function () {
   const OS = window.OS, h = OS.h, fs = OS.fs, path = OS.path, users = OS.users;
 
@@ -13,8 +14,12 @@
   ];
   const ACCENTS = ['#3584e4', '#2190a4', '#3a944a', '#c88800', '#ed5b00', '#e62d42', '#d56199', '#9141ac'];
 
-  const htui = OS.htui = { running: false, user: null, fs: null, wins: [], z: 10, pid: 100, wallpapers: WALLPAPERS, accents: ACCENTS, el: null, prefs: {} };
-  let clockTimer = null;
+  const htui = OS.htui = { running: false, user: null, fs: null, wins: [], z: 10, pid: 100, wallpapers: WALLPAPERS, accents: ACCENTS, el: null, prefs: {}, shell: null, sessionId: null };
+  let clockTimer = null, ticks = [];
+
+  // ---------- セッション（デスクトップ環境）の登録。パッケージからも OS.registerSession で追加できる
+  OS.sessions = {};
+  OS.registerSession = function (def) { OS.sessions[def.id] = def; };
 
   function avatar(u, size) {
     const st = 'width:' + size + 'px;height:' + size + 'px;font-size:' + Math.round(size * 0.45) + 'px;';
@@ -24,69 +29,47 @@
   htui.avatar = avatar;
 
   // ---------- 起動・終了
-  htui.start = function (user) {
+  htui.start = function (user, sid) {
     if (htui.running) return false;
     htui.running = true;
     htui.el = h('div', { id: 'htui' });
     OS.root.append(htui.el);
     document.addEventListener('keydown', hotkeys);
-    if (user && users.get(user)) session(user); else greeter();
+    if (user && users.get(user)) session(user, sid); else toLogin();
     return true;
   };
+  function clearShell() {
+    clearInterval(clockTimer); ticks = [];
+    if (htui.shell && htui.shell.onStop) { try { htui.shell.onStop(); } catch (e) { /* 無視 */ } }
+    htui.shell = null; htui.sessionId = null;
+    htui.iconsEl = null; htui.titleEl = null; htui.modeBtn = null; htui.userBtn = null; htui.tasks = null; htui.desk = null;
+  }
   htui.stop = function () {
     if (!htui.running) return false;
     htui.wins.slice().forEach(w => w.close(true));
-    clearInterval(clockTimer);
+    clearShell();
+    if (OS.hdm) OS.hdm.stop();
     document.removeEventListener('keydown', hotkeys);
     htui.el.remove(); htui.el = null;
-    htui.running = false; htui.user = null; htui.fs = null; htui.iconsEl = null; htui.titleEl = null; htui.modeBtn = null;
+    htui.running = false; htui.user = null; htui.fs = null;
     OS.setMode('auto');
     OS.tty1.focus();
     return true;
   };
   htui.logout = async function () {
     for (const w of htui.wins.slice()) { if ((await w.close()) === false) return; }
-    clearInterval(clockTimer);
-    greeter();
+    toLogin();
   };
-
-  // ---------- ログイン画面
-  function greeter() {
-    htui.user = null; htui.prefs = {}; htui.titleEl = null; htui.modeBtn = null;
+  // ログイン画面（hdm）へ
+  function toLogin() {
+    clearShell();
+    htui.user = null; htui.fs = null; htui.prefs = {};
     OS.setMode('auto');
-    htui.el.textContent = ''; htui.el.className = 'greeter';
-    htui.el.style.background = WALLPAPERS[0].css;
-    const box = h('div', { class: 'gr-box' });
-    const showUsers = () => {
-      box.textContent = '';
-      const list = h('div', { class: 'gr-users' });
-      users.list().filter(u => !u.root).forEach(u => list.append(h('button', { class: 'gr-user', type: 'button', onclick: () => ask(u) }, avatar(u, 72), h('span', null, u.name))));
-      box.append(h('h1', { class: 'gr-title' }, 'htmlOS'), h('p', { class: 'gr-sub' }, 'ログインするユーザーを選んでください'), list);
-    };
-    const ask = u => {
-      box.textContent = '';
-      const pw = h('input', { type: 'password', class: 'inp', id: 'gr-pw', placeholder: 'パスワード', 'aria-label': 'パスワード' });
-      const msg = h('div', { class: 'gr-msg', role: 'alert' });
-      const go = async e => {
-        e.preventDefault();
-        if (await users.verify(u.name, pw.value)) session(u.name);
-        else { msg.textContent = 'パスワードが違います。'; pw.value = ''; pw.focus(); }
-      };
-      box.append(avatar(u, 96), h('h2', { class: 'gr-name' }, u.name),
-        h('form', { class: 'gr-form', onsubmit: go }, pw, h('button', { class: 'btn primary', type: 'submit' }, 'ログイン')),
-        msg, h('button', { class: 'btn ghost', type: 'button', onclick: showUsers }, '別のユーザーを選ぶ'));
-      pw.focus();
-    };
-    const foot = h('div', { class: 'gr-foot' },
-      h('button', { class: 'btn ghost', type: 'button', onclick: () => htui.stop() }, OS.icon('terminal', 16), 'CUI に切り替え'),
-      h('button', { class: 'btn ghost', type: 'button', onclick: () => OS.reboot() }, OS.icon('reload', 16), '再起動'),
-      h('button', { class: 'btn ghost', type: 'button', onclick: () => OS.poweroff() }, OS.icon('power', 16), '電源を切る'));
-    htui.el.append(box, foot);
-    const l = users.list().filter(u => !u.root);
-    if (l.length === 1) ask(l[0]); else showUsers();
+    htui.el.textContent = ''; htui.el.removeAttribute('style'); htui.el.className = '';
+    OS.hdm.show(htui.el, (user, sid) => session(user, sid));
   }
 
-  // ---------- デスクトップ
+  // ---------- 個人設定（壁紙・アクセント・アニメーション・画面モード）
   function loadPrefs() { try { return JSON.parse(fs.read(users.home(htui.user) + '/.config/htui.json')); } catch (e) { return {}; } }
   htui.setPrefs = function (patch) {
     Object.assign(htui.prefs, patch);
@@ -106,55 +89,51 @@
     htui.userBtn.append(avatar(users.get(htui.user), 20), h('span', { class: 'p-uname' }, htui.user));
   };
 
-  function session(user) {
+  // ---------- セッション開始
+  function session(user, sid) {
+    clearShell();
     htui.user = user;
     htui.fs = OS.fsFor(() => htui.user);
-    htui.el.textContent = ''; htui.el.className = 'desktop';
+    const sh = OS.sessions[sid] || OS.sessions[OS.hdm.sessionFor(user)] || OS.sessions.htui;
+    htui.shell = sh; htui.sessionId = sh.id;
+    htui.el.textContent = ''; htui.el.className = 'desktop de-' + sh.id;
     htui.prefs = loadPrefs(); applyPrefs();
-
-    const tasks = htui.tasks = h('div', { class: 'p-tasks' });
-    const clock = h('div', { class: 'p-clock' });
-    const tick = () => { const d = new Date(); clock.textContent = (d.getMonth() + 1) + '/' + d.getDate() + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
-    tick(); clearInterval(clockTimer); clockTimer = setInterval(tick, 10000);
-    const appsBtn = h('button', { class: 'p-btn', type: 'button', onclick: e => menu(e.currentTarget, Object.values(OS.apps).map(a => ({ label: a.name, hint: a.desc, icon: a.icon, act: () => run(a.id) }))) }, OS.icon('grid', 16), h('span', { class: 'p-lbl' }, 'アプリ'));
-    const userBtn = htui.userBtn = h('button', { class: 'p-btn', type: 'button', onclick: e => menu(e.currentTarget, [
-      { label: '設定', icon: 'gear', act: () => run('settings') },
-      { label: 'ログアウト', icon: 'user', act: () => htui.logout() },
-      { label: 'HTUi を終了して CUI へ', icon: 'terminal', act: () => htui.stop() },
-      { label: '再起動', icon: 'reload', act: () => OS.reboot() },
-      { label: '電源を切る', icon: 'power', act: () => OS.poweroff() }
-    ], true) });
-    const title = htui.titleEl = h('div', { class: 'p-title' });
-    // 画面モードの切り替えボタン。アイコンは今のモード（自動のときは、自動で選ばれているモード）を表す
-    const modeBtn = htui.modeBtn = h('button', { class: 'p-btn p-mode', type: 'button', onclick: e => menu(e.currentTarget, ['auto', 'desktop', 'tablet', 'phone'].map(m => ({
-      label: OS.modeNames[m] + (m === 'auto' ? '（' + OS.modeNames[OS.autoMode()] + '）' : ''), icon: OS.modeIcons[m === 'auto' ? OS.autoMode() : m],
-      hint: m === OS.modePref ? '選択中' : null, act: () => htui.setPrefs({ mode: m }) })), true) });
-    htui.syncMode();
-    const panel = h('div', { class: 'panel' }, appsBtn, tasks, title, modeBtn, clock, userBtn);
-    htui.refreshUser();
-
-    const icons = htui.iconsEl = h('div', { class: 'desk-icons' });
-    const desk = htui.desk = h('div', { class: 'desk' }, icons);
+    sh.build(kit);
+    if (!htui.desk) kit.desk(false, true);
+    if (!htui.tasks) htui.tasks = h('div'); // タスクボタンを出さない環境でも、ウィンドウ側が参照するので置き場だけ作る
     // タッチ用の下部ナビ（タブレット・スマートフォンモードのときだけ表示される）
     const navBtn = (icon, label, fn) => h('button', { class: 'nav-btn', type: 'button', onclick: fn }, OS.icon(icon, 22), h('span', null, label));
-    const nav = h('div', { class: 'tabbar' },
+    htui.el.append(h('div', { class: 'tabbar' },
       navBtn('x', '閉じる', () => { const w = htui.active(); if (w) w.close(); }),
       navBtn('home', 'ホーム', goHome),
-      navBtn('grid', 'タスク', switcher));
-    htui.el.append(panel, desk, nav);
-    htui.refreshApps();
+      navBtn('grid', 'タスク', switcher)));
+    const tick = () => ticks.forEach(f => { try { f(new Date()); } catch (e) { /* 無視 */ } });
+    tick(); clockTimer = setInterval(tick, 5000);
+    htui.refreshApps(); htui.refreshUser(); htui.syncMode(); htui.syncTitle();
+    if (sh.onStart) sh.onStart(kit);
   }
+  htui.switchSession = async function (sid) {
+    if (!OS.sessions[sid] || !htui.user) return;
+    for (const w of htui.wins.slice()) { if ((await w.close()) === false) return; }
+    session(htui.user, sid);
+  };
+
   htui.syncMode = function () {
     const b = htui.modeBtn; if (!b) return;
     const t = '画面モード: ' + OS.modeNames[OS.modePref] + (OS.modePref === 'auto' ? '（今は' + OS.modeNames[OS.uiMode] + '）' : '') + '。押すと切り替え';
     b.textContent = ''; b.append(OS.icon(OS.modeIcons[OS.uiMode], 18)); b.title = t; b.setAttribute('aria-label', t);
   };
-  htui.syncTitle = function () { if (htui.titleEl) { const w = htui.active(); htui.titleEl.textContent = w ? w.title : ''; } };
+  htui.syncTitle = function () {
+    const w = htui.active();
+    if (htui.titleEl) htui.titleEl.textContent = w ? w.title : '';
+    if (htui.shell && htui.shell.onActive) htui.shell.onActive(w);
+  };
   function goHome() {
     const sw = htui.el.querySelector('.switcher'); if (sw) sw.remove();
     htui.wins.forEach(w => { w.el.classList.add('hidden'); w.el.classList.remove('active'); w.task.classList.remove('active'); });
     htui.syncTitle();
   }
+  htui.goHome = goHome;
   // 開いているアプリの一覧（タスク切り替え）
   function switcher() {
     const old = htui.el.querySelector('.switcher'); if (old) { old.remove(); return; }
@@ -170,11 +149,6 @@
     };
     fill(); htui.el.append(ov);
   }
-  function pickMode() {
-    ui.modal({ title: '画面モード', body: h('p', { class: 'modal-msg' }, 'タブレットとスマートフォンでは、アプリが全画面になり、ボタンが大きくなって、下にナビが出ます。「自動」はタッチ端末かどうかと画面の幅で決めます。\n今: ' + OS.modeNames[OS.modePref] + (OS.modePref === 'auto' ? '（' + OS.modeNames[OS.uiMode] + '）' : '')),
-      buttons: [{ label: 'キャンセル', cancel: true, value: null }].concat(['auto', 'desktop', 'tablet', 'phone'].map(m => ({ label: OS.modeNames[m], primary: m === OS.modePref, value: m }))) })
-      .then(m => { if (m) htui.setPrefs({ mode: m }); });
-  }
   // モードが変わったとき: タッチ系は全ウィンドウを全画面に、デスクトップに戻ったら元の大きさに
   htui.onMode = function () {
     if (!htui.running || !htui.user) return;
@@ -184,30 +158,103 @@
   };
   // デスクトップのアイコンを作り直す（パッケージの追加・削除のあとにも呼ばれる）
   htui.refreshApps = function () {
+    if (htui.shell && htui.shell.onApps) htui.shell.onApps();
     if (!htui.iconsEl || !htui.user) return;
     htui.iconsEl.textContent = '';
     Object.values(OS.apps).forEach(a => htui.iconsEl.append(h('button', { class: 'desk-icon', type: 'button', title: a.desc || a.name, onclick: () => run(a.id) },
-      h('span', { class: 'app-ico', style: 'background:' + (a.color || '#5e5c64') }, OS.icon(a.icon, 26)), h('span', { class: 'desk-label' }, a.name))));
+      kit.appIcon(a, 26), h('span', { class: 'desk-label' }, a.name))));
   };
   function run(id, arg) { try { OS.launch(id, arg); } catch (e) { ui.alert(e.message); } }
   htui.run = run;
 
   // ---------- ポップアップメニュー
-  function menu(anchor, items, right) {
-    const old = htui.el.querySelector('.menu'); if (old) { old.remove(); if (old._anchor === anchor) return; }
+  //   items: { label, icon, hint, act } / { sep: true } / { head: '見出し' }
+  function buildMenu(items, close) {
     const m = h('div', { class: 'menu', role: 'menu' });
+    items.forEach(it => {
+      if (it.sep) m.append(h('div', { class: 'menu-sep', role: 'separator' }));
+      else if (it.head) m.append(h('div', { class: 'menu-head' }, it.head));
+      else m.append(h('button', { class: 'menu-item', type: 'button', role: 'menuitem', disabled: it.disabled, onclick: () => { close(); it.act(); } },
+        it.icon ? OS.icon(it.icon, 16) : null, h('span', null, it.label), it.hint ? h('span', { class: 'menu-hint' }, it.hint) : null));
+    });
+    return m;
+  }
+  function openMenu(m, anchor) {
+    const off = e => { if (!m.contains(e.target) && !(anchor && anchor.contains(e.target))) close(); };
+    const esc = e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+    function close() { m.remove(); document.removeEventListener('pointerdown', off, true); document.removeEventListener('keydown', esc, true); }
+    m._close = close;
+    document.addEventListener('pointerdown', off, true); document.addEventListener('keydown', esc, true);
+    return close;
+  }
+  function closeMenus() { htui.el.querySelectorAll('.menu').forEach(m => m._close ? m._close() : m.remove()); }
+  htui.closeMenus = closeMenus;
+  // anchor の下（opt.up なら上）に出す
+  function menu(anchor, items, right, opt) {
+    const old = htui.el.querySelector('.menu'); if (old) { const same = old._anchor === anchor; closeMenus(); if (same) return; }
+    let close = () => {};
+    const m = buildMenu(items, () => close());
     m._anchor = anchor;
-    items.forEach(it => m.append(h('button', { class: 'menu-item', type: 'button', role: 'menuitem', onclick: () => { close(); it.act(); } },
-      it.icon ? OS.icon(it.icon, 16) : null, h('span', null, it.label), it.hint ? h('span', { class: 'menu-hint' }, it.hint) : null)));
     const r = anchor.getBoundingClientRect(), hr = htui.el.getBoundingClientRect();
-    m.style.top = (r.bottom - hr.top + 4) + 'px';
+    if (opt && opt.up) m.style.bottom = (hr.bottom - r.top + 4) + 'px'; else m.style.top = (r.bottom - hr.top + 4) + 'px';
     if (right) m.style.right = Math.max(4, hr.right - r.right) + 'px'; else m.style.left = Math.max(4, r.left - hr.left) + 'px';
     htui.el.append(m);
-    const off = e => { if (!m.contains(e.target) && !anchor.contains(e.target)) close(); };
-    function close() { m.remove(); document.removeEventListener('pointerdown', off, true); }
-    document.addEventListener('pointerdown', off, true);
+    close = openMenu(m, anchor);
   }
   htui.menu = menu;
+  // 画面上の点 (x, y) に出す（右クリックメニューなど）。はみ出さないように位置を直す
+  htui.menuAt = function (x, y, items) {
+    closeMenus();
+    let close = () => {};
+    const m = buildMenu(items, () => close());
+    const hr = htui.el.getBoundingClientRect();
+    m.style.left = '0px'; m.style.top = '0px'; m.style.visibility = 'hidden';
+    htui.el.append(m);
+    const mw = m.offsetWidth, mh = m.offsetHeight;
+    m.style.left = Math.max(4, Math.min(x - hr.left, hr.width - mw - 4)) + 'px';
+    m.style.top = Math.max(4, Math.min(y - hr.top, hr.height - mh - 4)) + 'px';
+    m.style.visibility = '';
+    close = openMenu(m, null);
+  };
+
+  // ---------- デスクトップ環境を作るための部品（shells.js から使う）
+  const kit = htui.kit = {
+    h: h, icon: OS.icon, avatar: avatar, run: run, menu: menu, menuAt: htui.menuAt,
+    apps: () => Object.values(OS.apps),
+    appIcon(a, size) { return h('span', { class: 'app-ico', style: 'background:' + (a.color || '#5e5c64') }, OS.icon(a.icon, size || 26)); },
+    // 時計。fmt(Date) の結果を el に入れ続ける
+    clock(el, fmt) { const f = d => { el.textContent = fmt(d); }; ticks.push(f); f(new Date()); return el; },
+    pad: n => String(n).padStart(2, '0'),
+    // ウィンドウを置く領域。icons=true ならデスクトップアイコンも並べる
+    desk(icons, append) {
+      const d = htui.desk = h('div', { class: 'desk' });
+      if (icons) d.append(htui.iconsEl = h('div', { class: 'desk-icons' }));
+      if (append) htui.el.append(d);
+      return d;
+    },
+    modeItems() {
+      return ['auto', 'desktop', 'tablet', 'phone'].map(m => ({
+        label: OS.modeNames[m] + (m === 'auto' ? '（' + OS.modeNames[OS.autoMode()] + '）' : ''), icon: OS.modeIcons[m === 'auto' ? OS.autoMode() : m],
+        hint: m === OS.modePref ? '選択中' : null, act: () => htui.setPrefs({ mode: m }) }));
+    },
+    // 画面モードの切り替えボタン。アイコンは今のモード（自動のときは、自動で選ばれているモード）を表す
+    modeButton(cls, opt) {
+      return htui.modeBtn = h('button', { class: cls + ' p-mode', type: 'button', onclick: e => menu(e.currentTarget, kit.modeItems(), true, opt) });
+    },
+    // ログアウト・CUI・再起動・電源
+    powerItems() {
+      return [
+        { label: 'ログアウト', icon: 'user', act: () => htui.logout() },
+        { label: 'HTUi を終了して CUI へ', icon: 'terminal', act: () => htui.stop() },
+        { label: '再起動', icon: 'reload', act: () => OS.reboot() },
+        { label: '電源を切る', icon: 'power', act: () => OS.poweroff() }
+      ];
+    },
+    userButton(cls, opt) {
+      const b = htui.userBtn = h('button', { class: cls, type: 'button', onclick: e => menu(e.currentTarget, [{ label: '設定', icon: 'gear', act: () => run('settings') }, { sep: true }].concat(kit.powerItems()), true, opt) });
+      return b;
+    }
+  };
 
   // ---------- ウィンドウマネージャ（移動・8方向リサイズ・スナップ・アニメーション）
   const ZONES = { max: [0, 0, 100, 100], left: [0, 0, 50, 100], right: [50, 0, 50, 100], tl: [0, 0, 50, 50], tr: [50, 0, 50, 50], bl: [0, 50, 50, 50], br: [50, 50, 50, 50] };
@@ -372,6 +419,7 @@
   }
   // Ctrl+Alt+矢印キーでアクティブなウィンドウをスナップ
   function hotkeys(e) {
+    if (htui.user && htui.shell && htui.shell.onKey && htui.shell.onKey(e) === true) { e.preventDefault(); return; }
     if (!e.ctrlKey || !e.altKey || !htui.user) return;
     const w = htui.active(); if (!w) return;
     if (e.key === 'ArrowLeft') w.snap('left'); else if (e.key === 'ArrowRight') w.snap('right');
