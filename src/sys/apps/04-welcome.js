@@ -99,22 +99,24 @@
             row('repair', 'reload', 'システムを修復', '/sys をメディアの内容で書き直します。ユーザー・ファイル・設定は残ります', '修復', async () => {
               if (await ui().confirm('/sys をメディアの内容で書き直します。/sys を自分で書き換えていた場合、その変更は消えます。', { ok: '修復', title: 'システムを修復' })) rewrite('システムを修復しています', '修復しました。再起動すると htmlOS が起動します。');
             }, { disabled: !has }),
-            row('passwd', 'user', 'パスワードをリセット', 'ユーザーや root のパスワードを忘れたときに、新しいパスワードを設定します', 'リセット…', resetPassword, { disabled: !has }),
-            row('boot', 'gear', '起動の設定を初期化', '起動したときの画面を GUI に、ログイン画面のデスクトップ環境を既定（HTUi）に戻します', '初期化', async () => {
-              if (!(await ui().confirm('起動の設定を初期化します。ユーザーとファイルは残ります。', { ok: '初期化', title: '起動の設定を初期化' }))) return;
+            row('passwd', 'user', 'パスワードをリセット', 'ユーザーのパスワードを忘れたときに、新しいパスワードを設定します。root のパスワードが必要です（root のパスワードもわからない場合は、BIOS の SETUP の Security から htmlOS を消去できます）', 'リセット…', resetPassword, { disabled: !has }),
+            row('boot', 'gear', '起動の設定を初期化', '起動したときの画面を GUI に、ログイン画面のデスクトップ環境を既定（HTUi）に戻します。管理者のサインインが必要です', '初期化…', async () => {
+              if (!(await signIn('起動の設定を初期化', '起動したときの画面を GUI に、ログイン画面のデスクトップ環境を既定（HTUi）に戻します。ユーザーとファイルは残ります。\n続けるには、管理者としてサインインしてください。'))) return;
               try { BOOT.realResetBoot(); ui().toast('起動の設定を初期化しました'); } catch (e) { ui().alert(e.message); }
             }, { disabled: !has }),
-            row('backup', 'download', 'データをバックアップ', 'ユーザー・ファイル・設定をすべて 1 つのファイル（.json）にして PC に保存します', '保存', () => {
+            row('backup', 'download', 'データをバックアップ', 'ユーザー・ファイル・設定をすべて 1 つのファイル（.json）にして PC に保存します。管理者のサインインが必要です', '保存…', async () => {
+              if (!(await signIn('データをバックアップ', 'ユーザー・ファイル・設定をすべて 1 つのファイルにして PC に保存します。\n続けるには、管理者としてサインインしてください。'))) return;
               try {
                 const url = URL.createObjectURL(new Blob([BOOT.realExport()], { type: 'application/json' })), d = new Date();
                 const a = h('a', { href: url, download: 'htmlos-backup-' + d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0') + '.json' });
                 document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 5000);
               } catch (e) { ui().alert(e.message); }
             }, { disabled: !has }),
-            row('restore', 'upload', 'バックアップから復元', 'バックアップのファイルを読み込み、インストール先をその内容に置き換えます', '復元…', restore),
+            row('restore', 'upload', 'バックアップから復元', 'バックアップのファイルを読み込み、インストール先をその内容に置き換えます' + (has ? '。管理者のサインインが必要です' : ''), '復元…', restore),
             row('uninstall', 'trash', 'htmlOS をアンインストール', '管理者としてサインインし、このブラウザから htmlOS のユーザー・ファイル・設定をすべて消去します（BIOS の設定は残ります）', 'アンインストール…', uninstall, { danger: true, disabled: !has })));
       }
       async function resetPassword() {
+        if (!(await signIn('パスワードをリセット', 'パスワードをリセットするには、root のパスワードが必要です。\nroot のパスワードもわからない場合は、BIOS の SETUP（起動時に Del / F2）の Security から htmlOS を消去できます（ユーザー・ファイル・設定はすべて消えます）。', true))) return;
         const list = BOOT.realUsers();
         if (!list.length) { ui().alert('ユーザーが見つかりません'); return; }
         const sel = h('select', { class: 'inp', id: 'wl-puser' }, list.map(u => h('option', { value: u.name }, u.name + (u.root ? '（root）' : u.admin ? '（管理者）' : ''))));
@@ -125,7 +127,9 @@
         if (p1.value !== p2.value) { ui().alert('パスワードが一致しません'); return; }
         try { await BOOT.realSetPassword(sel.value, p1.value); ui().toast(sel.value + ' のパスワードを設定しました'); } catch (e) { ui().alert(e.message); }
       }
-      function restore() {
+      async function restore() {
+        const signed = BOOT.realHasOS();
+        if (signed && !(await signIn('バックアップから復元', 'インストール先を、バックアップのファイルの内容に置き換えます。\n続けるには、管理者としてサインインしてください。'))) return;
         const inp = h('input', { type: 'file', accept: '.json,application/json', style: 'display:none' });
         inp.addEventListener('change', async () => {
           const f = inp.files && inp.files[0]; inp.remove(); if (!f) return;
@@ -133,34 +137,43 @@
           if (!(await ui().confirm('インストール先を「' + f.name + '」の内容に置き換えます。いまのユーザー・ファイル・設定は消えます。', { ok: '復元', danger: true, title: 'バックアップから復元' }))) return;
           try { const n = BOOT.realImport(text); await ui().alert(n + ' 個の項目を復元しました。再起動すると、復元した htmlOS が起動します。', '復元しました'); recover(); } catch (e) { ui().alert(e.message); }
         });
-        document.body.append(inp); inp.click();
+        document.body.append(inp);
+        // サインインの確認（非同期）のあとだとブラウザがファイル選択を開かないことがあるので、ボタンを押してもらってから開く
+        if (!signed) { inp.click(); return; }
+        const go = await ui().modal({ title: 'バックアップから復元', body: h('p', { class: 'modal-msg' }, 'サインインしました。復元するバックアップのファイル（.json）を選んでください。'),
+          buttons: [{ label: 'キャンセル', cancel: true, value: false }, { label: 'ファイルを選ぶ…', primary: true, value: () => { inp.click(); return true; } }] });
+        if (!go) inp.remove();
       }
-      async function uninstall() {
-        const admins = BOOT.realUsers().filter(u => u.admin || u.root);
-        if (!admins.length) { ui().alert('管理者のユーザーが見つかりません。先に「パスワードをリセット」などで直してください。'); return; }
-        const sel = h('select', { class: 'inp', id: 'wl-uuser' }, admins.map(u => h('option', { value: u.name }, u.name + (u.root ? '（root）' : '（管理者）'))));
+      // インストール先の管理者（rootOnly なら root）としてサインインしてもらう。できたらユーザー名、やめたら null
+      function signIn(title, lead, rootOnly) {
+        const users = BOOT.realUsers().filter(u => rootOnly ? u.root : (u.admin || u.root));
+        if (!users.length) { ui().alert(rootOnly ? 'root のユーザーが見つかりません。BIOS の SETUP（起動時に Del / F2）の Security から htmlOS を消去して、インストールし直してください。' : '管理者のユーザーが見つかりません。'); return Promise.resolve(null); }
+        const sel = h('select', { class: 'inp', id: 'wl-uuser' }, users.map(u => h('option', { value: u.name }, u.name + (u.root ? '（root）' : '（管理者）'))));
         const pw = h('input', { class: 'inp', type: 'password', id: 'wl-upw', 'aria-label': 'パスワード', autocomplete: 'current-password' });
         const msg = h('div', { class: 'wl-err', id: 'wl-uerr', role: 'alert' });
         const body = h('div', { class: 'wl-form' },
-          h('p', null, 'アンインストールするには、インストール先の htmlOS の管理者としてサインインしてください。'),
-          h('label', null, '管理者', sel), h('label', null, 'パスワード', pw), msg);
+          h('p', null, lead),
+          h('label', null, rootOnly ? 'ユーザー' : '管理者', sel), h('label', null, rootOnly ? 'root のパスワード' : 'パスワード', pw), msg);
+        if (rootOnly) sel.disabled = true;
         let tries = 0, close = null, busy = false;
-        const signIn = () => {
+        const go = () => {
           if (busy) return ui().KEEP;
           busy = true; msg.textContent = '確認しています…';
-          BOOT.realVerifyAdmin(sel.value, pw.value).then(async ok => {
-            if (ok) { close(true); return; }
+          BOOT.realVerifyAdmin(sel.value, pw.value, rootOnly).then(async ok => {
+            if (ok) { close(sel.value); return; }
             tries++; pw.value = '';
             await new Promise(r => setTimeout(r, Math.min(400 * tries, 2000)));
-            msg.textContent = 'パスワードが違います' + (tries >= 3 ? '。忘れた場合は「パスワードをリセット」を使ってください' : '');
+            msg.textContent = 'パスワードが違います' + (tries >= 3 ? (rootOnly ? '。root のパスワードもわからない場合は、BIOS の SETUP（起動時に Del / F2）の Security から htmlOS を消去できます' : '。忘れた場合は「パスワードをリセット」を使ってください') : '');
             busy = false; pw.focus();
           });
           return ui().KEEP;
         };
-        const ok = await ui().modal({ title: 'htmlOS をアンインストール', body, onOpen: d => { close = d; pw.focus(); },
-          buttons: [{ label: 'キャンセル', cancel: true, value: false }, { label: 'サインイン', primary: true, value: signIn }] });
-        if (!ok) return;
-        const user = sel.value;
+        return ui().modal({ title, body, onOpen: d => { close = d; pw.focus(); },
+          buttons: [{ label: 'キャンセル', cancel: true, value: null }, { label: 'サインイン', primary: true, value: go }] });
+      }
+      async function uninstall() {
+        const user = await signIn('htmlOS をアンインストール', 'アンインストールするには、インストール先の htmlOS の管理者としてサインインしてください。');
+        if (!user) return;
         if (!(await ui().confirm(user + ' としてサインインしました。\nこのブラウザの htmlOS のユーザー・ファイル・設定をすべて消去します。元に戻せません。', { ok: '消去', danger: true, title: 'htmlOS をアンインストール' }))) return;
         try { BOOT.realWipe(); } catch (e) { ui().alert(e.message); return; }
         await ui().alert('htmlOS をアンインストールしました。htmlOS i はこのまま使えます。次に開いたときは htmlOS i が起動します。', 'アンインストールしました');

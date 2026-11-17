@@ -234,9 +234,10 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   BOOT.updateReal = function (log) { onReal(function () { writeSys(log); }); };
   BOOT.realUsers = function () { return onReal(function () { try { return JSON.parse(JSON.parse(store.get('f:/etc/passwd')).c).map(function (u) { return { name: u.name, admin: !!u.admin, root: !!u.root }; }); } catch (e) { return []; } }); };
   // 管理者（admin / root）としてサインインできるかを確かめる（アンインストール用）
-  BOOT.realVerifyAdmin = async function (name, pw) {
+  // rootOnly のときは root だけを認める（パスワードのリセット用）
+  BOOT.realVerifyAdmin = async function (name, pw, rootOnly) {
     var u = onReal(function () { try { return JSON.parse(JSON.parse(store.get('f:/etc/passwd')).c).find(function (x) { return x.name === name; }); } catch (e) { return null; } });
-    if (!u || !(u.admin || u.root)) return false;
+    if (!u || !(rootOnly ? u.root : (u.admin || u.root))) return false;
     return verify(pw, u.pw);
   };
   BOOT.realSetPassword = async function (name, pw) {
@@ -790,7 +791,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 
   // BIOS セットアップ画面
   function setup() {
-    var cfg = nvram(), tab = 0, sel = 0, timer = null, note = '';
+    var cfg = nvram(), tab = 0, sel = 0, timer = null, note = '', armed = false;
     var meta = getMeta();
     var TABS = [
       { name: 'Main', items: [
@@ -807,6 +808,14 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         { key: 'speed', label: 'POST Speed', opts: [['normal', 'Normal'], ['slow', 'Slow']], help: 'POST の表示の速さです。\nSlow にすると、じっくり読める速さで進みます。' },
         { key: 'beep', label: 'POST Beep', opts: [[false, 'Disabled'], [true, 'Enabled']], help: 'POST が終わったときに「ピッ」と鳴らします。\nブラウザが音を許可していないときは鳴りません（ページを一度クリックしたあとは鳴りやすくなります）。' }
       ] },
+      { name: 'Security', items: [
+        { info: 'Installed OS', val: function () { return meta && store.get('f:/sys/kernel.js') != null ? 'htmlOS ' + meta.version : 'なし'; } },
+        { info: 'Users', val: function () { try { return JSON.parse(JSON.parse(store.get('f:/etc/passwd')).c).map(function (u) { return u.name; }).join(', '); } catch (e) { return '-'; } } },
+        { label: 'Erase htmlOS Storage', act: function () {
+          if (!armed) { armed = true; note = '本当に消去するときは、もう一度この項目を選んでください（Enter かクリック）。\nユーザー・ファイル・設定はすべて消え、元に戻せません。'; return; }
+          store.wipe(); armed = false; leave(true);
+        }, help: 'インストールした htmlOS のユーザー・ファイル・設定をすべて消去して再起動します（BIOS の設定は残ります）。\nroot のパスワードもわからなくなったときに使います。消去したあとは htmlOS i が起動するので、もう一度インストールしてください。\n大事なファイルがある場合は、先に hBackup などで書き出してください。' }
+      ], help: 'インストールした htmlOS の管理です。' },
       { name: 'Exit', items: [
         { label: 'Save Changes and Exit', act: function () { store.set('bios', JSON.stringify(cfg)); leave(true); }, help: '変更を保存して再起動します。（F10）' },
         { label: 'Discard Changes and Exit', act: function () { leave(false); }, help: '変更を保存せずに SETUP を終了して、ブートメニューへ進みます。（Esc）' },
@@ -816,13 +825,13 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     ];
     function leave(reboot) { if (timer) clearInterval(timer); keyHandler = null; if (reboot) location.reload(); else main(); }
     function selectable(i) { return !TABS[tab].items[i].info; }
-    function move(d) { var n = TABS[tab].items.length; for (var c = 0; c < n; c++) { sel = (sel + d + n) % n; if (selectable(sel)) return; } }
+    function move(d) { armed = false; note = ''; var n = TABS[tab].items.length; for (var c = 0; c < n; c++) { sel = (sel + d + n) % n; if (selectable(sel)) return; } }
     function fire() {
       var it = TABS[tab].items[sel]; if (!it || it.info) return;
       if (it.opts) { var i = 0; it.opts.forEach(function (o, j) { if (o[0] === cfg[it.key]) i = j; }); cfg[it.key] = it.opts[(i + 1) % it.opts.length][0]; note = ''; }
       else if (it.act) it.act();
     }
-    function setTab(t) { tab = (t + TABS.length) % TABS.length; sel = 0; if (!selectable(0)) move(1); if (!selectable(sel)) sel = -1; note = ''; }
+    function setTab(t) { armed = false; tab = (t + TABS.length) % TABS.length; sel = 0; if (!selectable(0)) move(1); if (!selectable(sel)) sel = -1; note = ''; }
     function render() {
       var box = el('div', 'bs'), tabs = el('div', 'bs-tabs'), body = el('div', 'bs-body'), items = el('div', 'bs-items'), help = el('div', 'bs-help');
       box.appendChild(el('div', 'bs-title', 'htmlBIOS Setup Utility'));
@@ -834,7 +843,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
           row = el('button', 'bs-item' + (i === sel ? ' sel' : '')); row.type = 'button';
           row.appendChild(el('span', '', it.label));
           if (it.opts) { var cur = it.opts.filter(function (o) { return o[0] === cfg[it.key]; })[0] || it.opts[0]; row.appendChild(el('span', 'bs-val', '[' + cur[1] + ']')); }
-          row.onclick = function () { sel = i; fire(); if (keyHandler) render(); };
+          row.onclick = function () { if (sel !== i) { armed = false; note = ''; } sel = i; fire(); if (keyHandler) render(); };
         }
         items.appendChild(row);
       });

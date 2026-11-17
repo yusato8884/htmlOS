@@ -2,7 +2,7 @@
 """src/ 以下を1枚の index.html（インストールメディア兼ブートローダ）にまとめる。"""
 import pathlib, subprocess, sys
 
-VERSION = '3.0.1'
+VERSION = '3.0.2'
 root = pathlib.Path(__file__).parent
 # ビルド番号: このリポジトリのコミット数 + 1（次のコミットに入る番号）
 try:
