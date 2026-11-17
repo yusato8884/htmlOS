@@ -3,7 +3,7 @@
 (function () {
   'use strict';
   const BOOT = window.BOOT, store = BOOT.store;
-  const OS = window.OS = { version: BOOT.installedVersion, apps: {}, store: store };
+  const OS = window.OS = { version: BOOT.installedVersion, apps: {}, store: store, live: !!BOOT.live };
 
   // ---------- DOM ヘルパー
   function h(tag, attrs, ...kids) {
@@ -77,6 +77,13 @@
     return h('span', { class: 'ico', 'aria-hidden': 'true', html: '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + (ICONS[name] || ICONS.file) + '</svg>' });
   };
 
+  // htmlOS のマーク </>（白い線）。起動・終了画面などで使う。線は pathLength=1 なので、描いていくアニメーションをつけやすい
+  const MARK = '<path pathLength="1" d="M8 7l-5 5 5 5"/><path pathLength="1" d="M16 7l5 5-5 5"/><path pathLength="1" d="M13.5 5l-3 14"/>';
+  OS.mark = function (size, cls) {
+    return h('span', { class: 'os-mark ' + (cls || ''), 'aria-hidden': 'true', html: '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' + MARK + '</svg>' });
+  };
+  const spinner = () => h('span', { class: 'sp-spin', 'aria-hidden': 'true', html: '<svg viewBox="0 0 24 24" width="34" height="34"><circle cx="12" cy="12" r="9.5"/></svg>' });
+
   // ---------- パス
   const path = OS.path = {
     norm(p, cwd, home) {
@@ -108,13 +115,34 @@
     catch (e) { throw new Error('ストレージの空き容量が足りません（LocalStorageの上限は約5MBです）'); }
   }
   const fs = OS.fs = {
-    stat(p) { const v = store.get(K(p)); if (v == null) return null; try { return JSON.parse(v); } catch (e) { return null; } },
-    exists(p) { return store.get(K(p)) != null; },
-    isDir(p) { const s = fs.stat(p); return !!s && s.t === 'd'; },
-    isFile(p) { const s = fs.stat(p); return !!s && s.t === 'f'; },
+    // シンボリックリンク（ノードの t が 'l'、c がリンク先）をたどった本当のパス。keepLast=true なら最後の部分はたどらない
+    real(p, keepLast) {
+      let parts = String(p).split('/').filter(Boolean), cur = '', hops = 0;
+      for (let i = 0; i < parts.length; i++) {
+        const next = cur + '/' + parts[i];
+        if (keepLast && i === parts.length - 1) { cur = next; break; }
+        const raw = store.get(K(next));
+        if (raw && raw.startsWith('{"t":"l"')) {
+          if (++hops > 16) throw new Error(p + ': シンボリックリンクが多すぎます（循環しているかもしれません）');
+          let to = '/'; try { to = path.norm(JSON.parse(raw).c, cur || '/'); } catch (e) { /* 壊れたリンクは / 扱い */ }
+          parts = to.split('/').filter(Boolean).concat(parts.slice(i + 1)); cur = ''; i = -1; continue;
+        }
+        cur = next;
+      }
+      return cur || '/';
+    },
+    _raw(p) { const v = store.get(K(p)); if (v == null) return null; try { return JSON.parse(v); } catch (e) { return null; } },
+    _here(p) { return p === '/' ? '/' : path.join(fs.real(path.dir(p)), path.base(p)); }, // 親だけたどったパス（リンクそのもの）
+    stat(p) { return fs._raw(fs.real(p)); },
+    lstat(p) { return fs._raw(fs._here(p)); },
+    isLink(p) { const s = fs.lstat(p); return !!s && s.t === 'l'; },
+    readlink(p) { const s = fs.lstat(p); if (!s || s.t !== 'l') throw new Error(p + ': シンボリックリンクではありません'); return s.c; },
+    exists(p) { try { return store.get(K(fs.real(p))) != null; } catch (e) { return false; } },
+    isDir(p) { try { const s = fs.stat(p); return !!s && s.t === 'd'; } catch (e) { return false; } },
+    isFile(p) { try { const s = fs.stat(p); return !!s && s.t === 'f'; } catch (e) { return false; } },
     list(p) {
       if (!fs.isDir(p)) throw new Error(p + ': ディレクトリではありません');
-      const pre = K(p === '/' ? '/' : p + '/'), names = [];
+      const q = fs.real(p), pre = K(q === '/' ? '/' : q + '/'), names = [];
       for (const k of store.keys(pre)) { const r = k.slice(pre.length); if (r && !r.includes('/')) names.push(r); }
       return names.sort((a, b) => a.localeCompare(b));
     },
@@ -127,47 +155,61 @@
     write(p, c, opt) {
       opt = opt || {};
       if (p === '/') throw new Error('/ には書き込めません');
-      const d = path.dir(p);
-      if (!fs.isDir(d)) throw new Error(d + ': ディレクトリがありません');
-      const old = fs.stat(p);
+      const q = fs.real(p), d = path.dir(q);
+      if (!fs.isDir(d)) throw new Error(path.dir(p) + ': ディレクトリがありません');
+      const old = fs._raw(q);
       if (old && old.t === 'd') throw new Error(p + ': ディレクトリです');
       const node = { t: 'f', c: String(c), m: Date.now(), o: opt.owner || (old && old.o) || 'root' };
       if (opt.bin) node.b = 1;
-      put(p, node);
+      put(q, node);
     },
     mkdir(p, opt) {
       opt = opt || {};
-      if (fs.exists(p)) { if (fs.isDir(p) && opt.parents) return; throw new Error(p + ': すでに存在します'); }
+      if (fs.exists(p) || fs.isLink(p)) { if (fs.isDir(p) && opt.parents) return; throw new Error(p + ': すでに存在します'); }
       const d = path.dir(p);
       if (!fs.isDir(d)) { if (opt.parents) fs.mkdir(d, opt); else throw new Error(d + ': ディレクトリがありません'); }
-      put(p, { t: 'd', m: Date.now(), o: opt.owner || 'root' });
+      put(fs._here(p), { t: 'd', m: Date.now(), o: opt.owner || 'root' });
+    },
+    symlink(target, p, opt) {
+      opt = opt || {};
+      if (!target) throw new Error('リンク先を指定してください');
+      if (fs.lstat(p)) throw new Error(p + ': すでに存在します');
+      if (!fs.isDir(path.dir(p))) throw new Error(path.dir(p) + ': ディレクトリがありません');
+      put(fs._here(p), { t: 'l', c: String(target), m: Date.now(), o: opt.owner || 'root' });
     },
     rm(p, opt) {
       opt = opt || {};
       if (p === '/') throw new Error('/ は削除できません');
-      const s = fs.stat(p);
+      const q = fs._here(p), s = fs._raw(q);
       if (!s) throw new Error(p + ': そのようなファイルはありません');
       if (s.t === 'd') {
-        if (fs.list(p).length && !opt.recursive) throw new Error(p + ': ディレクトリが空ではありません（-r が必要です）');
-        store.keys(K(p + '/')).forEach(k => store.del(k));
+        if (fs.list(q).length && !opt.recursive) throw new Error(p + ': ディレクトリが空ではありません（-r が必要です）');
+        store.keys(K(q + '/')).forEach(k => store.del(k));
       }
-      store.del(K(p));
+      store.del(K(q));
     },
     _cp(a, b, owner) {
-      const s = fs.stat(a);
-      if (s.t === 'd') { fs.mkdir(b, { parents: true, owner: owner || s.o }); for (const n of fs.list(a)) fs._cp(a + '/' + n, b + '/' + n, owner); }
+      const s = fs._raw(a);
+      if (s.t === 'd') { put(b, { t: 'd', m: Date.now(), o: owner || s.o }); for (const n of fs.list(a)) fs._cp(a + '/' + n, b + '/' + n, owner); }
       else put(b, Object.assign({}, s, { m: Date.now(), o: owner || s.o }));
     },
     dest(a, b) { return fs.isDir(b) ? path.join(b, path.base(a)) : b; },
     cp(a, b, opt) {
       if (!fs.exists(a)) throw new Error(a + ': そのようなファイルはありません');
-      b = fs.dest(a, b);
-      if (b === a || b.startsWith(a + '/')) throw new Error('自分自身の中にはコピーできません');
+      const src = fs.real(a); b = fs._here(fs.dest(a, b));
+      if (b === src || b.startsWith(src + '/')) throw new Error('自分自身の中にはコピーできません');
       if (!fs.isDir(path.dir(b))) throw new Error(path.dir(b) + ': ディレクトリがありません');
-      fs._cp(a, b, opt && opt.owner);
+      fs._cp(src, b, opt && opt.owner);
       return b;
     },
-    mv(a, b) { const d = fs.cp(a, b); fs.rm(a, { recursive: true }); return d; },
+    // 移動はリンクそのものを動かす
+    mv(a, b) {
+      const src = fs._here(a); if (!fs._raw(src)) throw new Error(a + ': そのようなファイルはありません');
+      const d = fs._here(fs.dest(a, b));
+      if (d === src || d.startsWith(src + '/')) throw new Error('自分自身の中には移動できません');
+      if (!fs.isDir(path.dir(d))) throw new Error(path.dir(d) + ': ディレクトリがありません');
+      fs._cp(src, d); fs.rm(src, { recursive: true }); return d;
+    },
     usage() {
       let used = 0;
       for (const k of store.keys()) used += k.length + 7 + (store.get(k) || '').length;
@@ -298,16 +340,24 @@
     const me = () => users.get(getUser()) || { name: getUser() };
     const canW = p => { const u = me(); return !!u.root || p.startsWith('/tmp/') || p.startsWith('/home/' + u.name + '/'); };
     const canR = p => { const u = me(); if (u.root) return true; if (p === '/root' || p.startsWith('/root/')) return false; if (u.admin) return true; if (p === '/root' || p.startsWith('/root/')) return false; const m = p.match(/^\/home\/([^/]+)/); return !m || m[1] === u.name; };
-    const W = p => { if (!canW(p)) throw new Error(p + ': 許可がありません（root 権限が必要です）'); return p; };
-    const R = p => { if (!canR(p)) throw new Error(p + ': 許可がありません'); return p; };
+    // リンクを通した書き込み・読み込みも許可を確かめるため、リンクをたどった先のパスでも調べる
+    const realOf = p => { try { return fs.real(p); } catch (e) { return p; } };
+    const hereOf = p => { try { return fs._here(p); } catch (e) { return p; } };
+    const deny = (p, w) => { throw new Error(p + (w ? ': 許可がありません（root 権限が必要です）' : ': 許可がありません')); };
+    const W = p => { if (!canW(p) || !canW(realOf(p))) deny(p, true); return p; };
+    const WL = p => { if (!canW(p) || !canW(hereOf(p))) deny(p, true); return p; };
+    const R = p => { if (!canR(p) || !canR(realOf(p))) deny(p); return p; };
+    const ok = p => canR(p) && canR(realOf(p));
     return {
-      stat: p => fs.stat(R(p)), exists: p => canR(p) && fs.exists(p), isDir: p => canR(p) && fs.isDir(p), isFile: p => canR(p) && fs.isFile(p),
+      stat: p => fs.stat(R(p)), lstat: p => fs.lstat(R(p)), exists: p => ok(p) && fs.exists(p), isDir: p => ok(p) && fs.isDir(p), isFile: p => ok(p) && fs.isFile(p),
+      isLink: p => canR(p) && fs.isLink(p), readlink: p => fs.readlink(R(p)), real: fs.real,
       list: p => fs.list(R(p)), read: p => fs.read(R(p)),
       write: (p, c, o) => fs.write(W(p), c, Object.assign({}, o, { owner: getUser() })),
-      mkdir: (p, o) => fs.mkdir(W(p), Object.assign({}, o, { owner: getUser() })),
-      rm: (p, o) => fs.rm(W(p), o),
-      cp: (a, b) => { R(a); W(fs.dest(a, b)); return fs.cp(a, b, { owner: getUser() }); },
-      mv: (a, b) => { W(a); W(fs.dest(a, b)); return fs.mv(a, b); },
+      mkdir: (p, o) => fs.mkdir(WL(p), Object.assign({}, o, { owner: getUser() })),
+      symlink: (t, p) => fs.symlink(t, WL(p), { owner: getUser() }),
+      rm: (p, o) => fs.rm(WL(p), o),
+      cp: (a, b) => { R(a); WL(fs.dest(a, b)); return fs.cp(a, b, { owner: getUser() }); },
+      mv: (a, b) => { WL(a); WL(fs.dest(a, b)); return fs.mv(a, b); },
       usage: fs.usage, kind: fs.kind, mime: fs.mime, dataURL: p => fs.dataURL(R(p)), unique: fs.unique, canWrite: canW
     };
   };
@@ -506,7 +556,7 @@
     const t0 = Date.now(), tty = OS.tty1, label = reboot ? '再起動しています…' : 'シャットダウンしています…';
     tty.pending = null; tty.capture = null; tty.line.style.display = 'none';
     const bar = h('i', { style: 'width:100%' }), msg = h('div', { class: 'sp-msg' });
-    if (gui) OS.root.append(h('div', { id: 'splash', class: 'down' }, h('div', { class: 'sp-logo', 'aria-hidden': 'true' }, '<', h('b', null, '/'), '>'), h('div', { class: 'sp-name' }, label), h('div', { class: 'sp-bar' }, bar), msg));
+    if (gui) OS.root.append(h('div', { id: 'splash', class: 'down', role: 'status' }, OS.mark(120, 'sp-mark'), spinner(), h('div', { class: 'sp-name' }, label)));
     tty.println(); tty.println(label);
     await nap(280);
     if (gui) OS.htui.stop();
@@ -570,8 +620,9 @@
 
   // ---------- 起動（起動画面は最低でも約1.2秒表示する。GUIはスプラッシュ、CUIは起動ログ）
   const sleep = ms => new Promise(r => setTimeout(r, ms));
+  OS.hostname = () => { try { return OS.config.get('hostname', 'htmlos') || 'htmlos'; } catch (e) { return 'htmlos'; } };
   OS.boot = async function (mode) {
-    const t0 = Date.now();
+    const t0 = OS.bootTime = Date.now();
     document.head.append(h('style', { id: 'htmlos-style' }, fs.read('/sys/style.css')));
     const root = OS.root = h('div', { id: 'os-root' });
     document.body.append(root);
@@ -591,7 +642,8 @@
     const tty = OS.tty1 = new Tty(t1);
     let splash = null; const bar = h('i'), msg = h('div', { class: 'sp-msg' });
     if (mode === 'gui') {
-      splash = h('div', { id: 'splash' }, h('div', { class: 'sp-logo', 'aria-hidden': 'true' }, '<', h('b', null, '/'), '>'), h('div', { class: 'sp-name' }, 'htmlOS ' + OS.version), h('div', { class: 'sp-bar' }, bar), msg);
+      // 黒い画面に白い </>。BIOS の Quiet Boot から来たときは、同じ位置にマークがもう出ているので描き直さない
+      splash = h('div', { id: 'splash', class: BOOT.quiet ? 'quiet' : '', role: 'status', 'aria-label': 'htmlOS ' + OS.version + ' を起動しています' }, OS.mark(120, 'sp-mark'), spinner());
       root.append(splash);
     }
     const apps = fs.list('/sys/apps').filter(n => n.endsWith('.js'));
@@ -623,7 +675,9 @@
     if (rest > 0) await sleep(rest);
     ttyLogin(tty);
     if (mode === 'gui') {
-      OS.htui.start();
+      // Live モードは live ユーザーで自動ログインし、インストーラーを開く
+      if (OS.live) { OS.htui.start('live'); if (OS.apps.installer) setTimeout(() => { try { OS.launch('installer'); } catch (e) { /* 開けなくても Live は使える */ } }, 350); }
+      else OS.htui.start();
       splash.classList.add('out');
       setTimeout(() => splash.remove(), 450);
     }

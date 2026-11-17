@@ -2,20 +2,27 @@
 
 ブラウザの中で動く、OS風の環境です。HTMLファイル1枚が「インストールメディア兼ブートローダ」になっていて、OS本体はブラウザの LocalStorage に展開されて起動します。
 
-**▶ 使ってみる: GitHub Pages で公開中**（このリポジトリの Pages の URL を開くとインストーラが起動します）
+**▶ 使ってみる: GitHub Pages で公開中**（このリポジトリの Pages の URL を開くと、Live モード（インストールせずに試す）とインストーラを選べます）
 
 ## 特徴
 
-- **htmlBIOS**: POST（自己診断）画面と SETUP 画面（Del / F2）。Quiet Boot などの設定つき
-- **ブートローダ**: GUI / CUI 起動、システム修復、再インストール
-- **jsh（CUI）**: JavaScript ベースのシェル。`ls -l /sys` のようなシェル風の書き方も、`ls("/sys").length` のような JS も使えます
+- **htmlBIOS**: POST（自己診断）画面と SETUP 画面（Del / F2）。Quiet Boot にすると黒い画面に白い `</>` だけを出し、そのまま OS の起動画面につながります
+- **起動画面**: 黒い背景に白い `</>` を線で描くアニメーションとスピナー
+- **ブートローダ**: GUI / CUI 起動、Live モード、システム修復、再インストール
+- **Live モードと GUI インストーラー**: インストールせずにメモリ上で試せます（再読み込みで消えます）。Live の中の「htmlOS をインストール」から、ユーザー・コンピューター名・起動モード・デスクトップ環境を選んでインストールでき、Live で作ったファイルも引き継げます。テキストモードのインストーラーも残しています
+- **jsh（CUI）**: JavaScript ベースのシェル。`ls -l /sys` のようなシェル風の書き方も、`ls("/sys").length` のような JS も使えます。パイプ（`ls /sys | grep js | wc -l`）、`$変数`、エイリアス、`~/.jshrc` に対応
+  - テキスト処理: head tail wc sort uniq cut tr nl rev tee diff grep
+  - ファイル操作: find tree du basename dirname ln（シンボリックリンク）readlink file
+  - システム情報・シェル: free uptime hostname id env export unset alias unalias which type man top
 - **HTUi（GUI）**: ウィンドウの移動・リサイズ・スナップ、アニメーション。jsh から `htui start` / `htui stop` で起動・終了
-- **hdm（HtmlDisplayManager）**: ログイン画面。ユーザーとデスクトップ環境を選んでログインし、最後に使った環境を覚えます。選んだ環境に合わせて見た目が変わります（HTUi 独自 / GDM 風 / Windows 11・8.1・Phone 風 / シンプル）
+- **hdm（HtmlDisplayManager）**: ログイン画面。ユーザーとデスクトップ環境を選んでログインし、最後に使った環境を覚えます。選んだ環境に合わせて見た目が変わります（HTUi 独自 / GDM 風 / Windows 11・8.1・Phone 風 / macOS 風・iOS 風 / シンプル）
 - **デスクトップ環境を選べる**:
   - HTUi … 上にパネル、左にアイコン（標準）
   - hWin … Windows 風。マウスではタスクバーとスタートメニュー。タブレットでは Windows 8.1 風（スタート画面のタイル、「デスクトップ」アプリ、チャーム、画面の端からのスワイプ）、スマートフォンでは Windows Phone 8.1 風（ステータスバーとアクションセンター、戻る・スタート・検索のナビゲーションバー、タスク切り替え）
   - hShell … GNOME 風。トップバー、「アクティビティ」画面・ドック、日時を押すとカレンダーと通知センター
   - hwc … Labwc 風。パネルなしのウィンドウマネージャだけ（右クリックでメニュー）
+  - hAqua … macOS 風。メニューバー、拡大するドック、信号機ボタンのウインドウ、Launchpad（F4）・Mission Control（F3）・Spotlight（Alt+Space）・コントロールセンター・通知センター。タブレットでは iPadOS 風、スマートフォンでは iOS 風（ホーム画面とドック、ホームバーのスワイプでホーム・アプリスイッチャー・アプリ切り替え、上端からコントロールセンター・通知センター）
+- **壁紙**: SVG で描いた 6 種類（ブルーム・波・夕焼けの山・オーロラ・砂丘・グラファイト）。設定からパソコンや hFS の画像も壁紙にできます
 - **キーボードの捕捉（Keyboard Lock）**: マウスでクリックすると全画面になり、Alt+Tab・Ctrl+W・Super キーなども htmlOS が受け取る（Chrome / Edge。Esc 長押しで解除。IME の切り替えキーは捕捉しない）。Alt+Tab（Alt+` でも）でウィンドウを切り替え
 - **タブレット / スマートフォンモード**: 全画面アプリ、画面キーボード対応。HTUi は下部ナビ、ほかの環境はそれぞれの操作方法（ジェスチャーなど）
 - **通知**: `OS.notify(...)` や jsh の `notify` で通知を出せます（ダウンロード完了などもここに出ます）

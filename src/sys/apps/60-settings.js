@@ -100,9 +100,27 @@
         }],
         look: ['外観', 'image', () => {
           const p = OS.htui.prefs;
+          const setWall = src => OS.htui.setWallpaperImage(src).then(() => show('look')).catch(e => OS.ui.alert(e.message));
           page.append(h('h2', null, '外観'), h('p', null, 'この設定はユーザーごとに ~/.config/htui.json に保存されます。'),
             h('h3', null, '壁紙'),
-            h('div', { class: 'st-swatches' }, OS.htui.wallpapers.map((w, i) => h('button', { class: 'st-sw wp' + ((p.wallpaper | 0) === i ? ' on' : ''), type: 'button', style: 'background:' + w.css, title: w.name, 'aria-label': '壁紙 ' + w.name, onclick: () => { OS.htui.setPrefs({ wallpaper: i }); show('look'); } }))),
+            h('div', { class: 'st-swatches' }, OS.htui.wallpapers.map((w, i) => h('button', { class: 'st-sw wp' + (p.wallpaper !== 'custom' && (p.wallpaper | 0) === i ? ' on' : ''), type: 'button', style: 'background:' + w.css, title: w.name, 'aria-label': '壁紙 ' + w.name, onclick: () => { OS.htui.setPrefs({ wallpaper: i }); show('look'); } })),
+              OS.htui.hasCustomWallpaper() ? h('button', { class: 'st-sw wp' + (p.wallpaper === 'custom' ? ' on' : ''), type: 'button', style: 'background:' + OS.htui.wallCss({ wallpaper: 'custom' }, OS.htui.user), title: '自分の画像', 'aria-label': '壁紙 自分の画像', onclick: () => { OS.htui.setPrefs({ wallpaper: 'custom' }); show('look'); } }) : null),
+            h('div', { class: 'st-row' },
+              h('button', { class: 'btn', type: 'button', onclick: () => {
+                const inp = h('input', { type: 'file', accept: 'image/*', style: 'display:none' });
+                inp.addEventListener('change', () => {
+                  const f = inp.files && inp.files[0]; if (!f) return;
+                  const r = new FileReader();
+                  r.onload = () => setWall(r.result);
+                  r.readAsDataURL(f);
+                });
+                document.body.append(inp); inp.click(); setTimeout(() => inp.remove(), 60000);
+              } }, OS.icon('upload', 16), 'パソコンの画像…'),
+              h('button', { class: 'btn', type: 'button', onclick: async () => {
+                const f = await OS.ui.pickFile({ title: '壁紙にする画像', kinds: ['image'] });
+                if (f) { try { setWall(OS.htui.fs.dataURL(f)); } catch (e) { OS.ui.alert(e.message); } }
+              } }, OS.icon('folder', 16), 'hFS の画像…'),
+              h('small', null, '長い辺が 1920px より大きい画像は縮めて保存します（~/.config/wallpaper）')),
             h('h3', null, 'アクセントカラー'),
             h('div', { class: 'st-swatches' }, OS.htui.accents.map(c => h('button', { class: 'st-sw' + ((p.accent || OS.htui.accents[0]) === c ? ' on' : ''), type: 'button', style: 'background:' + c, title: c, 'aria-label': 'アクセントカラー ' + c, onclick: () => { OS.htui.setPrefs({ accent: c }); show('look'); } })),
             h('h3', null, 'デスクトップ環境'),

@@ -4,6 +4,7 @@
      hShell → gdm    GDM 風
      hWin   → w11 / w8 / wp   デスクトップは Windows 11 風、タブレットは Windows 8.1 風、スマートフォンは Windows Phone 風（どれもロック画面つき）
      hwc    → wm     シンプルな独自デザイン（ユーザー名を入力する）
+     hAqua  → mac / ios   デスクトップは macOS 風、タブレットとスマートフォンは iOS 風（ロック画面つき）
    最後にログインしたユーザーと、ユーザーごとに最後に使ったセッションを /etc/hdm.json に覚える。 */
 (function () {
   const OS = window.OS, h = OS.h, users = OS.users;
@@ -26,6 +27,7 @@
       if (sid === 'gnome') return 'gdm';
       if (sid === 'wm') return 'wm';
       if (sid === 'win') return OS.uiMode === 'phone' ? 'wp' : OS.uiMode === 'tablet' ? 'w8' : 'w11';
+      if (sid === 'mac') return OS.uiMode === 'desktop' ? 'mac' : 'ios';
       return 'htui';
     },
 
@@ -44,7 +46,7 @@
         get user() { return st.user; }, get sid() { return st.sid; }, get unlocked() { return st.unlocked; },
         list: list, menuUp: false,
         avatar(u, size, square) { const a = htui.avatar(u, size); if (square) a.classList.add('sq'); return a; },
-        wallpaper(u) { const p = u ? prefsOf(u) : {}; return (htui.wallpapers[p.wallpaper | 0] || htui.wallpapers[0]).css; },
+        wallpaper(u) { return htui.wallCss(u ? prefsOf(u) : {}, u && u.name); },
         accent(u) { const p = u ? prefsOf(u) : {}; return p.accent || htui.accents[0]; },
         clock(node, fmt) { const f = d => { node.textContent = fmt(d); }; ticks.push(f); f(new Date()); return node; },
         pick(u) { st.user = u; st.msg = ''; if (u) st.sid = hdm.sessionFor(u.name); st.unlocked = true; render(); },
@@ -123,7 +125,7 @@
         const old = el.querySelector('#gr-pw'), typed = old ? old.value : '';
         const theme = hdm.themeFor(st.sid);
         // Windows 系はユーザー一覧の画面を持たず、いつも誰か一人を選んだ状態で出す
-        if (!st.user && (theme === 'w11' || theme === 'w8' || theme === 'wp')) st.user = list()[0] || null;
+        if (!st.user && (theme === 'w11' || theme === 'w8' || theme === 'wp' || theme === 'ios')) st.user = list()[0] || null;
         el.textContent = ''; el.removeAttribute('style');
         el.className = 'hdm hdm-' + theme;
         el.style.setProperty('--accent', c.accent(st.user));
@@ -265,5 +267,46 @@
       h('div', { class: 'wm-head' }, h('b', null, 'htmlOS ' + OS.version), c.clock(h('span'), d => pad(d.getHours()) + ':' + pad(d.getMinutes()))),
       f.form, f.msg),
       h('div', { class: 'wm-foot' }, c.modeButton('wm-ibtn', 15), c.powerButton('wm-ibtn', 15)));
+  };
+
+  // ---- hAqua（デスクトップ）: macOS 風。上に日付と大きな時刻、下にユーザーとパスワード
+  THEMES.mac = function (el, c) {
+    const u = c.user;
+    c.menuUp = true;
+    el.style.setProperty('--wall', c.wallpaper(u));
+    el.append(h('div', { class: 'ml-bg' }),
+      h('div', { class: 'ml-top' },
+        c.clock(h('div', { class: 'ml-date' }), d => (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + WEEK[d.getDay()] + '曜日'),
+        c.clock(h('div', { class: 'ml-time' }), d => d.getHours() + ':' + pad(d.getMinutes()))));
+    const bottom = h('div', { class: 'ml-bottom', 'data-shake': '' });
+    if (!u) bottom.append(h('div', { class: 'ml-users' }, c.userButtons('ml-user', 64)));
+    else {
+      const f = c.pwForm({ inputClass: 'ml-pw', submitClass: 'ml-go', formClass: 'ml-form', msgClass: 'ml-msg', placeholder: 'パスワードを入力' });
+      f.form.append(h('div', { class: 'ml-pwbox' }, f.input, f.submit));
+      bottom.append(c.avatar(u, 72), h('div', { class: 'gr-name ml-name' }, u.name), f.form, f.msg);
+      if (c.list().length > 1) bottom.append(h('button', { class: 'ml-switch', type: 'button', onclick: () => c.pick(null) }, OS.icon('back', 14), '別のユーザー'));
+    }
+    el.append(bottom, h('div', { class: 'ml-icons' },
+      h('label', { class: 'ml-ibtn', title: 'デスクトップ環境: ' + c.sessionName() }, OS.icon('grid', 16), c.sessionSelect('', true)),
+      c.modeButton('ml-ibtn', 16), c.powerButton('ml-ibtn', 16)));
+  };
+
+  // ---- hAqua（タブレット・スマートフォン）: iOS 風。ロック画面を上へスワイプするとパスワード入力
+  THEMES.ios = function (el, c) {
+    const u = c.user;
+    c.menuUp = true;
+    el.style.setProperty('--wall', c.wallpaper(u));
+    const f = c.pwForm({ inputClass: 'il-pw', submitClass: 'il-go', formClass: 'il-form', msgClass: 'il-msg', placeholder: 'パスワード' });
+    f.form.append(h('div', { class: 'il-pwbox' }, f.input, f.submit));
+    el.append(h('div', { class: 'il-bg' }),
+      h('div', { class: 'il-main', 'data-shake': '' },
+        h('div', { class: 'il-title' }, 'パスワードを入力'), c.avatar(u, 64), h('div', { class: 'gr-name il-name' }, u.name), f.form, f.msg,
+        h('label', { class: 'il-ses' }, OS.icon('grid', 15), c.sessionSelect('il-sel')),
+        c.list().length > 1 ? h('div', { class: 'il-users' }, c.userButtons('il-user', 34)) : null),
+      h('div', { class: 'il-icons' }, c.modeButton('il-ibtn', 18), c.powerButton('il-ibtn', 18)));
+    c.lock(h('div', { class: 'il-lock', style: 'background:' + c.wallpaper(u) },
+      c.clock(h('div', { class: 'il-ldate' }), d => (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + WEEK[d.getDay()] + '曜日'),
+      c.clock(h('div', { class: 'il-ltime' }), d => d.getHours() + ':' + pad(d.getMinutes())),
+      h('div', { class: 'il-hint' }, '上にスワイプして開く'), h('div', { class: 'il-bar' })));
   };
 })();
