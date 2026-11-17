@@ -256,6 +256,7 @@
 
   // ---- hwc: シンプルな独自デザイン（ユーザー名も入力する）
   THEMES.wm = function (el, c) {
+    c.menuUp = true;
     const name = h('input', { class: 'wm-in', id: 'hdm-user', value: c.user ? c.user.name : '', 'aria-label': 'ユーザー名', autocomplete: 'off', spellcheck: 'false', autocapitalize: 'off' });
     const f = c.pwForm({ inputClass: 'wm-in', submitClass: 'wm-go', formClass: 'wm-form', msgClass: 'wm-msg', submitLabel: 'ログイン', nameInput: name });
     const row = (label, ctl) => h('label', { class: 'wm-row' }, h('span', null, label), ctl);

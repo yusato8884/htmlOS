@@ -72,7 +72,7 @@
 .desk-icon:hover{background:rgba(255,255,255,.16)}
 .app-ico{display:flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:11px;color:#fff;box-shadow:0 1px 3px rgba(0,0,0,.35)}
 
-.menu{position:absolute;z-index:100000;min-width:200px;max-width:calc(100% - 8px);background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.3);padding:4px;display:flex;flex-direction:column}
+.menu{position:absolute;z-index:100000;color:var(--ink);min-width:200px;max-width:calc(100% - 8px);background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.3);padding:4px;display:flex;flex-direction:column}
 .menu-item{display:flex;align-items:center;gap:8px;padding:6px 10px;border:0;border-radius:5px;background:none;text-align:left;cursor:pointer}
 .menu-item:hover{background:var(--accent);color:#fff!important}
 .menu-hint{margin-left:auto;padding-left:14px;font-size:12px;opacity:.7}
@@ -929,3 +929,8 @@
   .wp-jump .wp-jl{animation:w8-in .3s cubic-bezier(.2,.8,.2,1) both}
 }
 .hdm-w8 .avatar.sq{box-shadow:0 0 0 2px rgba(255,255,255,.55);filter:brightness(.85)}
+
+/* ログイン画面は文字を白にしているので、白い背景の部品（メニュー・選択欄の一覧）の文字色を戻す */
+.hdm option{color:#111;background:#fff}
+.hdm .menu{color:var(--ink)}
+.hdm-wm .menu{color:var(--ink)}

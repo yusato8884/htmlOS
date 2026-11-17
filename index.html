@@ -1718,6 +1718,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 
   // ---- hwc: シンプルな独自デザイン（ユーザー名も入力する）
   THEMES.wm = function (el, c) {
+    c.menuUp = true;
     const name = h('input', { class: 'wm-in', id: 'hdm-user', value: c.user ? c.user.name : '', 'aria-label': 'ユーザー名', autocomplete: 'off', spellcheck: 'false', autocapitalize: 'off' });
     const f = c.pwForm({ inputClass: 'wm-in', submitClass: 'wm-go', formClass: 'wm-form', msgClass: 'wm-msg', submitLabel: 'ログイン', nameInput: name });
     const row = (label, ctl) => h('label', { class: 'wm-row' }, h('span', null, label), ctl);
@@ -1951,9 +1952,17 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     const m = buildMenu(items, () => close());
     m._anchor = anchor;
     const r = anchor.getBoundingClientRect(), hr = htui.el.getBoundingClientRect();
-    if (opt && opt.up) m.style.bottom = (hr.bottom - r.top + 4) + 'px'; else m.style.top = (r.bottom - hr.top + 4) + 'px';
-    if (right) m.style.right = Math.max(4, hr.right - r.right) + 'px'; else m.style.left = Math.max(4, r.left - hr.left) + 'px';
+    m.style.visibility = 'hidden'; m.style.left = '0px'; m.style.top = '0px';
     htui.el.append(m);
+    // 画面からはみ出さない位置に置く。下に入らなければ上に、どちらも入らなければ画面の中に収まるよう寄せる
+    const mw = m.offsetWidth, mh = m.offsetHeight, H = hr.height, W = hr.width;
+    const below = r.bottom - hr.top + 4, above = r.top - hr.top - 4 - mh;
+    let top = opt && opt.up ? above : below;
+    if (top + mh > H - 4) top = above >= 4 ? above : H - mh - 4;
+    if (top < 4) top = below + mh <= H - 4 ? below : 4;
+    let left = right ? r.right - hr.left - mw : r.left - hr.left;
+    left = Math.max(4, Math.min(left, W - mw - 4));
+    m.style.top = Math.max(4, top) + 'px'; m.style.left = left + 'px'; m.style.visibility = '';
     close = openMenu(m, anchor);
   }
   htui.menu = menu;
@@ -4034,7 +4043,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 .desk-icon:hover{background:rgba(255,255,255,.16)}
 .app-ico{display:flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:11px;color:#fff;box-shadow:0 1px 3px rgba(0,0,0,.35)}
 
-.menu{position:absolute;z-index:100000;min-width:200px;max-width:calc(100% - 8px);background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.3);padding:4px;display:flex;flex-direction:column}
+.menu{position:absolute;z-index:100000;color:var(--ink);min-width:200px;max-width:calc(100% - 8px);background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.3);padding:4px;display:flex;flex-direction:column}
 .menu-item{display:flex;align-items:center;gap:8px;padding:6px 10px;border:0;border-radius:5px;background:none;text-align:left;cursor:pointer}
 .menu-item:hover{background:var(--accent);color:#fff!important}
 .menu-hint{margin-left:auto;padding-left:14px;font-size:12px;opacity:.7}
@@ -4891,6 +4900,11 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   .wp-jump .wp-jl{animation:w8-in .3s cubic-bezier(.2,.8,.2,1) both}
 }
 .hdm-w8 .avatar.sq{box-shadow:0 0 0 2px rgba(255,255,255,.55);filter:brightness(.85)}
+
+/* ログイン画面は文字を白にしているので、白い背景の部品（メニュー・選択欄の一覧）の文字色を戻す */
+.hdm option{color:#111;background:#fff}
+.hdm .menu{color:var(--ink)}
+.hdm-wm .menu{color:var(--ink)}
 </script>
 <script>
 /* ============================================================
@@ -4901,7 +4915,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
    ============================================================ */
 (function () {
   'use strict';
-  var MEDIA_VERSION = '1.11.0';
+  var MEDIA_VERSION = '1.11.1';
   var P = 'htmlos:';
 
   // ---- ストレージ (LocalStorageが使えない環境ではRAMディスクで動く)

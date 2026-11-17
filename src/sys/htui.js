@@ -219,9 +219,17 @@
     const m = buildMenu(items, () => close());
     m._anchor = anchor;
     const r = anchor.getBoundingClientRect(), hr = htui.el.getBoundingClientRect();
-    if (opt && opt.up) m.style.bottom = (hr.bottom - r.top + 4) + 'px'; else m.style.top = (r.bottom - hr.top + 4) + 'px';
-    if (right) m.style.right = Math.max(4, hr.right - r.right) + 'px'; else m.style.left = Math.max(4, r.left - hr.left) + 'px';
+    m.style.visibility = 'hidden'; m.style.left = '0px'; m.style.top = '0px';
     htui.el.append(m);
+    // 画面からはみ出さない位置に置く。下に入らなければ上に、どちらも入らなければ画面の中に収まるよう寄せる
+    const mw = m.offsetWidth, mh = m.offsetHeight, H = hr.height, W = hr.width;
+    const below = r.bottom - hr.top + 4, above = r.top - hr.top - 4 - mh;
+    let top = opt && opt.up ? above : below;
+    if (top + mh > H - 4) top = above >= 4 ? above : H - mh - 4;
+    if (top < 4) top = below + mh <= H - 4 ? below : 4;
+    let left = right ? r.right - hr.left - mw : r.left - hr.left;
+    left = Math.max(4, Math.min(left, W - mw - 4));
+    m.style.top = Math.max(4, top) + 'px'; m.style.left = left + 'px'; m.style.visibility = '';
     close = openMenu(m, anchor);
   }
   htui.menu = menu;
