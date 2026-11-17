@@ -660,7 +660,9 @@
 /* ==================================================== hShell（GNOME 風） */
 .gn-bar{flex:none;height:30px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:0 4px;background:#000;color:#f4f4f5;font-size:13.5px;font-weight:600;z-index:5}
 .gn-left{display:flex;align-items:center;gap:6px;min-width:0}
-.gn-act{border:0;background:none;color:inherit!important;padding:3px 10px;border-radius:14px;cursor:pointer;font-weight:600}
+.gn-act{display:flex;align-items:center;gap:5px;height:24px;border:0;background:none;color:inherit!important;padding:0 10px;border-radius:12px;cursor:pointer;transition:background .2s}
+.gn-pill{width:30px;height:8px;border-radius:4px;background:#fff}
+.gn-pdot{width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,.5)}
 .gn-act:hover,.gn-status:hover,.gn-btn:hover{background:rgba(255,255,255,.16)}
 .gn-app{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;opacity:.9}
 .gn-clock{position:relative;display:flex;align-items:center;gap:6px;border:0;background:none;color:inherit!important;font:inherit;font-variant-numeric:tabular-nums;padding:3px 12px;border-radius:14px;cursor:pointer}
@@ -716,30 +718,6 @@
 .gn-right{display:flex;justify-content:flex-end;gap:2px}
 .gn-btn,.gn-status{display:flex;align-items:center;gap:6px;border:0;background:none;color:inherit!important;padding:3px 10px;border-radius:14px;cursor:pointer}
 .gn-hot{position:absolute;left:0;top:0;width:4px;height:4px;z-index:6}
-.gn-ov{position:absolute;left:0;right:0;top:30px;bottom:0;z-index:120000;display:flex;flex-direction:column;align-items:center;gap:16px;padding:18px 16px 12px;background:rgba(18,19,23,.86);backdrop-filter:blur(12px);color:#fff}
-.gn-search{width:min(340px,100%);border-radius:20px;text-align:center;background:rgba(255,255,255,.95)}
-.gn-area{flex:1;min-height:0;width:100%;overflow:auto;display:flex;align-items:flex-start;justify-content:center}
-.gn-wins{display:flex;flex-wrap:wrap;gap:22px;justify-content:center;align-content:center;min-height:100%;max-width:960px;padding:8px}
-.gn-win{position:relative;width:220px}
-.gn-winbtn{display:flex;flex-direction:column;align-items:center;gap:8px;width:100%;border:0;background:none;color:#fff!important;cursor:pointer;padding:0}
-.gn-thumb{width:100%;aspect-ratio:16/10;display:flex;align-items:center;justify-content:center;background:var(--surface);border-radius:12px;box-shadow:0 6px 20px rgba(0,0,0,.5);outline:3px solid transparent;transition:outline-color .12s,transform .12s}
-.gn-winbtn:hover .gn-thumb,.gn-winbtn:focus-visible .gn-thumb{outline-color:var(--accent);transform:scale(1.03)}
-.gn-win.cur .gn-thumb{outline-color:rgba(255,255,255,.5)}
-.gn-thumb .app-ico{width:64px;height:64px;border-radius:16px}
-.gn-wt{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;background:rgba(0,0,0,.45);padding:2px 10px;border-radius:10px}
-.gn-wx{position:absolute;top:-10px;right:-10px;width:28px;height:28px;border-radius:50%;border:0;background:#3a3d44;color:#fff!important;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .12s}
-.gn-win:hover .gn-wx,.gn-wx:focus-visible{opacity:1}
-.gn-apps{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:10px;width:min(820px,100%);align-content:start;padding:8px}
-.gn-appbtn{display:flex;flex-direction:column;align-items:center;gap:8px;padding:14px 6px;border:0;border-radius:14px;background:none;color:#fff!important;cursor:pointer;font-size:13px}
-.gn-appbtn:hover,.gn-appbtn:focus-visible{background:rgba(255,255,255,.12)}
-.gn-appbtn .app-ico{width:60px;height:60px;border-radius:15px}
-.gn-empty{opacity:.75;text-align:center;align-self:center}
-.gn-dock{flex:none;display:flex;align-items:center;gap:4px;max-width:100%;overflow-x:auto;padding:6px 8px;background:rgba(255,255,255,.12);border-radius:18px;scrollbar-width:none}
-.gn-dk{position:relative;flex:none;width:48px;height:48px;border:0;border-radius:12px;background:none;color:#fff!important;cursor:pointer;display:flex;align-items:center;justify-content:center}
-.gn-dk:hover,.gn-dk.on{background:rgba(255,255,255,.16)}
-.gn-dk .app-ico{width:38px;height:38px;border-radius:10px}
-.gn-dk.run::after{content:"";position:absolute;bottom:1px;left:50%;width:5px;height:5px;margin-left:-2.5px;border-radius:50%;background:#fff}
-.gn-dsep{flex:none;width:1px;height:32px;background:rgba(255,255,255,.25);margin:0 4px}
 .de-gnome .win{border-radius:12px;border-color:#7d7f87}
 .de-gnome .win-head{height:40px;justify-content:center;background:var(--surface)}
 .de-gnome .win-head>.ico{display:none}
@@ -749,12 +727,6 @@
 .de-gnome .win-btn.close{width:24px;height:24px}
 .de-gnome .win.tiled{border-radius:0}
 .touch .gn-bar{height:40px}
-.touch .gn-ov{top:40px}
-@media (prefers-reduced-motion:no-preference){
-  .gn-ov{animation:fade-in .18s ease-out}
-  .gn-ov .gn-win,.gn-ov .gn-appbtn{animation:pop .22s cubic-bezier(.2,.8,.2,1) both}
-  .gn-ov .gn-dock{animation:rise .25s cubic-bezier(.2,.8,.2,1)}
-}
 
 /* ==================================================== hwc（ウィンドウマネージャのみ・Labwc 風） */
 .de-wm .win{border-radius:0;border:1px solid #1f2125;box-shadow:0 4px 14px rgba(0,0,0,.35)}
@@ -934,3 +906,59 @@
 .hdm option{color:#111;background:#fff}
 .hdm .menu{color:var(--ink)}
 .hdm-wm .menu{color:var(--ink)}
+/* 閉じるアニメーション（メニュー・ポップアップ・アクティビティなど）。transform を使う配置を崩さないよう scale だけを動かす */
+@keyframes leave{to{opacity:0;scale:.97}}
+.leaving{animation:leave .14s ease-in forwards!important;pointer-events:none!important}
+/* ---- hShell アクティビティ画面（GNOME 40 以降の作り）。デスクトップ（.desk）そのものを縮めてワークスペースにし、本物のウィンドウを並べる */
+#htui.gn-ovmode{background:#242424!important}
+.gn-bar{transition:background .3s}
+.gn-ovmode .gn-bar{background:transparent}
+.gn-ovmode .gn-act{background:rgba(255,255,255,.18)}
+.gn-ovmode .desk,.gn-ovout .desk{transition:transform .3s cubic-bezier(.25,.8,.25,1),border-radius .3s,opacity .2s;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+.gn-ovmode .win,.gn-ovout .win{transition:transform .3s cubic-bezier(.25,.8,.25,1),opacity .2s!important}
+.gn-ovmode .win.hidden{display:flex;animation:fade-in .25s ease-out}
+.gn-ovout .win.hidden{opacity:0}
+.gn-ovmode .win.closing{animation:gn-fadeout .15s ease-in forwards}
+.gn-ovsearch .desk{opacity:0}
+@keyframes gn-fadeout{to{opacity:0}}
+.gn-ov{position:absolute;left:0;right:0;bottom:0;z-index:120000;color:#fff;overflow:hidden;animation:fade-in .2s ease-out}
+.gn-stage{position:absolute;inset:0}
+.gn-sbox{position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:2;width:min(370px,calc(100% - 24px));height:40px;display:flex;align-items:center;gap:10px;padding:0 16px;border-radius:20px;background:rgba(255,255,255,.12);color:rgba(255,255,255,.85);cursor:text;transition:background .15s,box-shadow .15s}
+.gn-sbox:hover{background:rgba(255,255,255,.16)}
+.gn-sbox:focus-within{background:rgba(255,255,255,.18);box-shadow:0 0 0 2px var(--accent)}
+.gn-search{flex:1;min-width:0;height:100%;border:0;background:none;color:#fff;font:inherit;font-size:15px;outline:none}
+.gn-search::placeholder{color:rgba(255,255,255,.6)}
+.gn-area{position:absolute;left:0;right:0;z-index:1;overflow:auto;display:none;justify-content:center;align-items:flex-start;padding:0 12px}
+.gn-ovapps .gn-area,.gn-ovsearch .gn-area{display:flex;animation:fade-in .2s ease-out}
+.gn-apps{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;width:min(900px,100%);align-content:start;padding:8px 0}
+.gn-appbtn{display:flex;flex-direction:column;align-items:center;gap:10px;padding:14px 6px;border:0;border-radius:18px;background:none;color:#fff!important;cursor:pointer;font-size:13px}
+.gn-appbtn:hover,.gn-appbtn:focus-visible{background:rgba(255,255,255,.1)}
+.gn-appbtn .app-ico{width:64px;height:64px;border-radius:16px}
+.gn-ovapps .gn-appbtn{animation:pop .22s cubic-bezier(.2,.8,.2,1) both}
+.gn-empty{opacity:.75;text-align:center;align-self:center;grid-column:1/-1}
+.gn-peek{position:absolute;border-radius:14px;box-shadow:0 8px 30px rgba(0,0,0,.5);cursor:pointer}
+.gn-ovapps .gn-peek,.gn-ovsearch .gn-peek{display:none}
+.gn-win{position:absolute;transition:opacity .2s}
+.gn-winbtn{position:absolute;inset:0;padding:0;border:0;border-radius:10px;background:none;cursor:pointer;outline:3px solid transparent;outline-offset:3px;transition:outline-color .12s}
+.gn-win:hover .gn-winbtn,.gn-winbtn:focus-visible{outline-color:rgba(255,255,255,.6)}
+.gn-wic{position:absolute;left:50%;bottom:0;transform:translate(-50%,50%);pointer-events:none;filter:drop-shadow(0 3px 8px rgba(0,0,0,.45))}
+.gn-wic .app-ico{width:52px;height:52px;border-radius:14px;box-shadow:none}
+.gn-wt{position:absolute;left:50%;top:calc(100% + 34px);transform:translateX(-50%);max-width:max(100%,180px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;padding:3px 12px;border-radius:12px;background:rgba(0,0,0,.65);opacity:0;pointer-events:none;transition:opacity .12s}
+.gn-win:hover .gn-wt,.gn-win:focus-within .gn-wt{opacity:1}
+.gn-wx{position:absolute;top:-13px;right:-13px;width:28px;height:28px;border-radius:50%;border:0;background:#3a3a3e;color:#fff!important;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .12s;box-shadow:0 2px 6px rgba(0,0,0,.4)}
+.gn-win:hover .gn-wx,.gn-wx:focus-visible,.touch .gn-wx{opacity:1}
+.gn-ovapps .gn-win,.gn-ovsearch .gn-win{opacity:0;pointer-events:none}
+.gn-dock{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);z-index:2;max-width:calc(100% - 16px);display:flex;align-items:center;gap:6px;overflow-x:auto;padding:10px 12px 12px;background:rgba(255,255,255,.1);border-radius:28px;scrollbar-width:none;animation:rise .3s cubic-bezier(.2,.8,.2,1)}
+.gn-dk{position:relative;flex:none;width:64px;height:64px;border:0;border-radius:16px;background:none;color:#fff!important;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .12s}
+.gn-dk:hover,.gn-dk.on{background:rgba(255,255,255,.14)}
+.gn-dk .app-ico{width:52px;height:52px;border-radius:14px}
+.gn-dk.run::after{content:"";position:absolute;bottom:-6px;left:50%;width:5px;height:5px;margin-left:-2.5px;border-radius:50%;background:#fff}
+.gn-dsep{flex:none;width:1px;height:46px;background:rgba(255,255,255,.2);margin:0 6px}
+.phone .gn-dock{padding:6px 8px 9px;gap:2px;border-radius:20px}
+.phone .gn-dk{width:46px;height:46px;border-radius:12px}
+.phone .gn-dk .app-ico{width:38px;height:38px;border-radius:10px}
+.phone .gn-wic .app-ico{width:36px;height:36px;border-radius:10px}
+.phone .gn-apps{grid-template-columns:repeat(auto-fill,minmax(84px,1fr))}
+.phone .gn-appbtn .app-ico{width:52px;height:52px}
+#os-root .gn-search:focus-visible{outline:none}
+#htui.de-gnome{transition:none}

@@ -34,7 +34,7 @@
     htui.running = true;
     htui.el = h('div', { id: 'htui' });
     OS.root.append(htui.el);
-    document.addEventListener('keydown', hotkeys);
+    document.addEventListener('keydown', hotkeys); document.addEventListener('keyup', superUp);
     if (user && users.get(user)) session(user, sid); else toLogin();
     return true;
   };
@@ -49,7 +49,7 @@
     htui.wins.slice().forEach(w => w.close(true));
     clearShell();
     if (OS.hdm) OS.hdm.stop();
-    document.removeEventListener('keydown', hotkeys);
+    document.removeEventListener('keydown', hotkeys); document.removeEventListener('keyup', superUp);
     htui.el.remove(); htui.el = null;
     htui.running = false; htui.user = null; htui.fs = null;
     OS.setMode('auto');
@@ -133,22 +133,22 @@
     if (htui.shell && htui.shell.onActive) htui.shell.onActive(w);
   };
   function goHome() {
-    const sw = htui.el.querySelector('.switcher'); if (sw) sw.remove();
+    const sw = htui.el.querySelector('.switcher:not(.leaving)'); if (sw) leave(sw);
     htui.wins.forEach(w => { w.el.classList.add('hidden'); w.el.classList.remove('active'); w.task.classList.remove('active'); });
     htui.syncTitle();
   }
   htui.goHome = goHome;
   // 開いているアプリの一覧（タスク切り替え）
   function switcher() {
-    const old = htui.el.querySelector('.switcher'); if (old) { old.remove(); return; }
+    const old = htui.el.querySelector('.switcher:not(.leaving)'); if (old) { leave(old); return; }
     const list = h('div', { class: 'sw-list' });
     const ov = h('div', { class: 'switcher' }, h('div', { class: 'sw-head' }, '開いているアプリ'), list);
-    ov.addEventListener('click', e => { if (e.target === ov || e.target === list) ov.remove(); });
+    ov.addEventListener('click', e => { if (e.target === ov || e.target === list) leave(ov); });
     const fill = () => {
       list.textContent = '';
       if (!htui.wins.length) list.append(h('p', { class: 'sw-empty' }, '開いているアプリはありません'));
       htui.wins.forEach(w => list.append(h('div', { class: 'sw-card' },
-        h('button', { class: 'sw-open', type: 'button', onclick: () => { ov.remove(); w.focus(); } }, OS.icon((OS.apps[w.app] || {}).icon || 'file', 22), h('span', null, w.title)),
+        h('button', { class: 'sw-open', type: 'button', onclick: () => { leave(ov); w.focus(); } }, OS.icon((OS.apps[w.app] || {}).icon || 'file', 22), h('span', null, w.title)),
         h('button', { class: 'sw-x', type: 'button', title: '閉じる', 'aria-label': w.title + ' を閉じる', onclick: async () => { await w.close(); fill(); } }, OS.icon('x', 18)))));
     };
     fill(); htui.el.append(ov);
@@ -192,6 +192,14 @@
 
   // ---------- ポップアップメニュー
   //   items: { label, icon, hint, act } / { sep: true } / { head: '見出し' }
+  // 閉じるアニメーションをつけて取り除く。閉じている途中のものは .leaving になり、もう開いているものとして扱わない
+  function leave(el) {
+    if (!el || !el.isConnected || el.classList.contains('leaving')) return;
+    if (htui.animOff()) { el.remove(); return; }
+    el.classList.add('leaving'); el.inert = true;
+    setTimeout(() => el.remove(), 150);
+  }
+  htui.leave = leave;
   function buildMenu(items, close) {
     const m = h('div', { class: 'menu', role: 'menu' });
     items.forEach(it => {
@@ -205,16 +213,16 @@
   function openMenu(m, anchor) {
     const off = e => { if (!m.contains(e.target) && !(anchor && anchor.contains(e.target))) close(); };
     const esc = e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
-    function close() { m.remove(); document.removeEventListener('pointerdown', off, true); document.removeEventListener('keydown', esc, true); }
+    function close() { leave(m); document.removeEventListener('pointerdown', off, true); document.removeEventListener('keydown', esc, true); }
     m._close = close;
     document.addEventListener('pointerdown', off, true); document.addEventListener('keydown', esc, true);
     return close;
   }
-  function closeMenus() { htui.el.querySelectorAll('.menu').forEach(m => m._close ? m._close() : m.remove()); }
+  function closeMenus() { htui.el.querySelectorAll('.menu:not(.leaving)').forEach(m => m._close ? m._close() : m.remove()); }
   htui.closeMenus = closeMenus;
   // anchor の下（opt.up なら上）に出す
   function menu(anchor, items, right, opt) {
-    const old = htui.el.querySelector('.menu'); if (old) { const same = old._anchor === anchor; closeMenus(); if (same) return; }
+    const old = htui.el.querySelector('.menu:not(.leaving)'); if (old) { const same = old._anchor === anchor; closeMenus(); if (same) return; }
     let close = () => {};
     const m = buildMenu(items, () => close());
     m._anchor = anchor;
@@ -453,7 +461,15 @@
     vis.sort((a, b) => (+b.el.style.zIndex || 0) - (+a.el.style.zIndex || 0))[0].focus();
   }
   // Ctrl+Alt+矢印キーでアクティブなウィンドウをスナップ
+  // Super（Windows / Command）キーだけを押して離したら、環境の onSuper を呼ぶ（GNOME のアクティビティ、Windows のスタートなど）
+  let superAlone = false;
+  function superUp(e) {
+    if (e.key !== 'Meta' || !superAlone) return;
+    superAlone = false;
+    if (htui.user && htui.shell && htui.shell.onSuper && !htui.el.querySelector('.modal-ov')) { e.preventDefault(); htui.shell.onSuper(); }
+  }
   function hotkeys(e) {
+    superAlone = e.key === 'Meta' && !e.repeat ? true : e.key === 'Meta' ? superAlone : false;
     if (htui.user && htui.shell && htui.shell.onKey && htui.shell.onKey(e) === true) { e.preventDefault(); return; }
     if (!e.ctrlKey || !e.altKey || !htui.user) return;
     const w = htui.active(); if (!w) return;

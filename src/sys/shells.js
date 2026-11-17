@@ -4,7 +4,7 @@
    gnome … hShell     GNOME 風。トップバー、アクティビティ画面とドック、カレンダーと通知センター
    wm    … hwc        Labwc 風。パネルなしのウィンドウマネージャだけ。右クリックでメニュー
    どれも OS.registerSession({ id, name, desc, build(kit), ... }) で登録している。
-   環境が持てるフック: onStart / onStop / onApps / onActive(win) / onFocus(win) / onMode / onNotify(n) / onKey(e) / freeWindows() */
+   環境が持てるフック: onStart / onStop / onApps / onActive(win) / onFocus(win) / onMode / onNotify(n) / onKey(e) / onSuper() / freeWindows() */
 (function () {
   const OS = window.OS, h = OS.h, htui = OS.htui;
   const logo = () => h('span', { class: 'os-logo', 'aria-hidden': 'true' }, '<', h('b', null, '/'), '>');
@@ -69,8 +69,8 @@
   function popup(el, anchor, onClose) {
     // ナビゲーションバー（スマートフォン）のボタンは自分で閉じ方を決めるので、外側を押した扱いにしない
     const off = e => { if (!el.contains(e.target) && !(anchor && anchor.contains(e.target)) && !e.target.closest('.menu,.modal-ov,.wp-nav')) close(); };
-    const esc = e => { if (e.key === 'Escape' && !htui.el.querySelector('.menu')) { e.stopPropagation(); close(); } };
-    function close() { el.remove(); document.removeEventListener('pointerdown', off, true); document.removeEventListener('keydown', esc, true); if (onClose) onClose(); }
+    const esc = e => { if (e.key === 'Escape' && !htui.el.querySelector('.menu:not(.leaving)')) { e.stopPropagation(); close(); } };
+    function close() { htui.leave(el); document.removeEventListener('pointerdown', off, true); document.removeEventListener('keydown', esc, true); if (onClose) onClose(); }
     el._close = close;
     setTimeout(() => { document.addEventListener('pointerdown', off, true); document.addEventListener('keydown', esc, true); }, 0);
     htui.el.append(el);
@@ -197,8 +197,8 @@
       const el = htui.el;
       const modal = el.querySelector('.modal-ov');
       if (modal) { modal.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return; }
-      if (el.querySelector('.menu')) { htui.closeMenus(); return; }
-      const pop = el.querySelector('.wp-ac,.wp-tasks,.wp-jump,.w8-appbar,.w8-charmwrap,.w8-pane,.w8-switch');
+      if (el.querySelector('.menu:not(.leaving)')) { htui.closeMenus(); return; }
+      const pop = el.querySelector('.wp-ac:not(.leaving),.wp-tasks:not(.leaving),.wp-jump:not(.leaving),.w8-appbar:not(.leaving),.w8-charmwrap:not(.leaving),.w8-pane:not(.leaving),.w8-switch:not(.leaving)');
       if (pop && pop._close) { pop._close(); return; }
       if (el.classList.contains('w8-start-on')) { if (this.startEl.classList.contains('apps')) this.showApps(false); return; }
       const w = htui.active();
@@ -206,7 +206,7 @@
     },
     // タスク切り替え: 開いているアプリを横に並べる。タップで切り替え、下へはじくと閉じる
     taskSwitcher() {
-      if (htui.el.querySelector('.wp-tasks')) return;
+      if (htui.el.querySelector('.wp-tasks:not(.leaving)')) return;
       const list = h('div', { class: 'wp-tlist' });
       const box = h('div', { class: 'wp-tasks', role: 'dialog', 'aria-label': 'タスク切り替え' }, list);
       const fill = () => {
@@ -238,7 +238,7 @@
     },
     // アクションセンター: 日時・クイック操作・通知
     actionCenter() {
-      if (htui.el.querySelector('.wp-ac')) return;
+      if (htui.el.querySelector('.wp-ac:not(.leaving)')) return;
       const k = htui.kit, self = this, d = new Date();
       const list = h('div', { class: 'wp-alist' });
       const fill = () => {
@@ -372,7 +372,7 @@
 
     // ---- チャーム（右端からのスワイプ）
     charms() {
-      if (htui.el.querySelector('.w8-charms')) return;
+      if (htui.el.querySelector('.w8-charms:not(.leaving)')) return;
       const k = htui.kit, self = this;
       const btn = (icon, label, fn) => h('button', { class: 'w8-charm', type: 'button', onclick: () => { close(); fn(); } }, icon === 'logo' ? h('span', { class: 'w8-clogo' }, OS.icon('win', 30)) : OS.icon(icon, 30), h('span', null, label));
       const cc = h('div', { class: 'w8-cc', 'aria-hidden': 'true' });
@@ -400,7 +400,7 @@
 
     // ---- アプリバー（全画面のアプリで、下の帯から上へスワイプ）
     appBar() {
-      if (htui.el.querySelector('.w8-appbar')) return;
+      if (htui.el.querySelector('.w8-appbar:not(.leaving)')) return;
       const w = htui.active();
       const btn = (icon, label, fn) => h('button', { class: 'w8-abtn', type: 'button', onclick: () => { close(); fn(); } }, h('span', { class: 'w8-aring' }, OS.icon(icon, 22)), h('span', null, label));
       const bar = h('div', { class: 'w8-appbar', role: 'toolbar', 'aria-label': 'アプリバー' },
@@ -465,7 +465,7 @@
 
     // ---- マウス用のスタートメニュー（デスクトップモード）
     toggleStart() {
-      const old = htui.el.querySelector('.startmenu');
+      const old = htui.el.querySelector('.startmenu:not(.leaving)');
       if (old) { old._close(); return; }
       const me = OS.users.get(htui.user), k = htui.kit;
       const q = h('input', { class: 'inp sm-search', id: 'sm-search', placeholder: 'アプリを検索', 'aria-label': 'アプリを検索', autocomplete: 'off' });
@@ -487,9 +487,10 @@
       fill();
       if (!OS.touch) q.focus();
     },
+    onSuper() { if (OS.touch) this.toggleStartScreen(); else this.toggleStart(); },
     onKey(e) {
-      if (e.ctrlKey && e.key === 'Escape') { if (OS.touch) this.toggleStartScreen(); else this.toggleStart(); return true; }
-      if (e.key === 'Escape' && OS.touch && OS.uiMode === 'phone' && !htui.el.querySelector('.modal-ov,.menu,.wp-ac,.wp-tasks,.wp-jump')) { const a = document.activeElement; if (!a || !/^(INPUT|TEXTAREA)$/.test(a.tagName)) { this.phoneBack(); return true; } }
+      if (e.ctrlKey && e.key === 'Escape') { this.onSuper(); return true; }
+      if (e.key === 'Escape' && OS.touch && OS.uiMode === 'phone' && !htui.el.querySelector('.modal-ov,.menu:not(.leaving),.wp-ac:not(.leaving),.wp-tasks:not(.leaving),.wp-jump:not(.leaving)')) { const a = document.activeElement; if (!a || !/^(INPUT|TEXTAREA)$/.test(a.tagName)) { this.phoneBack(); return true; } }
     }
   });
 
@@ -498,7 +499,8 @@
     id: 'gnome', name: 'hShell（GNOME 風）', desc: '上にトップバー。「アクティビティ」でウィンドウ一覧・ドック・アプリ一覧、日時でカレンダーと通知センターを出す GNOME 風のデスクトップです。タッチでは下端から上へスワイプでアクティビティ。',
     build(k) {
       const self = this;
-      const act = h('button', { class: 'gn-act', type: 'button', title: 'アクティビティ（Alt+F1）', onclick: () => self.overview() }, 'アクティビティ');
+      const act = h('button', { class: 'gn-act', type: 'button', title: 'アクティビティ（Super / Alt+F1）', 'aria-label': 'アクティビティ', onclick: () => self.overview() },
+        h('span', { class: 'gn-pill' }), h('span', { class: 'gn-pdot' }));
       htui.titleEl = h('div', { class: 'gn-app' });
       this.dot = h('span', { class: 'gn-dot', 'aria-hidden': 'true' });
       const clockText = k.clock(h('span'), d => (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + k.pad(d.getHours()) + ':' + k.pad(d.getMinutes()));
@@ -509,7 +511,7 @@
       const hot = h('div', { class: 'gn-hot', 'aria-hidden': 'true' });
       hot.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse' && !htui.el.classList.contains('dragging')) self.overview(true); });
       // タッチ: 下端から上へスワイプでアクティビティ、もう一度でアプリ一覧
-      const bottom = edge('b', { end: v => { if (v.max > 40) self.overview(true, htui.el.querySelector('.gn-ov') ? true : null); } });
+      const bottom = edge('b', { end: v => { if (v.max > 40) self.overview(true, htui.el.querySelector('.gn-ov:not(.leaving)') ? true : null); } });
       htui.el.append(h('div', { class: 'gn-bar' }, h('div', { class: 'gn-left' }, act, htui.titleEl), clock, h('div', { class: 'gn-right' }, k.modeButton('gn-btn'), status)), hot, k.desk(false), bottom);
       this.syncDot();
     },
@@ -531,7 +533,7 @@
 
     // ---- カレンダーと通知センター（日時を押すと開く）
     calendar(force) {
-      const old = htui.el.querySelector('.gn-cal');
+      const old = htui.el.querySelector('.gn-cal:not(.leaving)');
       if (old) { if (!force) old._close(); return; }
       const banner = htui.el.querySelector('.gn-banner'); if (banner) banner.remove();
       const self = this, now = new Date();
@@ -574,73 +576,160 @@
       popup(pop, this.clockBtn);
     },
 
-    // ---- アクティビティ画面。force=true なら開いているときに閉じない。apps=true でアプリ一覧
+    // ---- アクティビティ画面（GNOME 40 以降の作り）。デスクトップそのものを縮めて「ワークスペース」にし、
+    //      その中に本物のウィンドウを重ならないよう並べ直す。force=true なら開いているときに閉じない。apps=true でアプリ一覧
     overview(force, apps) {
-      const k = htui.kit, self = this;
-      let ov = htui.el.querySelector('.gn-ov');
+      const k = htui.kit, root = htui.el, desk = htui.desk;
+      let ov = root.querySelector('.gn-ov:not(.leaving)');
       if (ov) { if (!force) ov._close(); else if (apps != null) ov._mode(apps); return; }
-      const q = h('input', { class: 'inp gn-search', id: 'gn-search', placeholder: '入力して検索', 'aria-label': 'アプリを検索', autocomplete: 'off' });
-      const area = h('div', { class: 'gn-area' }), dock = h('div', { class: 'gn-dock' });
-      ov = h('div', { class: 'gn-ov' }, q, area, dock);
-      let showApps = !!apps;
-      const close = () => { ov.remove(); document.removeEventListener('keydown', esc, true); };
-      const esc = e => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
-      ov._close = close; ov._mode = a => { showApps = a; render(); };
-      ov.addEventListener('click', e => { if (e.target === ov || e.target === area) close(); });
-      // タッチ: 上へスワイプでアプリ一覧、下へスワイプで戻る（ウィンドウのカードの上は、カードを閉じる操作になる）
-      swipe(ov, (dx, dy) => {
-        if (Math.abs(dx) > Math.abs(dy) || htui.el.querySelector('.gn-win[style*="translate"]')) return false;
-        if (dy < -60 && !showApps) { showApps = true; q.value = ''; render(); }
-        else if (dy > 60) { if (showApps) { showApps = false; render(); } else close(); }
-        else return false;
-      });
-      function render() {
-        area.textContent = '';
-        const t = q.value.trim().toLowerCase();
-        if (showApps || t) {
-          const list = k.apps().filter(a => !t || (a.name + ' ' + (a.desc || '') + ' ' + a.id).toLowerCase().includes(t));
-          const g = h('div', { class: 'gn-apps' });
-          list.forEach(a => g.append(h('button', { class: 'gn-appbtn', type: 'button', title: a.desc || a.name, onclick: () => { close(); k.run(a.id); } }, k.appIcon(a, 34), h('span', null, a.name))));
-          if (!list.length) g.append(h('p', { class: 'gn-empty' }, '見つかりませんでした'));
-          area.append(g);
-        } else {
-          const g = h('div', { class: 'gn-wins' });
-          if (!htui.wins.length) g.append(h('p', { class: 'gn-empty' }, '開いているウィンドウはありません。下のドックからアプリを開いてください。'));
-          htui.wins.forEach(w => {
-            const a = OS.apps[w.app] || {};
-            const card = h('div', { class: 'gn-win' + (w === htui.active() ? ' cur' : '') },
-              h('button', { class: 'gn-winbtn', type: 'button', onclick: () => { close(); w.focus(); } }, h('span', { class: 'gn-thumb' }, k.appIcon(a.icon ? a : { icon: 'file' }, 40)), h('span', { class: 'gn-wt' }, w.title)),
-              h('button', { class: 'gn-wx', type: 'button', title: '閉じる', 'aria-label': w.title + ' を閉じる', onclick: async () => { await w.close(); render(); } }, OS.icon('x', 14)));
-            // タッチ: ウィンドウを上へはじくと閉じる
-            card.addEventListener('pointerdown', e => {
-              if (e.pointerType === 'mouse' || e.target.closest('.gn-wx')) return;
-              const y0 = e.clientY; let dy = 0;
-              const mv = ev => { dy = Math.min(0, ev.clientY - y0); if (dy < -8) { card.style.transition = 'none'; card.style.transform = 'translateY(' + dy + 'px)'; card.style.opacity = String(1 + dy / 300); } };
-              const up = async () => {
-                document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up);
-                card.style.transition = ''; card.style.transform = ''; card.style.opacity = '';
-                if (dy < -90) { card.addEventListener('click', ev => ev.stopPropagation(), { capture: true, once: true }); await w.close(); render(); }
-              };
-              document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
-            });
-            g.append(card);
-          });
-          area.append(g);
+      htui.closeMenus();
+      const cal = root.querySelector('.gn-cal:not(.leaving)'); if (cal && cal._close) cal._close();
+      const tok = root._ovTok = {}, wall = root.style.background;
+      const q = h('input', { class: 'gn-search', id: 'gn-search', placeholder: '入力して検索', 'aria-label': 'アプリを検索', autocomplete: 'off', spellcheck: 'false' });
+      const sbox = h('label', { class: 'gn-sbox' }, OS.icon('search', 18), q);
+      const stage = h('div', { class: 'gn-stage' }), area = h('div', { class: 'gn-area' }), dock = h('div', { class: 'gn-dock' });
+      ov = h('div', { class: 'gn-ov' }, stage, area, sbox, dock);
+      ov.style.top = desk.offsetTop + 'px';
+      let showApps = !!apps, closing = false, cards = [];
+      const searching = () => q.value.trim() !== '';
+
+      // ウィンドウの並べ方: 行数を 1 から順に試し、ウィンドウがいちばん大きく見える行数を選ぶ（元の位置の上下・左右の順は保つ）
+      function arrange(W, H) {
+        const items = htui.wins.filter(w => !w.closed).map(w => ({ w, x: w.el.offsetLeft, y: w.el.offsetTop, ww: w.el.offsetWidth || 1, hh: w.el.offsetHeight || 1 }));
+        const n = items.length; if (!n) return [];
+        const P = Math.max(W, H) * .035, G = Math.max(W, H) * .035, AW = W - P * 2, AH = H - P * 2;
+        items.sort((a, b) => (a.y + a.hh / 2) - (b.y + b.hh / 2));
+        let best = null;
+        for (let r = 1; r <= n; r++) {
+          const cols = Math.ceil(n / r); if (Math.ceil(n / cols) !== r) continue;
+          const cw = (AW - (cols - 1) * G) / cols, ch = (AH - (r - 1) * G) / r;
+          const cover = items.reduce((t, it) => { const s = Math.min(cw / it.ww, ch / it.hh, 1); return t + s * s * it.ww * it.hh; }, 0);
+          if (!best || cover > best.cover) best = { r, cols, cw, ch, cover };
         }
+        const { r, cols, cw, ch } = best, out = [];
+        for (let i = 0; i < r; i++) {
+          const row = items.slice(i * cols, i * cols + cols).sort((a, b) => (a.x + a.ww / 2) - (b.x + b.ww / 2));
+          const sc = row.map(it => Math.min(cw / it.ww, ch / it.hh, 1));
+          const tw = row.reduce((t, it, j) => t + it.ww * sc[j], 0) + G * (row.length - 1);
+          let x = P + (AW - tw) / 2; const y = P + (AH - (r * ch + (r - 1) * G)) / 2 + i * (ch + G);
+          row.forEach((it, j) => { out.push(Object.assign(it, { s: sc[j], X: x, Y: y + (ch - it.hh * sc[j]) / 2 })); x += it.ww * sc[j] + G; });
+        }
+        return out;
+      }
+      function fillDock() {
         dock.textContent = '';
         k.apps().forEach(a => dock.append(h('button', { class: 'gn-dk' + (htui.wins.some(w => w.app === a.id) ? ' run' : ''), type: 'button', title: a.name, 'aria-label': a.name, onclick: () => {
           const w = byZ().find(x => x.app === a.id);
-          close(); if (w) w.focus(); else k.run(a.id);
-        } }, k.appIcon(a, 26))));
-        dock.append(h('span', { class: 'gn-dsep' }), h('button', { class: 'gn-dk gn-grid' + (showApps ? ' on' : ''), type: 'button', title: 'アプリを表示', 'aria-label': 'アプリを表示', onclick: () => { showApps = !showApps; q.value = ''; render(); } }, OS.icon('grid', 22)));
+          if (w) pick(w); else { close(); k.run(a.id); }
+        } }, k.appIcon(a, 28))));
+        const grid = h('button', { class: 'gn-dk gn-grid' + (showApps ? ' on' : ''), type: 'button', title: 'アプリを表示', 'aria-label': 'アプリを表示', onclick: () => { showApps = !showApps; q.value = ''; layout(); } });
+        grid.innerHTML = '<svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor" aria-hidden="true">' + [5, 12, 19].map(y => [5, 12, 19].map(x => '<circle cx="' + x + '" cy="' + y + '" r="2.1"/>').join('')).join('') + '</svg>';
+        dock.append(h('span', { class: 'gn-dsep' }), grid);
       }
-      q.addEventListener('input', render);
+      function fillApps() {
+        area.textContent = '';
+        const t = q.value.trim().toLowerCase();
+        const list = k.apps().filter(a => !t || (a.name + ' ' + (a.desc || '') + ' ' + a.id).toLowerCase().includes(t));
+        const g = h('div', { class: 'gn-apps' });
+        list.forEach(a => g.append(h('button', { class: 'gn-appbtn', type: 'button', title: a.desc || a.name, onclick: () => { close(); k.run(a.id); } }, k.appIcon(a, 34), h('span', null, a.name))));
+        if (!list.length) g.append(h('p', { class: 'gn-empty' }, '見つかりませんでした'));
+        area.append(g);
+      }
+      function layout() {
+        if (closing) return;
+        const sr = searching();
+        root.classList.toggle('gn-ovapps', showApps && !sr); root.classList.toggle('gn-ovsearch', sr);
+        fillDock();
+        const W = desk.clientWidth, H = desk.clientHeight, phone = OS.uiMode === 'phone';
+        const top = sbox.offsetTop + sbox.offsetHeight + 16, bottom = H - dock.offsetTop + 18;
+        const side = phone ? 12 : Math.max(24, W * .06);
+        let kk = Math.max(.1, Math.min((H - top - bottom) / H, (W - side * 2) / W));
+        if (showApps || sr) kk = Math.min(kk, phone ? .14 : .17);
+        const g = { k: kk, x: (W - kk * W) / 2, y: top };
+        desk.style.transformOrigin = '0 0';
+        desk.style.transform = 'translate(' + g.x + 'px,' + g.y + 'px) scale(' + kk + ')';
+        desk.style.borderRadius = (14 / kk) + 'px';
+        const items = arrange(W, H);
+        items.forEach(it => { const s = it.w.el.style; s.transformOrigin = '0 0'; s.transform = 'translate(' + (it.X - it.x) + 'px,' + (it.Y - it.y) + 'px) scale(' + it.s + ')'; });
+        cards = items.map(it => Object.assign(it, { g }));
+        stage.textContent = '';
+        if (showApps || sr) { area.style.top = (g.y + kk * H + 18) + 'px'; area.style.bottom = bottom + 'px'; fillApps(); }
+        else area.textContent = '';
+        // 右どなりの空のワークスペース（GNOME はいつも空のワークスペースを 1 つ用意して見せる）
+        stage.append(h('div', { class: 'gn-peek', 'aria-hidden': 'true', style: 'left:' + (g.x + kk * W + Math.max(24, W * .06)) + 'px;top:' + g.y + 'px;width:' + kk * W + 'px;height:' + kk * H + 'px;background:' + wall }));
+        items.forEach(it => stage.append(card(it)));
+      }
+      function card(it) {
+        const { w, g } = it, a = OS.apps[w.app] || {};
+        const L = g.x + it.X * g.k, T = g.y + it.Y * g.k, CW = it.ww * it.s * g.k, CH = it.hh * it.s * g.k;
+        const c = h('div', { class: 'gn-win' + (w === htui.active() ? ' cur' : ''), style: 'left:' + L + 'px;top:' + T + 'px;width:' + CW + 'px;height:' + CH + 'px' },
+          h('button', { class: 'gn-winbtn', type: 'button', 'aria-label': w.title, title: w.title, onclick: () => pick(w) }),
+          h('span', { class: 'gn-wic' }, k.appIcon(a.icon ? a : { icon: 'file' }, 30)),
+          h('span', { class: 'gn-wt' }, w.title),
+          h('button', { class: 'gn-wx', type: 'button', title: '閉じる', 'aria-label': w.title + ' を閉じる', onclick: () => w.close().then(relayout) }, OS.icon('x', 14)));
+        // タッチ: ウィンドウを上へはじくと閉じる（中の本物のウィンドウもいっしょに動かす）
+        c.addEventListener('pointerdown', e => {
+          if (e.pointerType === 'mouse' || e.target.closest('.gn-wx')) return;
+          const y0 = e.clientY, base = w.el.style.transform; let dy = 0;
+          const mv = ev => { dy = Math.min(0, ev.clientY - y0); if (dy < -8) {
+            c.style.transition = 'none'; c.style.transform = 'translateY(' + dy + 'px)'; c.style.opacity = String(1 + dy / 300);
+            w.el.style.transition = 'none'; w.el.style.transform = 'translate(' + (it.X - it.x) + 'px,' + (it.Y - it.y + dy / g.k) + 'px) scale(' + it.s + ')'; w.el.style.opacity = c.style.opacity; } };
+          const up = () => {
+            document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up);
+            c.style.transition = ''; c.style.transform = ''; c.style.opacity = ''; w.el.style.transition = ''; w.el.style.opacity = '';
+            if (dy < -90) { c.addEventListener('click', ev => ev.stopPropagation(), { capture: true, once: true }); w.close().then(relayout); }
+            else w.el.style.transform = base;
+          };
+          document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
+        });
+        return c;
+      }
+      function pick(w) { w.focus(); close(); }
+      // 閉じる: 縮めたデスクトップとウィンドウを元の位置へ戻すアニメーションのあと、片付ける
+      function close() {
+        if (closing) return; closing = true;
+        document.removeEventListener('keydown', esc, true); window.removeEventListener('resize', relayout); mo.disconnect();
+        root.classList.remove('gn-ovapps', 'gn-ovsearch'); root.classList.add('gn-ovout');
+        desk.style.transform = ''; desk.style.borderRadius = '';
+        htui.wins.forEach(w => { w.el.style.transform = ''; });
+        htui.leave(ov);
+        const fin = () => {
+          if (root._ovTok !== tok) return;
+          root.classList.remove('gn-ovmode', 'gn-ovout'); desk.style.background = ''; desk.style.transformOrigin = '';
+          htui.wins.forEach(w => { w.el.style.transformOrigin = ''; });
+        };
+        if (htui.animOff()) fin(); else setTimeout(fin, 300);
+      }
+      const esc = e => {
+        if (e.key !== 'Escape' || root.querySelector('.menu:not(.leaving),.modal-ov')) return;
+        e.stopPropagation();
+        if (searching()) { q.value = ''; layout(); } else if (showApps) { showApps = false; layout(); } else close();
+      };
+      // ウィンドウが開いたり閉じたりしたら並べ直す
+      let raf = 0;
+      const relayout = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(layout); };
+      const mo = new MutationObserver(relayout);
+      ov._close = close; ov._mode = a => { showApps = a; q.value = ''; layout(); };
+      ov.addEventListener('click', e => { if (e.target === ov || e.target === stage || e.target === area || e.target.classList.contains('gn-peek')) close(); });
+      // タッチ: 上へスワイプでアプリ一覧、下へスワイプで戻る（ウィンドウの上は、ウィンドウを閉じる操作になる）
+      swipe(ov, (dx, dy) => {
+        if (Math.abs(dx) > Math.abs(dy) || root.querySelector('.gn-win[style*="translate"]')) return false;
+        if (dy < -60 && !showApps) { showApps = true; q.value = ''; layout(); }
+        else if (dy > 60) { if (showApps || searching()) { showApps = false; q.value = ''; layout(); } else close(); }
+        else return false;
+      });
+      q.addEventListener('input', layout);
       q.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); const b = area.querySelector('.gn-appbtn'); if (b) b.click(); } });
-      document.addEventListener('keydown', esc, true);
-      render(); htui.el.append(ov);
+      document.addEventListener('keydown', esc, true); window.addEventListener('resize', relayout);
+      root.classList.remove('gn-ovout'); root.classList.add('gn-ovmode');
+      desk.style.background = wall;
+      root.append(ov);
+      layout();
+      mo.observe(desk, { childList: true });
       if (!OS.touch) q.focus();
     },
-    onKey(e) { if (e.altKey && e.key === 'F1') { this.overview(); return true; } }
+    onKey(e) { if (e.altKey && e.key === 'F1') { this.overview(); return true; } },
+    onSuper() { this.overview(); }
   });
 
   // ======================================================== hwc（Labwc 風・ウィンドウマネージャだけ）

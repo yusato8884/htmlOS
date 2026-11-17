@@ -176,6 +176,20 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   var scr = document.getElementById('boot');
   var keyHandler = null;
   document.addEventListener('keydown', function (e) { if (keyHandler) keyHandler(e); });
+  // Keyboard Lock: 全画面でないときにマウスでクリックしたら全画面にして、ブラウザや OS が先に取るキー
+  // （Alt+Tab、Ctrl+W、Windows キーなど）も htmlOS が受け取る。Esc を長押しすると解除される（ブラウザの仕様）
+  // 捕まえるキー。IME の切り替えに使うキー（Space、半角/全角 = Backquote、英数/かな、変換/無変換、Caps Lock など）は
+  // 捕まえず OS に任せる。こうすると Ctrl+Space などでの入力方式の切り替えや、日本語入力の変換はそのまま使える
+  var LOCK_KEYS = ['Escape', 'Tab', 'MetaLeft', 'MetaRight', 'Backspace', 'Enter', 'Delete', 'Insert', 'Home', 'End', 'PageUp', 'PageDown',
+    'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Minus', 'Equal', 'BracketLeft', 'BracketRight', 'Backslash', 'Semicolon', 'Quote', 'Comma', 'Period', 'Slash']
+    .concat('ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(function (c) { return 'Key' + c; }))
+    .concat('0123456789'.split('').map(function (c) { return 'Digit' + c; }))
+    .concat([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(function (n) { return 'F' + n; }));
+  document.addEventListener('pointerdown', function (e) {
+    if (e.pointerType !== 'mouse' || e.button !== 0 || navigator.webdriver || document.fullscreenElement) return;
+    if (!navigator.keyboard || !navigator.keyboard.lock || !document.documentElement.requestFullscreen) return;
+    document.documentElement.requestFullscreen({ navigationUI: 'hide' }).then(function () { return navigator.keyboard.lock(LOCK_KEYS); }).catch(function () { /* 使えないブラウザでは何もしない */ });
+  }, true);
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
   function show(node, cls) { scr.style.display = 'flex'; scr.className = cls || ''; scr.textContent = ''; scr.appendChild(node); }
 
