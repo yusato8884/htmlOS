@@ -752,21 +752,7 @@
       htui.menuAt(x, y, items.concat([{ sep: true }], k.powerItems()));
     },
     onKey(e) {
-      // Alt+Tab（ブラウザや OS が先に取ってしまう環境では Alt+` でも切り替えられる）
-      if (e.altKey && !e.ctrlKey && (e.key === 'Tab' || e.key === '`')) {
-        const list = htui.wins.slice().sort((a, b) => (+a.el.style.zIndex || 0) - (+b.el.style.zIndex || 0));
-        if (!list.length) return true;
-        const w = e.shiftKey ? list[list.length - 2] || list[0] : list[0];
-        w.focus(); this.osd(w.title);
-        return true;
-      }
       if (e.ctrlKey && e.altKey && e.key === 'Enter') { htui.kit.run('terminal'); return true; }
     },
-    osd(text) {
-      let o = htui.el.querySelector('.wm-osd');
-      if (!o) { o = h('div', { class: 'wm-osd', role: 'status' }); htui.el.append(o); }
-      o.textContent = text; clearTimeout(this._osd);
-      this._osd = setTimeout(() => o.remove(), 900);
-    }
   });
 })();

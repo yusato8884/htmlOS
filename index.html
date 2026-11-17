@@ -1769,7 +1769,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     htui.running = true;
     htui.el = h('div', { id: 'htui' });
     OS.root.append(htui.el);
-    document.addEventListener('keydown', hotkeys); document.addEventListener('keyup', superUp);
+    document.addEventListener('keydown', hotkeys); document.addEventListener('keyup', keyUp); window.addEventListener('blur', altTabEnd);
     if (user && users.get(user)) session(user, sid); else toLogin();
     return true;
   };
@@ -1784,7 +1784,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     htui.wins.slice().forEach(w => w.close(true));
     clearShell();
     if (OS.hdm) OS.hdm.stop();
-    document.removeEventListener('keydown', hotkeys); document.removeEventListener('keyup', superUp);
+    document.removeEventListener('keydown', hotkeys); document.removeEventListener('keyup', keyUp); window.removeEventListener('blur', altTabEnd); altTabEnd(true);
     htui.el.remove(); htui.el = null;
     htui.running = false; htui.user = null; htui.fs = null;
     OS.setMode('auto');
@@ -2198,13 +2198,51 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   // Ctrl+Alt+矢印キーでアクティブなウィンドウをスナップ
   // Super（Windows / Command）キーだけを押して離したら、環境の onSuper を呼ぶ（GNOME のアクティビティ、Windows のスタートなど）
   let superAlone = false;
-  function superUp(e) {
+  function keyUp(e) {
+    if (e.key === 'Alt' && ats) { e.preventDefault(); altTabEnd(); return; }
     if (e.key !== 'Meta' || !superAlone) return;
     superAlone = false;
     if (htui.user && htui.shell && htui.shell.onSuper && !htui.el.querySelector('.modal-ov')) { e.preventDefault(); htui.shell.onSuper(); }
   }
+  // ---- Alt+Tab（Alt+` でも）: Alt を押したまま Tab で選び、Alt を離すとそのウィンドウに切り替える。Shift で逆順、Esc でやめる
+  //      順番は最近使った順（手前から）。最小化したウィンドウも入る
+  let ats = null;
+  function altTab(back) {
+    if (!ats) {
+      const list = htui.wins.filter(w => !w.closed).sort((a, b) => (+b.el.style.zIndex || 0) - (+a.el.style.zIndex || 0));
+      if (!list.length) return;
+      const row = h('div', { class: 'ats-row' });
+      const el = h('div', { class: 'ats', role: 'listbox', 'aria-label': 'ウィンドウの切り替え' }, row, h('div', { class: 'ats-title' }));
+      list.forEach((w, i) => {
+        const a = OS.apps[w.app] || {};
+        row.append(h('button', { class: 'ats-item', type: 'button', role: 'option', title: w.title, tabindex: '-1',
+          onpointerdown: e => e.preventDefault(), onclick: () => { ats.i = i; altTabEnd(); } },
+          kit.appIcon(a.icon ? a : { icon: 'file' }, 30), h('span', { class: 'ats-name' }, a.name || w.title)));
+      });
+      ats = { list, i: 0, el };
+      htui.el.append(el);
+      if (list.length === 1) { paintAts(); return; }
+    }
+    const n = ats.list.length;
+    ats.i = (ats.i + (back ? -1 : 1) + n) % n;
+    paintAts();
+  }
+  function paintAts() {
+    [...ats.el.querySelectorAll('.ats-item')].forEach((b, j) => { b.classList.toggle('sel', j === ats.i); b.setAttribute('aria-selected', j === ats.i ? 'true' : 'false'); if (j === ats.i) b.scrollIntoView({ block: 'nearest', inline: 'nearest' }); });
+    ats.el.lastChild.textContent = ats.list[ats.i].title;
+  }
+  function altTabEnd(cancel) {
+    if (!ats) return;
+    const { list, i, el } = ats; ats = null;
+    leave(el);
+    if (cancel !== true && list[i] && !list[i].closed) list[i].focus();
+  }
   function hotkeys(e) {
     superAlone = e.key === 'Meta' && !e.repeat ? true : e.key === 'Meta' ? superAlone : false;
+    if (ats && e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); altTabEnd(true); return; }
+    if (htui.user && e.altKey && !e.ctrlKey && !e.metaKey && (e.key === 'Tab' || e.code === 'Backquote') && !htui.el.querySelector('.modal-ov')) {
+      e.preventDefault(); e.stopPropagation(); altTab(e.shiftKey); return;
+    }
     if (htui.user && htui.shell && htui.shell.onKey && htui.shell.onKey(e) === true) { e.preventDefault(); return; }
     if (!e.ctrlKey || !e.altKey || !htui.user) return;
     const w = htui.active(); if (!w) return;
@@ -4056,22 +4094,8 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       htui.menuAt(x, y, items.concat([{ sep: true }], k.powerItems()));
     },
     onKey(e) {
-      // Alt+Tab（ブラウザや OS が先に取ってしまう環境では Alt+` でも切り替えられる）
-      if (e.altKey && !e.ctrlKey && (e.key === 'Tab' || e.key === '`')) {
-        const list = htui.wins.slice().sort((a, b) => (+a.el.style.zIndex || 0) - (+b.el.style.zIndex || 0));
-        if (!list.length) return true;
-        const w = e.shiftKey ? list[list.length - 2] || list[0] : list[0];
-        w.focus(); this.osd(w.title);
-        return true;
-      }
       if (e.ctrlKey && e.altKey && e.key === 'Enter') { htui.kit.run('terminal'); return true; }
     },
-    osd(text) {
-      let o = htui.el.querySelector('.wm-osd');
-      if (!o) { o = h('div', { class: 'wm-osd', role: 'status' }); htui.el.append(o); }
-      o.textContent = text; clearTimeout(this._osd);
-      this._osd = setTimeout(() => o.remove(), 900);
-    }
   });
 })();
 </script>
@@ -4821,7 +4845,6 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 .de-wm .menu-item{border-radius:0;padding:4px 10px;font-size:13px}
 .de-wm .menu-head{color:#9aa0aa}
 .de-wm .menu-sep{background:#4a4f5b}
-.wm-osd{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%);z-index:300000;padding:12px 22px;background:rgba(47,52,63,.95);color:#fff;border:1px solid #1f2125;font-size:15px;max-width:80%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* hdm・hWin・hShell は .panel を使わないので、タッチ用のパネル規則が当たらないよう分けておく */
 .st-sessions{display:flex;flex-direction:column;gap:6px}
@@ -5040,6 +5063,24 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 .phone .gn-appbtn .app-ico{width:52px;height:52px}
 #os-root .gn-search:focus-visible{outline:none}
 #htui.de-gnome{transition:none}
+/* ---- Alt+Tab のウィンドウ切り替え（全環境共通。見た目だけ環境に寄せる） */
+.ats{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:190000;max-width:calc(100% - 24px);display:flex;flex-direction:column;align-items:center;gap:8px;padding:14px;border-radius:18px;background:rgba(32,33,38,.94);color:#f4f4f5;box-shadow:0 18px 50px rgba(0,0,0,.5);backdrop-filter:blur(14px);animation:fade-in .1s ease-out;pointer-events:auto}
+.ats-row{display:flex;gap:6px;max-width:100%;overflow-x:auto;scrollbar-width:none}
+.ats-item{flex:none;width:104px;display:flex;flex-direction:column;align-items:center;gap:8px;padding:14px 6px 10px;border:0;border-radius:12px;background:none;color:inherit!important;cursor:pointer;font-size:12.5px;outline:2px solid transparent}
+.ats-item .app-ico{width:60px;height:60px;border-radius:15px}
+.ats-item:hover{background:rgba(255,255,255,.08)}
+.ats-item.sel{background:rgba(255,255,255,.16);outline-color:rgba(255,255,255,.35)}
+.ats-name{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ats-title{max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:600;padding:0 6px}
+.de-win .ats{border-radius:8px;background:rgba(40,42,48,.9)}
+.de-win .ats-item{border-radius:6px}
+.de-win .ats-item.sel{outline:2px solid #fff;background:rgba(255,255,255,.1)}
+.de-wm .ats{border-radius:2px;padding:8px;background:#2f343f;font-family:var(--mono);box-shadow:0 6px 18px rgba(0,0,0,.5)}
+.de-wm .ats-item{width:90px;border-radius:2px;padding:8px 4px}
+.de-wm .ats-item .app-ico{width:44px;height:44px;border-radius:4px}
+.de-wm .ats-item.sel{background:#5294e2;outline:0}
+.phone .ats-item{width:84px}
+.phone .ats-item .app-ico{width:48px;height:48px}
 </script>
 <script>
 /* ============================================================
@@ -5050,7 +5091,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
    ============================================================ */
 (function () {
   'use strict';
-  var MEDIA_VERSION = '1.12.1';
+  var MEDIA_VERSION = '1.12.2';
   var P = 'htmlos:';
 
   // ---- ストレージ (LocalStorageが使えない環境ではRAMディスクで動く)

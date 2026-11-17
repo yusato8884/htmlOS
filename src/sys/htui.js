@@ -34,7 +34,7 @@
     htui.running = true;
     htui.el = h('div', { id: 'htui' });
     OS.root.append(htui.el);
-    document.addEventListener('keydown', hotkeys); document.addEventListener('keyup', superUp);
+    document.addEventListener('keydown', hotkeys); document.addEventListener('keyup', keyUp); window.addEventListener('blur', altTabEnd);
     if (user && users.get(user)) session(user, sid); else toLogin();
     return true;
   };
@@ -49,7 +49,7 @@
     htui.wins.slice().forEach(w => w.close(true));
     clearShell();
     if (OS.hdm) OS.hdm.stop();
-    document.removeEventListener('keydown', hotkeys); document.removeEventListener('keyup', superUp);
+    document.removeEventListener('keydown', hotkeys); document.removeEventListener('keyup', keyUp); window.removeEventListener('blur', altTabEnd); altTabEnd(true);
     htui.el.remove(); htui.el = null;
     htui.running = false; htui.user = null; htui.fs = null;
     OS.setMode('auto');
@@ -463,13 +463,51 @@
   // Ctrl+Alt+矢印キーでアクティブなウィンドウをスナップ
   // Super（Windows / Command）キーだけを押して離したら、環境の onSuper を呼ぶ（GNOME のアクティビティ、Windows のスタートなど）
   let superAlone = false;
-  function superUp(e) {
+  function keyUp(e) {
+    if (e.key === 'Alt' && ats) { e.preventDefault(); altTabEnd(); return; }
     if (e.key !== 'Meta' || !superAlone) return;
     superAlone = false;
     if (htui.user && htui.shell && htui.shell.onSuper && !htui.el.querySelector('.modal-ov')) { e.preventDefault(); htui.shell.onSuper(); }
   }
+  // ---- Alt+Tab（Alt+` でも）: Alt を押したまま Tab で選び、Alt を離すとそのウィンドウに切り替える。Shift で逆順、Esc でやめる
+  //      順番は最近使った順（手前から）。最小化したウィンドウも入る
+  let ats = null;
+  function altTab(back) {
+    if (!ats) {
+      const list = htui.wins.filter(w => !w.closed).sort((a, b) => (+b.el.style.zIndex || 0) - (+a.el.style.zIndex || 0));
+      if (!list.length) return;
+      const row = h('div', { class: 'ats-row' });
+      const el = h('div', { class: 'ats', role: 'listbox', 'aria-label': 'ウィンドウの切り替え' }, row, h('div', { class: 'ats-title' }));
+      list.forEach((w, i) => {
+        const a = OS.apps[w.app] || {};
+        row.append(h('button', { class: 'ats-item', type: 'button', role: 'option', title: w.title, tabindex: '-1',
+          onpointerdown: e => e.preventDefault(), onclick: () => { ats.i = i; altTabEnd(); } },
+          kit.appIcon(a.icon ? a : { icon: 'file' }, 30), h('span', { class: 'ats-name' }, a.name || w.title)));
+      });
+      ats = { list, i: 0, el };
+      htui.el.append(el);
+      if (list.length === 1) { paintAts(); return; }
+    }
+    const n = ats.list.length;
+    ats.i = (ats.i + (back ? -1 : 1) + n) % n;
+    paintAts();
+  }
+  function paintAts() {
+    [...ats.el.querySelectorAll('.ats-item')].forEach((b, j) => { b.classList.toggle('sel', j === ats.i); b.setAttribute('aria-selected', j === ats.i ? 'true' : 'false'); if (j === ats.i) b.scrollIntoView({ block: 'nearest', inline: 'nearest' }); });
+    ats.el.lastChild.textContent = ats.list[ats.i].title;
+  }
+  function altTabEnd(cancel) {
+    if (!ats) return;
+    const { list, i, el } = ats; ats = null;
+    leave(el);
+    if (cancel !== true && list[i] && !list[i].closed) list[i].focus();
+  }
   function hotkeys(e) {
     superAlone = e.key === 'Meta' && !e.repeat ? true : e.key === 'Meta' ? superAlone : false;
+    if (ats && e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); altTabEnd(true); return; }
+    if (htui.user && e.altKey && !e.ctrlKey && !e.metaKey && (e.key === 'Tab' || e.code === 'Backquote') && !htui.el.querySelector('.modal-ov')) {
+      e.preventDefault(); e.stopPropagation(); altTab(e.shiftKey); return;
+    }
     if (htui.user && htui.shell && htui.shell.onKey && htui.shell.onKey(e) === true) { e.preventDefault(); return; }
     if (!e.ctrlKey || !e.altKey || !htui.user) return;
     const w = htui.active(); if (!w) return;
