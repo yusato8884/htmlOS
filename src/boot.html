@@ -240,7 +240,9 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   // （Alt+Tab、Ctrl+W、Windows キーなど）も htmlOS が受け取る。Esc を長押しすると解除される（ブラウザの仕様）
   // 捕まえるキー。IME の切り替えに使うキー（Space、半角/全角 = Backquote、英数/かな、変換/無変換、Caps Lock など）は
   // 捕まえず OS に任せる。こうすると Ctrl+Space などでの入力方式の切り替えや、日本語入力の変換はそのまま使える
-  var LOCK_KEYS = ['Escape', 'Tab', 'MetaLeft', 'MetaRight', 'Backspace', 'Enter', 'Delete', 'Insert', 'Home', 'End', 'PageUp', 'PageDown',
+  // Windows では Alt+Tab を捕まえるのに Alt 自体も一覧に入れる（入れないと OS のタスク切り替えが先に動く）。
+  // Ctrl・Shift は入れない（Ctrl+Space などの入力方式の切り替えを OS に残すため）
+  var LOCK_KEYS = ['Escape', 'Tab', 'MetaLeft', 'MetaRight', 'AltLeft', 'AltRight', 'ContextMenu', 'Backspace', 'Enter', 'Delete', 'Insert', 'Home', 'End', 'PageUp', 'PageDown',
     'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Minus', 'Equal', 'BracketLeft', 'BracketRight', 'Backslash', 'Semicolon', 'Quote', 'Comma', 'Period', 'Slash']
     .concat('ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(function (c) { return 'Key' + c; }))
     .concat('0123456789'.split('').map(function (c) { return 'Digit' + c; }))

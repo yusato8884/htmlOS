@@ -110,9 +110,17 @@
     video: 'mp4 webm ogv mov m4v'.split(' ')
   };
   const MIME = { svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif', mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', oga: 'audio/ogg', m4a: 'audio/mp4', flac: 'audio/flac', aac: 'audio/aac', opus: 'audio/ogg', mp4: 'video/mp4', webm: 'video/webm', ogv: 'video/ogg', mov: 'video/quicktime', m4v: 'video/mp4', html: 'text/html', htm: 'text/html', css: 'text/css', js: 'text/javascript', json: 'application/json' };
+  // ファイルが変わったことを知らせる（デスクトップや hFile が表示を更新するため）。まとめて 1 回にする
+  const watchers = new Set(); let changedPaths = new Set(), changeTimer = 0;
+  function changed(p) {
+    changedPaths.add(p);
+    if (changeTimer) return;
+    changeTimer = setTimeout(() => { const l = [...changedPaths]; changedPaths = new Set(); changeTimer = 0; watchers.forEach(f => { try { f(l); } catch (e) { /* 見ている側の失敗は無視 */ } }); }, 30);
+  }
   function put(p, node) {
     try { store.set(K(p), JSON.stringify(node)); }
     catch (e) { throw new Error('ストレージの空き容量が足りません（LocalStorageの上限は約5MBです）'); }
+    changed(p);
   }
   const fs = OS.fs = {
     // シンボリックリンク（ノードの t が 'l'、c がリンク先）をたどった本当のパス。keepLast=true なら最後の部分はたどらない
@@ -187,7 +195,10 @@
         store.keys(K(q + '/')).forEach(k => store.del(k));
       }
       store.del(K(q));
+      changed(q);
     },
+    // 変更を見る。fn(変わったパスの一覧)。戻り値の関数を呼ぶと見るのをやめる
+    watch(fn) { watchers.add(fn); return () => watchers.delete(fn); },
     _cp(a, b, owner) {
       const s = fs._raw(a);
       if (s.t === 'd') { put(b, { t: 'd', m: Date.now(), o: owner || s.o }); for (const n of fs.list(a)) fs._cp(a + '/' + n, b + '/' + n, owner); }
@@ -285,7 +296,7 @@
       if (fs.exists(home)) return;
       const o = { owner: name, parents: true };
       if (name === 'root') { fs.mkdir(home + '/.config', o); return; }
-      ['Documents', 'Downloads', 'Pictures', 'Music', 'Videos', '.config'].forEach(d => fs.mkdir(home + '/' + d, o));
+      ['Desktop', 'Documents', 'Downloads', 'Pictures', 'Music', 'Videos', '.config'].forEach(d => fs.mkdir(home + '/' + d, o));
       const w = (p, c, bin) => fs.write(home + '/' + p, c, { owner: name, bin: bin });
       w('Documents/readme.txt', [
         'htmlOS ' + OS.version + ' へようこそ',
@@ -358,7 +369,7 @@
       rm: (p, o) => fs.rm(WL(p), o),
       cp: (a, b) => { R(a); WL(fs.dest(a, b)); return fs.cp(a, b, { owner: getUser() }); },
       mv: (a, b) => { WL(a); WL(fs.dest(a, b)); return fs.mv(a, b); },
-      usage: fs.usage, kind: fs.kind, mime: fs.mime, dataURL: p => fs.dataURL(R(p)), unique: fs.unique, canWrite: canW
+      usage: fs.usage, kind: fs.kind, mime: fs.mime, dataURL: p => fs.dataURL(R(p)), unique: fs.unique, canWrite: canW, watch: fs.watch
     };
   };
 

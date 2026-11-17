@@ -106,7 +106,8 @@
     clearInterval(clockTimer); ticks = [];
     if (htui.shell && htui.shell.onStop) { try { htui.shell.onStop(); } catch (e) { /* 無視 */ } }
     htui.shell = null; htui.sessionId = null;
-    htui.iconsEl = null; htui.titleEl = null; htui.modeBtn = null; htui.userBtn = null; htui.tasks = null; htui.desk = null;
+    if (unwatchDesk) { unwatchDesk(); unwatchDesk = null; }
+    htui.iconsEl = null; htui.deskOpt = null; htui.titleEl = null; htui.modeBtn = null; htui.userBtn = null; htui.tasks = null; htui.desk = null;
   }
   htui.stop = function () {
     if (!htui.running) return false;
@@ -194,7 +195,7 @@
     OS.notify({ app: 'htmlOS', icon: 'user', title: 'ようこそ、' + user + ' さん', body: sh.name + ' にログインしました', silent: true });
     const tick = () => ticks.forEach(f => { try { f(new Date()); } catch (e) { /* 無視 */ } });
     tick(); clockTimer = setInterval(tick, 5000);
-    htui.refreshApps(); htui.refreshUser(); htui.syncMode(); htui.syncTitle();
+    htui.refreshApps(); htui.refreshUser(); htui.syncMode(); htui.syncTitle(); watchDesk();
     if (sh.onStart) sh.onStart(kit);
   }
   htui.switchSession = async function (sid) {
@@ -244,6 +245,7 @@
       if (OS.touch && !w.free) w.snap('max', true); else if (!OS.touch && w.zone === 'max') w.unsnap(true);
     });
     htui.syncTitle();
+    htui.refreshDesk();
     if (htui.shell && htui.shell.onMode) htui.shell.onMode();
   };
 
@@ -260,14 +262,194 @@
     else if (!n.silent && !htui.prefs.dnd) ui.toast(n.title + (n.body ? '：' + n.body : ''));
     return n;
   };
-  // デスクトップのアイコンを作り直す（パッケージの追加・削除のあとにも呼ばれる）
+  // ---------- ゴミ箱（~/.Trash）。元の場所は ~/.Trash/.info.json に覚えておき、「元に戻す」で戻せる
+  const trash = htui.trash = {
+    dir: () => users.home(htui.user) + '/.Trash',
+    ensure() { const d = trash.dir(); if (!htui.fs.isDir(d)) htui.fs.mkdir(d, { parents: true }); return d; },
+    info() { try { return JSON.parse(htui.fs.read(trash.dir() + '/.info.json')) || {}; } catch (e) { return {}; } },
+    save(i) { htui.fs.write(trash.dir() + '/.info.json', JSON.stringify(i)); },
+    inside: p => p === trash.dir() || p.startsWith(trash.dir() + '/'),
+    items() { try { return htui.fs.list(trash.dir()).filter(n => n !== '.info.json'); } catch (e) { return []; } },
+    move(p) {
+      if (trash.inside(p)) throw new Error('ゴミ箱の中のものは「完全に削除」してください');
+      const d = trash.ensure(), dest = htui.fs.unique(d + '/' + OS.path.base(p));
+      htui.fs.mv(p, dest);
+      const i = trash.info(); i[OS.path.base(dest)] = { from: p, at: Date.now() }; trash.save(i);
+      return dest;
+    },
+    from: name => (trash.info()[name] || {}).from || null,
+    restore(name) {
+      const e = trash.info()[name]; if (!e) throw new Error(name + ' の元の場所が分かりません');
+      const to = htui.fs.exists(e.from) ? htui.fs.unique(e.from) : e.from;
+      if (!htui.fs.isDir(OS.path.dir(to))) htui.fs.mkdir(OS.path.dir(to), { parents: true });
+      htui.fs.mv(trash.dir() + '/' + name, to);
+      const i = trash.info(); delete i[name]; trash.save(i);
+      return to;
+    },
+    remove(name) { htui.fs.rm(trash.dir() + '/' + name, { recursive: true }); const i = trash.info(); delete i[name]; trash.save(i); },
+    async empty(ask) {
+      const n = trash.items().length; if (!n) return false;
+      if (ask && !(await ui.confirm('ゴミ箱の ' + n + ' 個の項目を完全に削除しますか? 元に戻せません。', { ok: '空にする', danger: true, title: 'ゴミ箱を空にする' }))) return false;
+      trash.items().forEach(x => htui.fs.rm(trash.dir() + '/' + x, { recursive: true })); trash.save({});
+      return true;
+    }
+  };
+  // ファイルのコピー・切り取り（hFile とデスクトップで共通）
+  htui.fileClip = null;
+  htui.pasteInto = function (dir) {
+    const c = htui.fileClip; if (!c) return null;
+    if (!OS.fs.exists(c.path)) { htui.fileClip = null; throw new Error('元のファイルがなくなっています'); }
+    const d = htui.fs.unique(OS.path.join(dir, OS.path.base(c.path)));
+    if (c.cut) { htui.fs.mv(c.path, d); htui.fileClip = null; } else htui.fs.cp(c.path, d);
+    return d;
+  };
+  // ファイルの情報
+  htui.fileInfo = function (p) {
+    const ls = OS.fs.lstat(p), s = OS.fs.stat(p) || ls;
+    if (!ls) { ui.alert(p + ' はありません'); return; }
+    const from = trash.inside(p) ? trash.from(OS.path.base(p)) : null;
+    const rows = [['場所', p], ['種類', ls.t === 'l' ? 'シンボリックリンク → ' + ls.c : s.t === 'd' ? 'フォルダ' : (fs.kind(p) + (s.b ? '（バイナリ）' : ''))],
+      ['大きさ', s.t === 'd' ? fs.list(p).length + ' 個の項目' : fmtSize(s.c.length)], ['所有者', s.o || 'root'], ['変更日時', new Date(s.m).toLocaleString('ja-JP')]];
+    if (from) rows.push(['元の場所', from]);
+    ui.modal({ title: OS.path.base(p) + ' の情報', body: h('dl', { class: 'hf-info' }, rows.map(r => [h('dt', null, r[0]), h('dd', null, r[1])])), buttons: [{ label: '閉じる', primary: true, cancel: true, value: true }] });
+  };
+  htui.askName = async (msg, def, title, dir) => {
+    const n = await ui.prompt(msg, def, { title: title });
+    if (!n) return null;
+    if (n.includes('/') || n === '.' || n === '..') throw new Error('その名前は使えません');
+    if (dir && htui.fs.exists(OS.path.join(dir, n))) throw new Error(n + ' はすでにあります');
+    return n;
+  };
+  const fmtSize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(2) + ' MB';
+
+  // ---------- デスクトップ: ~/Desktop の中身を並べるファイル置き場（タッチモードの HTUi だけはアプリのランチャー）
+  //   左上（hAqua は右上）から、ホーム・/（ルート）・ゴミ箱（HTUi と hWin）・~/Desktop のファイルの順に並ぶ
+  const KIND_COLOR = { text: '#5e5c64', html: '#e66100', image: '#2ec27e', audio: '#9141ac', video: '#c01c28', other: '#77767b' };
+  const deskDir = () => users.home(htui.user) + '/Desktop';
   htui.refreshApps = function () {
     if (htui.shell && htui.shell.onApps) htui.shell.onApps();
-    if (!htui.iconsEl || !htui.user) return;
-    htui.iconsEl.textContent = '';
-    Object.values(OS.apps).forEach(a => htui.iconsEl.append(h('button', { class: 'desk-icon', type: 'button', title: a.desc || a.name, onclick: () => run(a.id) },
-      kit.appIcon(a, 26), h('span', { class: 'desk-label' }, a.name))));
+    htui.refreshDesk();
   };
+  htui.refreshDesk = function () {
+    const box = htui.iconsEl, o = htui.deskOpt;
+    if (!box || !o || !htui.user) return;
+    const keep = [...box.querySelectorAll('.sel')].map(b => b.dataset.path);
+    box.textContent = '';
+    // 登場のアニメーションは最初の 1 回だけ（ファイルが変わって並べ直すたびには動かさない）
+    if (!box._shown) { box._shown = true; box.classList.add('intro'); setTimeout(() => box.classList.remove('intro'), 900); }
+    const apps = OS.touch && o.appsOnTouch;
+    box.classList.toggle('apps', apps); box.classList.toggle('files', !apps);
+    if (apps) {
+      Object.values(OS.apps).forEach(a => box.append(h('button', { class: 'desk-icon', type: 'button', title: a.desc || a.name, 'data-app': a.id, onclick: () => run(a.id) },
+        kit.appIcon(a, 26), h('span', { class: 'desk-label' }, a.name))));
+      return;
+    }
+    if (!o.files) return;
+    const home = users.home(htui.user), dd = deskDir();
+    try { if (!htui.fs.isDir(dd)) htui.fs.mkdir(dd, { parents: true }); } catch (e) { /* 作れなくても表示は続ける */ }
+    const add = x => { const b = deskIcon(x); if (keep.includes(x.path)) b.classList.add('sel'); box.append(b); };
+    add({ special: 'home', name: 'ホーム', icon: 'home', color: '#26a269', path: home });
+    add({ special: 'root', name: '/（ルート）', icon: 'monitor', color: '#3d3846', path: '/' });
+    if (o.trash) { const n = trash.items().length; add({ special: 'trash', name: 'ゴミ箱', icon: 'trash', color: n ? '#a35a00' : '#77767b', path: trash.dir(), badge: n || null }); }
+    let names = []; try { names = htui.fs.list(dd).filter(n => !n.startsWith('.')); } catch (e) { /* 読めない */ }
+    names.map(n => ({ n, p: dd + '/' + n, d: htui.fs.isDir(dd + '/' + n) })).sort((a, b) => (b.d - a.d) || a.n.localeCompare(b.n, 'ja'))
+      .forEach(x => add({ name: x.n, path: x.p, dir: x.d, link: htui.fs.isLink(x.p), icon: x.d ? 'folder' : fileIcon(x.p), color: x.d ? '#3584e4' : KIND_COLOR[fs.kind(x.p)] || KIND_COLOR.other }));
+  };
+  function deskIcon(o) {
+    const b = h('button', { class: 'desk-icon desk-file' + (o.special ? ' sp-' + o.special : '') + (o.link ? ' link' : ''), type: 'button', title: o.path, 'data-path': o.path, draggable: o.special ? 'false' : 'true' },
+      h('span', { class: 'dico', style: '--c:' + o.color }, OS.icon(o.icon, 28), o.badge ? h('i', { class: 'dbadge' }, String(o.badge)) : null),
+      h('span', { class: 'desk-label' }, o.name));
+    b._o = o;
+    b.addEventListener('click', e => {
+      if (!(e.ctrlKey || e.metaKey)) htui.iconsEl.querySelectorAll('.sel').forEach(x => { if (x !== b) x.classList.remove('sel'); });
+      b.classList.toggle('sel', e.ctrlKey || e.metaKey ? !b.classList.contains('sel') : true);
+    });
+    b.addEventListener('dblclick', () => openDesk(o));
+    b.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); openDesk(o); }
+      else if (e.key === 'Delete' && !o.special) { e.preventDefault(); toTrash(o.path, e.shiftKey); }
+      else if (e.key === 'F2' && !o.special) { e.preventDefault(); renameDesk(o.path); }
+    });
+    if (!o.special) b.addEventListener('dragstart', e => { e.dataTransfer.setData('text/x-htmlos-path', o.path); e.dataTransfer.effectAllowed = 'move'; b.classList.add('sel'); });
+    // フォルダ・ホーム・ゴミ箱には、デスクトップのアイコンをドロップできる（ゴミ箱なら捨てる、フォルダなら移動）
+    if (o.dir || o.special === 'trash' || o.special === 'home') {
+      b.addEventListener('dragover', e => { if (e.dataTransfer.types.includes('text/x-htmlos-path')) { e.preventDefault(); b.classList.add('drop'); } });
+      b.addEventListener('dragleave', () => b.classList.remove('drop'));
+      b.addEventListener('drop', e => {
+        b.classList.remove('drop');
+        const src = e.dataTransfer.getData('text/x-htmlos-path'); if (!src || src === o.path) return;
+        e.preventDefault(); e.stopPropagation();
+        try { if (o.special === 'trash') trash.move(src); else htui.fs.mv(src, htui.fs.unique(OS.path.join(o.path, OS.path.base(src)))); } catch (er) { ui.alert(er.message); }
+      });
+    }
+    return b;
+  }
+  function openDesk(o) {
+    try { if (o.special || o.dir) run('hfile', o.path); else OS.openFile(o.path); } catch (e) { ui.alert(e.message); }
+  }
+  async function toTrash(p, now) {
+    try {
+      if (now) {
+        if (!(await ui.confirm(OS.path.base(p) + ' を完全に削除しますか? 元に戻せません。', { ok: '削除', danger: true, title: '完全に削除' }))) return;
+        htui.fs.rm(p, { recursive: true });
+      } else trash.move(p);
+    } catch (e) { ui.alert(e.message); }
+  }
+  async function renameDesk(p) {
+    try { const n = await htui.askName('新しい名前', OS.path.base(p), '名前の変更'); if (!n || n === OS.path.base(p)) return; const d = OS.path.join(OS.path.dir(p), n); if (htui.fs.exists(d)) throw new Error(n + ' はすでにあります'); htui.fs.mv(p, d); } catch (e) { ui.alert(e.message); }
+  }
+  async function newOnDesk(dir) {
+    try { const d = deskDir(); const n = await htui.askName(dir ? 'フォルダの名前' : 'ファイルの名前', dir ? '新しいフォルダ' : '新しいテキスト.txt', dir ? '新しいフォルダ' : '新しいファイル', d); if (!n) return; if (dir) htui.fs.mkdir(d + '/' + n); else htui.fs.write(d + '/' + n, ''); } catch (e) { ui.alert(e.message); }
+  }
+  // PC のファイルを ~/Desktop に取り込む（ドロップ・メニューから）
+  async function importToDesk(files) {
+    let ok = 0; const fails = [];
+    for (const f of Array.from(files)) {
+      try { const c = await OS.net.blobToContent(f, f.name); htui.fs.write(htui.fs.unique(deskDir() + '/' + f.name), c.content, { bin: c.bin }); ok++; }
+      catch (e) { fails.push(f.name + ': ' + e.message); }
+    }
+    if (fails.length) ui.alert('取り込めなかったファイル:\n' + fails.join('\n'));
+    else if (ok) ui.toast(ok + ' 個のファイルをデスクトップに取り込みました');
+  }
+  function pickImport() {
+    const inp = h('input', { type: 'file', multiple: true, style: 'display:none' });
+    inp.addEventListener('change', () => { importToDesk(inp.files); inp.remove(); });
+    document.body.append(inp); inp.click();
+  }
+  function deskFileMenu(o) {
+    if (o.special === 'home') return [{ head: 'ホーム' }, { label: '開く', icon: 'folder', act: () => openDesk(o) }, { label: 'ここで Terminal を開く', icon: 'terminal', act: () => run('terminal', { cmd: 'cd ~' }) }, { label: '情報を見る', act: () => htui.fileInfo(o.path) }];
+    if (o.special === 'root') return [{ head: '/（ルート）' }, { label: '開く', icon: 'folder', act: () => openDesk(o) }, { label: 'ここで Terminal を開く', icon: 'terminal', act: () => run('terminal', { cmd: 'cd /' }) }];
+    if (o.special === 'trash') return [{ head: 'ゴミ箱' }, { label: '開く', icon: 'trash', act: () => openDesk(o) }, { label: 'ゴミ箱を空にする…', icon: 'trash', disabled: !trash.items().length, act: () => trash.empty(true) }];
+    const k = fs.kind(o.path), items = [{ head: o.name + (o.link ? '（リンク）' : '') }, { label: '開く', icon: o.icon, act: () => openDesk(o) }];
+    if (!o.dir && (k === 'text' || k === 'html' || k === 'other')) items.push({ label: 'hedit で開く', icon: 'edit', act: () => run('hedit', o.path) });
+    if (o.dir) items.push({ label: 'ここで Terminal を開く', icon: 'terminal', act: () => run('terminal', { cmd: 'cd "' + o.path + '"' }) });
+    items.push({ sep: true },
+      { label: 'コピー', act: () => { htui.fileClip = { path: o.path, cut: false }; ui.toast(o.name + ' をコピーしました'); } },
+      { label: '切り取り', act: () => { htui.fileClip = { path: o.path, cut: true }; ui.toast(o.name + ' を切り取りました'); } },
+      { label: '名前を変更…', act: () => renameDesk(o.path) },
+      { label: 'ゴミ箱に移動', icon: 'trash', act: () => toTrash(o.path) },
+      { label: '完全に削除…', act: () => toTrash(o.path, true) },
+      { sep: true }, { label: '情報を見る', act: () => htui.fileInfo(o.path) });
+    return items;
+  }
+  // デスクトップの空いているところのクリックで選択を外す・PC のファイルのドロップ
+  function wireDesk(d) {
+    d.addEventListener('pointerdown', e => { if ((e.target === d || e.target === htui.iconsEl) && htui.iconsEl) htui.iconsEl.querySelectorAll('.sel').forEach(x => x.classList.remove('sel')); });
+    d.addEventListener('dragover', e => { if (htui.deskOpt && htui.deskOpt.files && !OS.touch && e.dataTransfer.types.includes('Files')) { e.preventDefault(); d.classList.add('drop'); } });
+    d.addEventListener('dragleave', e => { if (e.target === d) d.classList.remove('drop'); });
+    d.addEventListener('drop', e => { d.classList.remove('drop'); if (e.dataTransfer.files && e.dataTransfer.files.length && htui.deskOpt && htui.deskOpt.files) { e.preventDefault(); importToDesk(e.dataTransfer.files); } });
+  }
+  // ~/Desktop・ゴミ箱が変わったら並べ直す
+  let unwatchDesk = null;
+  function watchDesk() {
+    if (unwatchDesk) unwatchDesk();
+    unwatchDesk = fs.watch(paths => {
+      if (!htui.user || !htui.iconsEl) return;
+      const dd = deskDir(), tr = trash.dir();
+      if (paths.some(p => p === dd || p.startsWith(dd + '/') || p === tr || p.startsWith(tr + '/'))) htui.refreshDesk();
+      if (paths.some(p => p === tr || p.startsWith(tr + '/')) && htui.shell && htui.shell.onApps) htui.shell.onApps();
+    });
+  }
   function run(id, arg) { try { OS.launch(id, arg); } catch (e) { ui.alert(e.message); } }
   htui.run = run;
 
@@ -321,13 +503,19 @@
   htui.winMenu = winMenu;
   function deskMenu() {
     const sid = htui.sessionId, sh = htui.shell || {};
-    const items = [
-      { label: 'Terminal を開く', icon: 'terminal', act: () => run('terminal') },
+    const files = htui.deskOpt && htui.deskOpt.files && !(OS.touch && htui.deskOpt.appsOnTouch);
+    const items = files ? [
+      { label: '新しいフォルダ…', icon: 'plus', act: () => newOnDesk(true) },
+      { label: '新しいテキストファイル…', icon: 'plus', act: () => newOnDesk(false) },
+      { label: '貼り付け' + (htui.fileClip ? '（' + OS.path.base(htui.fileClip.path) + '）' : ''), disabled: !htui.fileClip, act: () => { try { htui.pasteInto(deskDir()); } catch (e) { ui.alert(e.message); } } },
+      { label: 'PC から取り込む…', icon: 'upload', act: pickImport },
+      { sep: true }] : [];
+    items.push(
+      { label: 'Terminal を開く', icon: 'terminal', act: () => run('terminal', files ? { cmd: 'cd ~/Desktop' } : undefined) },
       { label: 'ホームフォルダを開く', icon: 'folder', act: () => run('hfile') },
       { sep: true },
       { label: '壁紙を変更…', icon: 'image', act: () => run('settings', 'look') },
-      { label: '画面モード…', icon: OS.modeIcons[OS.uiMode], act: () => { const p = htui._ctxAt; setTimeout(() => htui.menuAt(p[0], p[1], kit.modeItems()), 0); } }
-    ];
+      { label: '画面モード…', icon: OS.modeIcons[OS.uiMode], act: () => { const p = htui._ctxAt; setTimeout(() => htui.menuAt(p[0], p[1], kit.modeItems()), 0); } });
     if (sid === 'mac') items.push({ sep: true }, { label: 'Launchpad', icon: 'grid', act: () => sh.launchpad() }, { label: 'Mission Control', icon: 'grid', act: () => sh.missionControl() });
     if (sid === 'gnome') items.push({ sep: true }, { label: 'アクティビティ', icon: 'grid', act: () => sh.overview() });
     if (sid === 'win') items.push({ sep: true }, { label: 'タスクマネージャー', icon: 'chart', act: () => run('htask') });
@@ -346,7 +534,8 @@
     if (!items && htui.shell && htui.shell.onContext) items = htui.shell.onContext(e);
     if (!items) { const head = t.closest('.win-head'); if (head && !t.closest('.win-btn')) { const w = htui.wins.find(x => x.el.contains(head)); if (w) items = winMenu(w); } }
     if (!items) { const tb = t.closest('.p-task'); const w = tb && htui.wins.find(x => x.task === tb); if (w) items = [{ head: w.title }, { label: w.el.classList.contains('hidden') ? '元に戻す' : '最小化', icon: 'min', act: () => (w.el.classList.contains('hidden') ? w.focus() : w.minimize()) }, { label: w.zone === 'max' ? '元のサイズに戻す' : '最大化', icon: 'max', act: () => (w.zone === 'max' ? w.unsnap() : w.snap('max')) }, { label: '新しいウィンドウ', icon: 'plus', act: () => run(w.app) }, { sep: true }, { label: '閉じる', icon: 'x', act: () => w.close() }]; }
-    if (!items) { const di = t.closest('.desk-icon'); if (di) { const a = Object.values(OS.apps).find(x => di.title === (x.desc || x.name)); if (a) items = [{ head: a.name }, { label: '開く', icon: a.icon, act: () => run(a.id) }, { label: 'このアプリについて', act: () => ui.alert((a.desc || a.name) + (a.pkg ? '\n（パッケージ ' + a.pkg + '）' : ''), a.name) }]; } }
+    if (!items) { const df = t.closest('.desk-file'); if (df && df._o) { htui.iconsEl.querySelectorAll('.sel').forEach(x => x.classList.toggle('sel', x === df)); items = deskFileMenu(df._o); } }
+    if (!items) { const di = t.closest('.desk-icon[data-app]'); if (di) { const a = Object.values(OS.apps).find(x => di.title === (x.desc || x.name)); if (a) items = [{ head: a.name }, { label: '開く', icon: a.icon, act: () => run(a.id) }, { label: 'このアプリについて', act: () => ui.alert((a.desc || a.name) + (a.pkg ? '\n（パッケージ ' + a.pkg + '）' : ''), a.name) }]; } }
     if (!items && (t === htui.desk || t.classList.contains('desk-icons') || t.classList.contains('ios-home') || t.classList.contains('ios-grid'))) items = deskMenu();
     e.preventDefault(); // ほかの場所でもブラウザのメニューは出さない
     if (items && items.length) htui.menuAt(at[0], at[1], items);
@@ -427,9 +616,12 @@
     clock(el, fmt) { const f = d => { el.textContent = fmt(d); }; ticks.push(f); f(new Date()); return el; },
     pad: n => String(n).padStart(2, '0'),
     // ウィンドウを置く領域。icons=true ならデスクトップアイコンも並べる
+    // icons: true（＝ { files, trash, appsOnTouch } をすべて）か、そのオブジェクト。files はファイル置き場、trash はゴミ箱、appsOnTouch はタッチモードならアプリのランチャー
     desk(icons, append) {
       const d = htui.desk = h('div', { class: 'desk' });
-      if (icons) d.append(htui.iconsEl = h('div', { class: 'desk-icons' }));
+      htui.deskOpt = icons === true ? { files: true, trash: true, appsOnTouch: true } : icons || null;
+      if (htui.deskOpt) d.append(htui.iconsEl = h('div', { class: 'desk-icons' }));
+      wireDesk(d);
       if (append) htui.el.append(d);
       return d;
     },

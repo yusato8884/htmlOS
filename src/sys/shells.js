@@ -115,7 +115,7 @@
     id: 'win', name: 'hWin（Windows 風）', desc: 'マウスでは下にタスクバーとスタートメニュー。タブレットとスマートフォンでは Windows 8.1 風のスタート画面とチャーム、画面の端からのスワイプ操作になります。',
     build(k) {
       const self = this;
-      const desk = k.desk(true);
+      const desk = k.desk({ files: true, trash: true });
       const tasks = htui.tasks = h('div', { class: 'tb-tasks' });
       const start = h('button', { class: 'tb-start', type: 'button', title: 'スタート（Ctrl+Esc）', 'aria-label': 'スタート', onclick: () => { if (OS.touch) self.showStart(); else self.toggleStart(); } }, logo());
       const clock = k.clock(h('div', { class: 'tb-clock' }), d => k.pad(d.getHours()) + ':' + k.pad(d.getMinutes()) + '\n' + d.getFullYear() + '/' + k.pad(d.getMonth() + 1) + '/' + k.pad(d.getDate()));
@@ -526,7 +526,7 @@
       hot.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse' && !htui.el.classList.contains('dragging')) self.overview(true); });
       // タッチ: 下端から上へスワイプでアクティビティ、もう一度でアプリ一覧
       const bottom = edge('b', { end: v => { if (v.max > 40) self.overview(true, htui.el.querySelector('.gn-ov:not(.leaving)') ? true : null); } });
-      htui.el.append(h('div', { class: 'gn-bar' }, h('div', { class: 'gn-left' }, act, htui.titleEl), clock, h('div', { class: 'gn-right' }, k.modeButton('gn-btn'), status)), hot, k.desk(false), bottom);
+      htui.el.append(h('div', { class: 'gn-bar' }, h('div', { class: 'gn-left' }, act, htui.titleEl), clock, h('div', { class: 'gn-right' }, k.modeButton('gn-btn'), status)), hot, k.desk({ files: true }), bottom);
       this.syncDot();
     },
     onStart() { if (!OS.touch) this.overview(true); },
@@ -828,7 +828,7 @@
       const widget = h('div', { class: 'ios-widget' }, k.clock(h('b'), d => d.getHours() + ':' + pad(d.getMinutes())), k.clock(h('span'), d => (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + WEEK[d.getDay()] + '曜日'));
       this.home = h('div', { class: 'ios-home' }, widget, this.grid, h('div', { class: 'ios-dots', 'aria-hidden': 'true' }, h('i', { class: 'on' }), h('i')), this.iosDock);
       swipe(this.home, (dx, dy) => { if (dy > 60 && Math.abs(dy) > Math.abs(dx)) this.spotlight(); else return false; });
-      const desk = k.desk(false);
+      const desk = k.desk({ files: true });
       desk.prepend(this.home);
       const batt = h('span', { class: 'ios-batt', hidden: true });
       if (navigator.getBattery) navigator.getBattery().then(b => { const upd = () => { batt.hidden = false; batt.textContent = Math.round(b.level * 100) + '%'; }; upd(); b.addEventListener('levelchange', upd); }).catch(() => {});
@@ -851,7 +851,7 @@
       if (!this.dock) return;
       const k = htui.kit, self = this;
       // 中身が変わらないなら作り直さない（作り直すと、押している途中のボタンが入れ替わってタップが消える）
-      const sig = [OS.uiMode, Object.keys(OS.apps).join(), htui.wins.map(w => w.app + (w.el.classList.contains('hidden') ? '-' : '+') + w.title).join('|'), byZ().map(w => w.app).join()].join('#');
+      const sig = [OS.uiMode, Object.keys(OS.apps).join(), htui.wins.map(w => w.app + (w.el.classList.contains('hidden') ? '-' : '+') + w.title).join('|'), byZ().map(w => w.app).join(), htui.trash.items().length].join('#');
       if (sig === this._sig) return;
       this._sig = sig;
       // デスクトップのドック: Launchpad・よく使うアプリ・（区切り）・ドックにない起動中のアプリ・しまったウインドウ
@@ -863,7 +863,8 @@
       const mins = htui.wins.filter(w => w.el.classList.contains('hidden'));
       this.dock.append(h('span', { class: 'mc-dsep' }));
       mins.forEach(w => { const a = OS.apps[w.app] || {}; const b = item('mc-min', w.title, h('span', { class: 'mc-thumb' }, k.appIcon(a.icon ? a : { icon: 'file' }, 18)), () => w.focus()); b._win = w; this.dock.append(b); });
-      this.dock.append(item('mc-trash', 'ゴミ箱', h('span', { class: 'app-ico mc-trashico' }, OS.icon('trash', 26)), () => OS.ui.toast('htmlOS ではファイルはすぐに削除されます（ゴミ箱はありません）')));
+      const tn = htui.trash.items().length;
+      this.dock.append(item('mc-trash' + (tn ? ' full' : ''), tn ? 'ゴミ箱（' + tn + ' 個）' : 'ゴミ箱', h('span', { class: 'app-ico mc-trashico' }, OS.icon('trash', 26)), () => { try { htui.trash.ensure(); } catch (e) { /* 作れない */ } OS.launch('hfile', htui.trash.dir()); }));
       // ホーム画面
       const tile = a => h('button', { class: 'ios-app', type: 'button', title: a.desc || a.name, 'data-app': a.id, onclick: () => self.openApp(a.id) }, k.appIcon(a, 30), h('span', null, a.name));
       const dockIds = (IOS_DOCK[OS.uiMode] || IOS_DOCK.phone).filter(id => OS.apps[id]);
@@ -1228,7 +1229,7 @@
       const b = e.target.closest('.mc-dk,.ios-app'); if (!b) return null;
       if (b._win) { const w = b._win; return [{ head: w.title }, { label: '元に戻す', icon: 'max', act: () => w.focus() }, { sep: true }, { label: '閉じる', icon: 'x', act: () => w.close() }]; }
       if (b.classList.contains('mc-lp')) return [{ label: 'Launchpad を開く', icon: 'grid', act: () => this.launchpad() }];
-      if (b.classList.contains('mc-trash')) return [{ label: 'ゴミ箱は空です', disabled: true, act: () => {} }];
+      if (b.classList.contains('mc-trash')) return [{ label: 'ゴミ箱を開く', icon: 'trash', act: () => b.click() }, { label: 'ゴミ箱を空にする…', disabled: !htui.trash.items().length, act: () => htui.trash.empty(true) }];
       return appItems(b.dataset.app, id => this.openApp(id));
     },
     onSuper() { this.launchpad(); },
