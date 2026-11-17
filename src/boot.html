@@ -233,6 +233,12 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   // アップデート・システム修復: /sys をメディアの内容で書き直す（ユーザー・ファイル・設定は残る）
   BOOT.updateReal = function (log) { onReal(function () { writeSys(log); }); };
   BOOT.realUsers = function () { return onReal(function () { try { return JSON.parse(JSON.parse(store.get('f:/etc/passwd')).c).map(function (u) { return { name: u.name, admin: !!u.admin, root: !!u.root }; }); } catch (e) { return []; } }); };
+  // 管理者（admin / root）としてサインインできるかを確かめる（アンインストール用）
+  BOOT.realVerifyAdmin = async function (name, pw) {
+    var u = onReal(function () { try { return JSON.parse(JSON.parse(store.get('f:/etc/passwd')).c).find(function (x) { return x.name === name; }); } catch (e) { return null; } });
+    if (!u || !(u.admin || u.root)) return false;
+    return verify(pw, u.pw);
+  };
   BOOT.realSetPassword = async function (name, pw) {
     var hv = await hash(pw);
     onReal(function () {

@@ -200,7 +200,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
               } catch (e) { ui().alert(e.message); }
             }, { disabled: !has }),
             row('restore', 'upload', 'バックアップから復元', 'バックアップのファイルを読み込み、インストール先をその内容に置き換えます', '復元…', restore),
-            row('uninstall', 'trash', 'htmlOS をアンインストール', 'このブラウザから htmlOS のユーザー・ファイル・設定をすべて消します（BIOS の設定は残ります）', 'アンインストール…', uninstall, { danger: true, disabled: !has })));
+            row('uninstall', 'trash', 'htmlOS をアンインストール', '管理者としてサインインし、このブラウザから htmlOS のユーザー・ファイル・設定をすべて消去します（BIOS の設定は残ります）', 'アンインストール…', uninstall, { danger: true, disabled: !has })));
       }
       async function resetPassword() {
         const list = BOOT.realUsers();
@@ -224,9 +224,32 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         document.body.append(inp); inp.click();
       }
       async function uninstall() {
-        const t = await ui().prompt('アンインストールすると、このブラウザの htmlOS のユーザー・ファイル・設定がすべて消え、元に戻せません。\n続けるには「アンインストール」と入力してください。', '', { title: 'htmlOS をアンインストール' });
-        if (t == null) return;
-        if (t.trim() !== 'アンインストール') { ui().alert('入力が違うので、中止しました'); return; }
+        const admins = BOOT.realUsers().filter(u => u.admin || u.root);
+        if (!admins.length) { ui().alert('管理者のユーザーが見つかりません。先に「パスワードをリセット」などで直してください。'); return; }
+        const sel = h('select', { class: 'inp', id: 'wl-uuser' }, admins.map(u => h('option', { value: u.name }, u.name + (u.root ? '（root）' : '（管理者）'))));
+        const pw = h('input', { class: 'inp', type: 'password', id: 'wl-upw', 'aria-label': 'パスワード', autocomplete: 'current-password' });
+        const msg = h('div', { class: 'wl-err', id: 'wl-uerr', role: 'alert' });
+        const body = h('div', { class: 'wl-form' },
+          h('p', null, 'アンインストールするには、インストール先の htmlOS の管理者としてサインインしてください。'),
+          h('label', null, '管理者', sel), h('label', null, 'パスワード', pw), msg);
+        let tries = 0, close = null, busy = false;
+        const signIn = () => {
+          if (busy) return ui().KEEP;
+          busy = true; msg.textContent = '確認しています…';
+          BOOT.realVerifyAdmin(sel.value, pw.value).then(async ok => {
+            if (ok) { close(true); return; }
+            tries++; pw.value = '';
+            await new Promise(r => setTimeout(r, Math.min(400 * tries, 2000)));
+            msg.textContent = 'パスワードが違います' + (tries >= 3 ? '。忘れた場合は「パスワードをリセット」を使ってください' : '');
+            busy = false; pw.focus();
+          });
+          return ui().KEEP;
+        };
+        const ok = await ui().modal({ title: 'htmlOS をアンインストール', body, onOpen: d => { close = d; pw.focus(); },
+          buttons: [{ label: 'キャンセル', cancel: true, value: false }, { label: 'サインイン', primary: true, value: signIn }] });
+        if (!ok) return;
+        const user = sel.value;
+        if (!(await ui().confirm(user + ' としてサインインしました。\nこのブラウザの htmlOS のユーザー・ファイル・設定をすべて消去します。元に戻せません。', { ok: '消去', danger: true, title: 'htmlOS をアンインストール' }))) return;
         try { BOOT.realWipe(); } catch (e) { ui().alert(e.message); return; }
         await ui().alert('htmlOS をアンインストールしました。htmlOS i はこのまま使えます。次に開いたときは htmlOS i が起動します。', 'アンインストールしました');
         home();
@@ -7225,6 +7248,8 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 .wl-act .btn{flex:none}
 .wl-form{display:flex;flex-direction:column;gap:10px;min-width:260px}
 .wl-form label{display:flex;flex-direction:column;gap:4px;font-size:13px}
+.wl-form p{margin:0;font-size:13px;line-height:1.6}
+.wl-err{min-height:1.4em;font-size:12.5px;color:#e01b24}
 .phone .wl-act{flex-wrap:wrap}
 </script>
 <script>
@@ -7236,7 +7261,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
    ============================================================ */
 (function () {
   'use strict';
-  var MEDIA_VERSION = '3.0.0', MEDIA_BUILD = '18';
+  var MEDIA_VERSION = '3.0.1', MEDIA_BUILD = '19';
   var BOOT = window.BOOT = {};
   var P = 'htmlos:';
 
@@ -7374,6 +7399,12 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   // アップデート・システム修復: /sys をメディアの内容で書き直す（ユーザー・ファイル・設定は残る）
   BOOT.updateReal = function (log) { onReal(function () { writeSys(log); }); };
   BOOT.realUsers = function () { return onReal(function () { try { return JSON.parse(JSON.parse(store.get('f:/etc/passwd')).c).map(function (u) { return { name: u.name, admin: !!u.admin, root: !!u.root }; }); } catch (e) { return []; } }); };
+  // 管理者（admin / root）としてサインインできるかを確かめる（アンインストール用）
+  BOOT.realVerifyAdmin = async function (name, pw) {
+    var u = onReal(function () { try { return JSON.parse(JSON.parse(store.get('f:/etc/passwd')).c).find(function (x) { return x.name === name; }); } catch (e) { return null; } });
+    if (!u || !(u.admin || u.root)) return false;
+    return verify(pw, u.pw);
+  };
   BOOT.realSetPassword = async function (name, pw) {
     var hv = await hash(pw);
     onReal(function () {

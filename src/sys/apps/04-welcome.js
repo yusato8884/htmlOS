@@ -112,7 +112,7 @@
               } catch (e) { ui().alert(e.message); }
             }, { disabled: !has }),
             row('restore', 'upload', 'バックアップから復元', 'バックアップのファイルを読み込み、インストール先をその内容に置き換えます', '復元…', restore),
-            row('uninstall', 'trash', 'htmlOS をアンインストール', 'このブラウザから htmlOS のユーザー・ファイル・設定をすべて消します（BIOS の設定は残ります）', 'アンインストール…', uninstall, { danger: true, disabled: !has })));
+            row('uninstall', 'trash', 'htmlOS をアンインストール', '管理者としてサインインし、このブラウザから htmlOS のユーザー・ファイル・設定をすべて消去します（BIOS の設定は残ります）', 'アンインストール…', uninstall, { danger: true, disabled: !has })));
       }
       async function resetPassword() {
         const list = BOOT.realUsers();
@@ -136,9 +136,32 @@
         document.body.append(inp); inp.click();
       }
       async function uninstall() {
-        const t = await ui().prompt('アンインストールすると、このブラウザの htmlOS のユーザー・ファイル・設定がすべて消え、元に戻せません。\n続けるには「アンインストール」と入力してください。', '', { title: 'htmlOS をアンインストール' });
-        if (t == null) return;
-        if (t.trim() !== 'アンインストール') { ui().alert('入力が違うので、中止しました'); return; }
+        const admins = BOOT.realUsers().filter(u => u.admin || u.root);
+        if (!admins.length) { ui().alert('管理者のユーザーが見つかりません。先に「パスワードをリセット」などで直してください。'); return; }
+        const sel = h('select', { class: 'inp', id: 'wl-uuser' }, admins.map(u => h('option', { value: u.name }, u.name + (u.root ? '（root）' : '（管理者）'))));
+        const pw = h('input', { class: 'inp', type: 'password', id: 'wl-upw', 'aria-label': 'パスワード', autocomplete: 'current-password' });
+        const msg = h('div', { class: 'wl-err', id: 'wl-uerr', role: 'alert' });
+        const body = h('div', { class: 'wl-form' },
+          h('p', null, 'アンインストールするには、インストール先の htmlOS の管理者としてサインインしてください。'),
+          h('label', null, '管理者', sel), h('label', null, 'パスワード', pw), msg);
+        let tries = 0, close = null, busy = false;
+        const signIn = () => {
+          if (busy) return ui().KEEP;
+          busy = true; msg.textContent = '確認しています…';
+          BOOT.realVerifyAdmin(sel.value, pw.value).then(async ok => {
+            if (ok) { close(true); return; }
+            tries++; pw.value = '';
+            await new Promise(r => setTimeout(r, Math.min(400 * tries, 2000)));
+            msg.textContent = 'パスワードが違います' + (tries >= 3 ? '。忘れた場合は「パスワードをリセット」を使ってください' : '');
+            busy = false; pw.focus();
+          });
+          return ui().KEEP;
+        };
+        const ok = await ui().modal({ title: 'htmlOS をアンインストール', body, onOpen: d => { close = d; pw.focus(); },
+          buttons: [{ label: 'キャンセル', cancel: true, value: false }, { label: 'サインイン', primary: true, value: signIn }] });
+        if (!ok) return;
+        const user = sel.value;
+        if (!(await ui().confirm(user + ' としてサインインしました。\nこのブラウザの htmlOS のユーザー・ファイル・設定をすべて消去します。元に戻せません。', { ok: '消去', danger: true, title: 'htmlOS をアンインストール' }))) return;
         try { BOOT.realWipe(); } catch (e) { ui().alert(e.message); return; }
         await ui().alert('htmlOS をアンインストールしました。htmlOS i はこのまま使えます。次に開いたときは htmlOS i が起動します。', 'アンインストールしました');
         home();
