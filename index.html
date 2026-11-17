@@ -1461,12 +1461,20 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 </script>
 <script type="text/x-htmlos" data-path="/sys/hdm.js">
 /* hdm — HtmlDisplayManager。HTUi のログイン画面。
-   ユーザーを選んでパスワードを入れ、使うデスクトップ環境（セッション）を選んでログインする。
+   選んだデスクトップ環境（セッション）に合わせて、ログイン画面の見た目が変わる。
+     HTUi   → htui   HTUi に寄せた独自デザイン
+     hShell → gdm    GDM 風
+     hWin   → w11 / w8 / wp   デスクトップは Windows 11 風、タブレットは Windows 8.1 風、スマートフォンは Windows Phone 風（どれもロック画面つき）
+     hwc    → wm     シンプルな独自デザイン（ユーザー名を入力する）
    最後にログインしたユーザーと、ユーザーごとに最後に使ったセッションを /etc/hdm.json に覚える。 */
 (function () {
   const OS = window.OS, h = OS.h, users = OS.users;
   const CONF = '/etc/hdm.json';
-  let timer = null;
+  const pad = n => String(n).padStart(2, '0');
+  const WEEK = '日月火水木金土';
+  const fmtDate = d => (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + WEEK[d.getDay()] + '曜日';
+  const logo = () => h('span', { class: 'os-logo', 'aria-hidden': 'true' }, '<', h('b', null, '/'), '>');
+  let timer = null, ticks = [];
 
   const hdm = OS.hdm = {
     conf() { try { return JSON.parse(OS.fs.read(CONF)); } catch (e) { return {}; } },
@@ -1474,75 +1482,250 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     defaultSession() { const s = OS.config.get('session', 'htui'); return OS.sessions[s] ? s : 'htui'; },
     sessionFor(user) { const s = ((hdm.conf().users) || {})[user]; return OS.sessions[s] ? s : hdm.defaultSession(); },
     setUserSession(user, sid) { const c = hdm.conf(); c.users = c.users || {}; c.users[user] = sid; hdm.save(c); },
-    stop() { clearInterval(timer); timer = null; },
+    stop() { clearInterval(timer); timer = null; ticks = []; },
+    // セッションと画面モードから、ログイン画面のテーマを決める
+    themeFor(sid) {
+      if (sid === 'gnome') return 'gdm';
+      if (sid === 'wm') return 'wm';
+      if (sid === 'win') return OS.uiMode === 'phone' ? 'wp' : OS.uiMode === 'tablet' ? 'w8' : 'w11';
+      return 'htui';
+    },
 
     // container にログイン画面を出す。ログインできたら onLogin(ユーザー名, セッションID)
     show(container, onLogin) {
       hdm.stop();
       const el = container, htui = OS.htui;
-      el.className = 'hdm';
-      const fmtDate = d => (d.getMonth() + 1) + '月' + d.getDate() + '日（' + '日月火水木金土'[d.getDay()] + '）';
-      const pad = n => String(n).padStart(2, '0');
-      const barClock = h('div', { class: 'hdm-barclock' }), bigTime = h('div', { class: 'hdm-time' }), bigDate = h('div', { class: 'hdm-date' });
-      const tick = () => { const d = new Date(), t = pad(d.getHours()) + ':' + pad(d.getMinutes()); barClock.textContent = fmtDate(d) + ' ' + t; bigTime.textContent = t; bigDate.textContent = fmtDate(d); };
-      tick(); timer = setInterval(tick, 5000);
-
-      const powerBtn = h('button', { class: 'hdm-btn', type: 'button', title: '電源', 'aria-label': '電源メニュー', onclick: e => htui.menu(e.currentTarget, [
-        { label: 'CUI に切り替え', icon: 'terminal', act: () => htui.stop() },
-        { label: '再起動', icon: 'reload', act: () => OS.reboot() },
-        { label: '電源を切る', icon: 'power', act: () => OS.poweroff() }
-      ], true) }, OS.icon('power', 18));
-      const modeBtn = h('button', { class: 'hdm-btn', type: 'button', onclick: e => htui.menu(e.currentTarget, ['auto', 'desktop', 'tablet', 'phone'].map(m => ({
-        label: OS.modeNames[m] + (m === 'auto' ? '（' + OS.modeNames[OS.autoMode()] + '）' : ''), icon: OS.modeIcons[m === 'auto' ? OS.autoMode() : m],
-        hint: m === OS.modePref ? '選択中' : null, act: () => { OS.setMode(m); syncMode(); } })), true) });
-      const syncMode = () => { modeBtn.textContent = ''; modeBtn.append(OS.icon(OS.modeIcons[OS.uiMode], 18)); modeBtn.title = '画面モード: ' + OS.modeNames[OS.modePref]; modeBtn.setAttribute('aria-label', modeBtn.title); };
-      syncMode();
-
-      const bar = h('div', { class: 'hdm-bar' },
-        h('div', { class: 'hdm-host' }, h('b', null, 'htmlOS'), h('span', null, OS.version)),
-        barClock,
-        h('div', { class: 'hdm-right' }, modeBtn, powerBtn));
-      const card = h('div', { class: 'hdm-card' });
-      const msg = h('div', { class: 'gr-msg hdm-msg', role: 'alert' });
-      const main = h('div', { class: 'hdm-main' }, h('div', { class: 'hdm-clock' }, bigTime, bigDate), card);
-      const foot = h('div', { class: 'hdm-foot' }, 'hdm — HtmlDisplayManager');
-      el.append(bar, main, foot);
-
       const list = () => users.list().filter(u => !u.root);
-      function showUsers() {
-        card.textContent = '';
-        const grid = h('div', { class: 'gr-users' });
-        list().forEach(u => grid.append(h('button', { class: 'gr-user', type: 'button', onclick: () => ask(u) }, OS.htui.avatar(u, 64), h('span', null, u.name))));
-        card.append(h('p', { class: 'hdm-sub' }, 'ログインするユーザーを選んでください'), grid);
+      const lastU = users.get(hdm.conf().lastUser);
+      const first = lastU && !lastU.root ? lastU : list().length === 1 ? list()[0] : null;
+      const st = { user: first, sid: first ? hdm.sessionFor(first.name) : hdm.defaultSession(), unlocked: false, msg: '' };
+      const prefsOf = u => { try { return JSON.parse(OS.fs.read(users.home(u.name) + '/.config/htui.json')); } catch (e) { return {}; } };
+
+      // 各テーマに渡す部品
+      const c = {
+        get user() { return st.user; }, get sid() { return st.sid; }, get unlocked() { return st.unlocked; },
+        list: list, menuUp: false,
+        avatar(u, size, square) { const a = htui.avatar(u, size); if (square) a.classList.add('sq'); return a; },
+        wallpaper(u) { const p = u ? prefsOf(u) : {}; return (htui.wallpapers[p.wallpaper | 0] || htui.wallpapers[0]).css; },
+        accent(u) { const p = u ? prefsOf(u) : {}; return p.accent || htui.accents[0]; },
+        clock(node, fmt) { const f = d => { node.textContent = fmt(d); }; ticks.push(f); f(new Date()); return node; },
+        pick(u) { st.user = u; st.msg = ''; if (u) st.sid = hdm.sessionFor(u.name); st.unlocked = true; render(); },
+        sessionName() { return (OS.sessions[st.sid] || {}).name || ''; },
+        sessionDesc() { return (OS.sessions[st.sid] || {}).desc || ''; },
+        // デスクトップ環境の選択。overlay=true なら、アイコンの上に重ねる透明な選択欄にする
+        sessionSelect(cls, overlay) {
+          const sel = h('select', { class: (cls || 'sel') + (overlay ? ' hdm-ovsel' : ''), id: 'hdm-session', 'aria-label': 'デスクトップ環境', title: 'デスクトップ環境' },
+            Object.values(OS.sessions).map(s => h('option', { value: s.id, selected: s.id === st.sid }, s.name)));
+          sel.addEventListener('change', () => { st.sid = sel.value; st.unlocked = true; render(); });
+          return sel;
+        },
+        // パスワード欄つきのフォーム。nameInput を渡すと、ユーザー名も入力させる
+        pwForm(o) {
+          o = o || {};
+          const input = h('input', { type: 'password', class: o.inputClass || 'inp', id: 'gr-pw', placeholder: o.placeholder || 'パスワード', 'aria-label': 'パスワード', autocomplete: 'off' });
+          const submit = h('button', { class: o.submitClass || 'btn primary', type: 'submit', 'aria-label': 'ログイン', title: 'ログイン' }, o.submitLabel || OS.icon('fwd', 18));
+          const msg = h('div', { class: 'gr-msg ' + (o.msgClass || ''), role: 'alert' }, st.msg);
+          const form = h('form', { class: o.formClass || '', onsubmit: async e => {
+            e.preventDefault();
+            const u = o.nameInput ? users.get(o.nameInput.value.trim()) : st.user;
+            if (u && !u.root && await users.verify(u.name, input.value)) {
+              const cf = hdm.conf(); cf.lastUser = u.name; cf.users = cf.users || {}; cf.users[u.name] = st.sid; hdm.save(cf);
+              hdm.stop();
+              onLogin(u.name, st.sid);
+            } else {
+              st.msg = o.nameInput ? 'ユーザー名かパスワードが違います。' : 'パスワードが違います。';
+              msg.textContent = st.msg; input.value = ''; input.focus();
+              const box = form.closest('[data-shake]') || form; box.classList.remove('shake'); void box.offsetWidth; box.classList.add('shake');
+            }
+          } });
+          return { input: input, submit: submit, msg: msg, form: form };
+        },
+        userButtons(cls, size, square) {
+          return list().map(u => h('button', { class: 'gr-user ' + (cls || '') + (st.user && st.user.name === u.name ? ' cur' : ''), type: 'button', onclick: () => c.pick(u) },
+            c.avatar(u, size || 40, square), h('span', null, u.name)));
+        },
+        powerButton(cls, size) {
+          return h('button', { class: 'hdm-btn ' + (cls || ''), type: 'button', title: '電源', 'aria-label': '電源メニュー', onclick: e => htui.menu(e.currentTarget, [
+            { label: 'CUI に切り替え', icon: 'terminal', act: () => htui.stop() },
+            { label: '再起動', icon: 'reload', act: () => OS.reboot() },
+            { label: '電源を切る', icon: 'power', act: () => OS.poweroff() }
+          ], true, c.menuUp ? { up: true } : null) }, OS.icon('power', size || 18));
+        },
+        modeButton(cls, size) {
+          const t = '画面モード: ' + OS.modeNames[OS.modePref];
+          return h('button', { class: 'hdm-btn ' + (cls || ''), type: 'button', title: t, 'aria-label': t, onclick: e => htui.menu(e.currentTarget, ['auto', 'desktop', 'tablet', 'phone'].map(m => ({
+            label: OS.modeNames[m] + (m === 'auto' ? '（' + OS.modeNames[OS.autoMode()] + '）' : ''), icon: OS.modeIcons[m === 'auto' ? OS.autoMode() : m],
+            hint: m === OS.modePref ? '選択中' : null, act: () => { OS.setMode(m); render(); } })), true, c.menuUp ? { up: true } : null) }, OS.icon(OS.modeIcons[OS.uiMode], size || 18));
+        },
+        // ロック画面。クリック・タップ・キー・上へのスワイプで外れる（Windows 系テーマで使う）
+        lock(layer) {
+          if (st.unlocked) return;
+          layer.classList.add('hdm-lock');
+          el.append(layer);
+          let y0 = null;
+          const open = () => {
+            if (st.unlocked) return;
+            st.unlocked = true; document.removeEventListener('keydown', key, true);
+            layer.classList.add('out');
+            setTimeout(() => layer.remove(), 450);
+            const pw = el.querySelector('#gr-pw'); if (pw) setTimeout(() => pw.focus(), 60);
+          };
+          // キーを押すとロックが外れる。そのキーはそのままパスワード欄などへ届く
+          const key = e => { if (!el.isConnected || !layer.isConnected) { document.removeEventListener('keydown', key, true); return; } if (!e.ctrlKey && !e.altKey && !e.metaKey) open(); };
+          document.addEventListener('keydown', key, true);
+          layer.addEventListener('pointerdown', e => { y0 = e.clientY; layer.setPointerCapture(e.pointerId); });
+          layer.addEventListener('pointermove', e => { if (y0 != null && e.clientY < y0) { layer.style.transition = 'none'; layer.style.transform = 'translateY(' + (e.clientY - y0) + 'px)'; } });
+          const up = e => { const d = y0 == null ? 0 : y0 - e.clientY; y0 = null; layer.style.transition = ''; layer.style.transform = ''; if (e.type !== 'pointercancel' && (d > 60 || Math.abs(d) < 8)) open(); };
+          layer.addEventListener('pointerup', up); layer.addEventListener('pointercancel', up);
+        }
+      };
+
+      function render() {
+        ticks = [];
+        const old = el.querySelector('#gr-pw'), typed = old ? old.value : '';
+        const theme = hdm.themeFor(st.sid);
+        // Windows 系はユーザー一覧の画面を持たず、いつも誰か一人を選んだ状態で出す
+        if (!st.user && (theme === 'w11' || theme === 'w8' || theme === 'wp')) st.user = list()[0] || null;
+        el.textContent = ''; el.removeAttribute('style');
+        el.className = 'hdm hdm-' + theme;
+        el.style.setProperty('--accent', c.accent(st.user));
+        c.menuUp = false;
+        THEMES[theme](el, c);
+        const pw = el.querySelector('#gr-pw'), nm = el.querySelector('#hdm-user');
+        if (pw) pw.value = typed;
+        const locked = !!el.querySelector('.hdm-lock');
+        if (!locked) { if (nm && !nm.value) nm.focus(); else if (pw) pw.focus(); }
       }
-      function ask(u) {
-        card.textContent = ''; msg.textContent = '';
-        const pw = h('input', { type: 'password', class: 'inp', id: 'gr-pw', placeholder: 'パスワード', 'aria-label': 'パスワード', autocomplete: 'off' });
-        const sel = h('select', { class: 'sel hdm-session', id: 'hdm-session', 'aria-label': 'デスクトップ環境' },
-          Object.values(OS.sessions).map(s => h('option', { value: s.id, selected: s.id === hdm.sessionFor(u.name) }, s.name)));
-        const desc = h('div', { class: 'hdm-desc' });
-        const syncDesc = () => { const s = OS.sessions[sel.value]; desc.textContent = s ? s.desc : ''; };
-        sel.addEventListener('change', syncDesc); syncDesc();
-        const go = async e => {
-          e.preventDefault();
-          if (await users.verify(u.name, pw.value)) {
-            const c = hdm.conf(); c.lastUser = u.name; c.users = c.users || {}; c.users[u.name] = sel.value; hdm.save(c);
-            hdm.stop();
-            onLogin(u.name, sel.value);
-          } else { msg.textContent = 'パスワードが違います。'; pw.value = ''; pw.focus(); }
-        };
-        [OS.htui.avatar(u, 88), h('h2', { class: 'gr-name' }, u.name),
-          h('form', { class: 'hdm-form', onsubmit: go },
-            h('div', { class: 'gr-form' }, pw, h('button', { class: 'btn primary', type: 'submit', 'aria-label': 'ログイン' }, OS.icon('fwd', 18))),
-            h('label', { class: 'hdm-sesrow' }, OS.icon('grid', 16), sel), desc),
-          msg, list().length > 1 ? h('button', { class: 'btn ghost small', type: 'button', onclick: showUsers }, '別のユーザー') : null].forEach(n => { if (n) card.append(n); });
-        pw.focus();
-      }
-      const last = users.get(hdm.conf().lastUser);
-      if (last && !last.root) ask(last);
-      else if (list().length === 1) ask(list()[0]);
-      else showUsers();
+      clearInterval(timer);
+      timer = setInterval(() => { const d = new Date(); ticks.forEach(f => f(d)); }, 5000);
+      render();
     }
+  };
+
+  // ======================================================== テーマ
+  const THEMES = {};
+
+  // ---- HTUi: 独自デザイン（HTUi のパネルと揃える。壁紙とアクセントカラーはそのユーザーのもの）
+  THEMES.htui = function (el, c) {
+    const u = c.user;
+    el.style.background = c.wallpaper(u);
+    el.append(h('div', { class: 'hh-panel' },
+      h('div', { class: 'hh-brand' }, logo(), h('span', null, 'htmlOS')),
+      c.clock(h('div', { class: 'hh-clock' }), d => (d.getMonth() + 1) + '/' + d.getDate() + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes())),
+      h('div', { class: 'hh-right' }, c.modeButton('hh-pbtn'), c.powerButton('hh-pbtn'))));
+    const main = h('div', { class: 'hh-main' });
+    if (!u) {
+      main.append(h('div', { class: 'hh-card' }, h('h1', { class: 'hh-title' }, 'ようこそ'), h('p', { class: 'hh-sub' }, 'ログインするユーザーを選んでください'), h('div', { class: 'hh-users' }, c.userButtons('hh-user', 64))));
+    } else {
+      const f = c.pwForm({ inputClass: 'hh-pw', submitClass: 'hh-go', formClass: 'hh-form', msgClass: 'hh-msg' });
+      f.form.append(h('div', { class: 'hh-pwrow' }, f.input, f.submit));
+      main.append(h('div', { class: 'hh-card', 'data-shake': '' },
+        h('div', { class: 'hh-ring' }, c.avatar(u, 104)),
+        h('h1', { class: 'gr-name hh-name' }, u.name),
+        c.clock(h('p', { class: 'hh-sub' }), d => fmtDate(d)),
+        f.form, f.msg,
+        h('label', { class: 'hh-ses' }, OS.icon('grid', 15), c.sessionSelect('hh-sel')),
+        h('p', { class: 'hh-desc' }, c.sessionDesc())));
+    }
+    el.append(main);
+    if (u && c.list().length > 1) el.append(h('div', { class: 'hh-others', role: 'group', 'aria-label': 'ユーザー' }, c.userButtons('hh-chip', 26)));
+    el.append(h('div', { class: 'hh-foot' }, 'hdm — HtmlDisplayManager'));
+  };
+
+  // ---- hShell: GDM 風
+  THEMES.gdm = function (el, c) {
+    const u = c.user;
+    el.append(h('div', { class: 'gd-bar' }, h('span'),
+      c.clock(h('b', { class: 'gd-clock' }), d => (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + pad(d.getHours()) + ':' + pad(d.getMinutes())),
+      h('div', { class: 'gd-sys' }, c.modeButton('gd-ibtn', 16), c.powerButton('gd-ibtn', 16))));
+    const main = h('div', { class: 'gd-main' });
+    if (!u) {
+      main.append(h('div', { class: 'gd-list' }, c.userButtons('gd-row', 48)),
+        h('button', { class: 'gd-link', type: 'button', onclick: () => OS.ui.toast('このコンピューターに登録されたユーザーだけがログインできます') }, 'アカウントが見つかりませんか?'));
+    } else {
+      const f = c.pwForm({ inputClass: 'gd-pw', submitClass: 'gd-go', formClass: 'gd-form', msgClass: 'gd-msg' });
+      f.form.append(h('div', { class: 'gd-pwrow' },
+        c.list().length > 1 ? h('button', { class: 'gd-back', type: 'button', 'aria-label': '別のユーザー', title: '別のユーザー', onclick: () => c.pick(null) }, OS.icon('back', 18)) : null,
+        f.input, f.submit));
+      main.append(h('div', { class: 'gd-auth', 'data-shake': '' }, c.avatar(u, 96), h('div', { class: 'gr-name gd-name' }, u.name), f.form, f.msg));
+      // セッションは右下の歯車から選ぶ（GDM と同じ場所）
+      el.append(h('label', { class: 'gd-gear', title: 'デスクトップ環境: ' + c.sessionName() }, OS.icon('gear', 20), c.sessionSelect('', true)));
+    }
+    el.append(main, h('div', { class: 'gd-logo' }, logo(), h('span', null, 'htmlOS')));
+  };
+
+  // ---- hWin（デスクトップ）: Windows 11 風
+  THEMES.w11 = function (el, c) {
+    const u = c.user;
+    el.style.setProperty('--wall', c.wallpaper(u));
+    c.menuUp = true;
+    const f = c.pwForm({ inputClass: 'w11-pw', submitClass: 'w11-go', formClass: 'w11-form', msgClass: 'w11-msg' });
+    f.form.append(h('div', { class: 'w11-pwbox' }, f.input, f.submit));
+    el.append(h('div', { class: 'w11-bg' }),
+      h('div', { class: 'w11-center', 'data-shake': '' }, c.avatar(u, 168), h('div', { class: 'gr-name w11-name' }, u.name), f.form, f.msg,
+        h('div', { class: 'w11-opt' }, 'サインイン オプション: パスワード')),
+      h('div', { class: 'w11-users' }, c.list().length > 1 ? c.userButtons('w11-user', 34) : null),
+      h('div', { class: 'w11-icons' },
+        h('span', { class: 'w11-ibtn', title: navigator.onLine === false ? 'オフライン' : 'インターネットに接続済み' }, OS.icon('globe', 20)),
+        h('label', { class: 'w11-ibtn w11-ses', title: 'デスクトップ環境: ' + c.sessionName() }, OS.icon('grid', 20), c.sessionSelect('', true)),
+        c.modeButton('w11-ibtn', 20), c.powerButton('w11-ibtn', 20)));
+    c.lock(h('div', { class: 'w11-lock' }, h('div', { class: 'w11-lockbg' }),
+      c.clock(h('div', { class: 'w11-ltime' }), d => d.getHours() + ':' + pad(d.getMinutes())),
+      c.clock(h('div', { class: 'w11-ldate' }), d => (d.getMonth() + 1) + '月' + d.getDate() + '日' + WEEK[d.getDay()] + '曜日')));
+  };
+
+  // ---- hWin（タブレット）: Windows 8.1 風
+  THEMES.w8 = function (el, c) {
+    const u = c.user;
+    c.menuUp = true;
+    const f = c.pwForm({ inputClass: 'w8l-pw', submitClass: 'w8l-go', formClass: 'w8l-form', msgClass: 'w8l-msg' });
+    f.form.append(h('div', { class: 'w8l-pwbox' }, f.input, f.submit));
+    const pick = h('div', { class: 'w8l-pick' }, c.userButtons('w8l-user', 96, true));
+    el.append(h('div', { class: 'w8l-main', 'data-shake': '' },
+      c.list().length > 1 ? h('button', { class: 'w8l-back', type: 'button', 'aria-label': '別のユーザー', title: '別のユーザー', onclick: () => pick.classList.toggle('on') }, OS.icon('back', 24)) : h('span', { class: 'w8l-back-sp' }),
+      c.avatar(u, 190, true), h('div', { class: 'w8l-side' }, h('div', { class: 'gr-name w8l-name' }, u.name), f.form, f.msg)),
+      pick,
+      h('div', { class: 'w8l-icons' },
+        h('label', { class: 'w8l-ibtn', title: 'デスクトップ環境: ' + c.sessionName() }, OS.icon('grid', 24), c.sessionSelect('', true)),
+        c.modeButton('w8l-ibtn', 24), c.powerButton('w8l-ibtn', 24)));
+    c.lock(h('div', { class: 'w8l-lock', style: 'background:' + c.wallpaper(u) },
+      h('div', { class: 'w8l-lclock' },
+        c.clock(h('div', { class: 'w8l-ltime' }), d => d.getHours() + ':' + pad(d.getMinutes())),
+        c.clock(h('div', { class: 'w8l-ldate' }), d => (d.getMonth() + 1) + '月' + d.getDate() + '日\n' + WEEK[d.getDay()] + '曜日'))));
+  };
+
+  // ---- hWin（スマートフォン）: Windows Phone 風
+  THEMES.wp = function (el, c) {
+    const u = c.user;
+    const f = c.pwForm({ inputClass: 'wpl-pw', submitClass: 'wpl-ok', formClass: 'wpl-form', msgClass: 'wpl-msg', submitLabel: 'OK' });
+    const others = h('div', { class: 'wpl-users' }, c.userButtons('wpl-user', 44, true));
+    f.form.append(f.input, h('div', { class: 'wpl-btns' }, f.submit,
+      c.list().length > 1 ? h('button', { class: 'wpl-alt', type: 'button', onclick: () => others.classList.toggle('on') }, '別のユーザー') : null));
+    el.append(h('div', { class: 'wpl-status' }, h('span', { class: 'wpl-net' }, OS.icon('globe', 14)), h('span', { class: 'wpl-sbtns' }, c.modeButton('wpl-ibtn', 16), c.powerButton('wpl-ibtn', 16)), c.clock(h('span'), d => pad(d.getHours()) + ':' + pad(d.getMinutes()))),
+      h('div', { class: 'wpl-main', 'data-shake': '' },
+        h('div', { class: 'wpl-app' }, 'HTMLOS'),
+        h('h1', { class: 'wpl-title' }, 'パスワード'),
+        h('div', { class: 'wpl-who' }, c.avatar(u, 44, true), h('span', { class: 'gr-name' }, u.name)),
+        f.form, f.msg,
+        h('label', { class: 'wpl-ses' }, h('span', null, 'デスクトップ環境'), c.sessionSelect('wpl-sel')),
+        others));
+    c.lock(h('div', { class: 'wpl-lock', style: 'background:' + c.wallpaper(u) },
+      h('div', { class: 'wpl-lclock' },
+        c.clock(h('div', { class: 'wpl-ltime' }), d => d.getHours() + ':' + pad(d.getMinutes())),
+        c.clock(h('div', { class: 'wpl-ldate' }), d => WEEK[d.getDay()] + '曜日\n' + (d.getMonth() + 1) + '月' + d.getDate() + '日')),
+      h('div', { class: 'wpl-hint' }, '上へスワイプしてロックを解除')));
+  };
+
+  // ---- hwc: シンプルな独自デザイン（ユーザー名も入力する）
+  THEMES.wm = function (el, c) {
+    const name = h('input', { class: 'wm-in', id: 'hdm-user', value: c.user ? c.user.name : '', 'aria-label': 'ユーザー名', autocomplete: 'off', spellcheck: 'false', autocapitalize: 'off' });
+    const f = c.pwForm({ inputClass: 'wm-in', submitClass: 'wm-go', formClass: 'wm-form', msgClass: 'wm-msg', submitLabel: 'ログイン', nameInput: name });
+    const row = (label, ctl) => h('label', { class: 'wm-row' }, h('span', null, label), ctl);
+    f.form.append(row('ユーザー', name), row('パスワード', f.input), row('セッション', c.sessionSelect('wm-in')), h('div', { class: 'wm-acts' }, f.submit));
+    el.append(h('div', { class: 'wm-box', 'data-shake': '' },
+      h('div', { class: 'wm-head' }, h('b', null, 'htmlOS ' + OS.version), c.clock(h('span'), d => pad(d.getHours()) + ':' + pad(d.getMinutes()))),
+      f.form, f.msg),
+      h('div', { class: 'wm-foot' }, c.modeButton('wm-ibtn', 15), c.powerButton('wm-ibtn', 15)));
   };
 })();
 </script>
@@ -4090,7 +4273,6 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 .touch .st-sw.wp{width:92px;height:58px}
 .touch .st-nav{width:170px}
 .touch .hs-out{font-size:14px}
-.touch .gr-user{min-width:124px;padding:16px}
 .hs-direct{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;font-size:13px}
 .switcher{position:absolute;inset:0;z-index:150000;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);display:flex;flex-direction:column;align-items:center;padding:20px 14px;gap:12px;color:#fff}
 .sw-head{font-weight:600}
@@ -4129,38 +4311,182 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 .phone .tbl{font-size:13.5px}
 .phone .hb-page{padding:18px 12px}
 
-/* ==================================================== hdm（ログイン画面） */
-#htui.hdm{color:#fff;background:radial-gradient(120% 90% at 50% 0%,#24476e 0%,#14243a 55%,#0b121c 100%)}
-.hdm-bar{flex:none;height:34px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:0 8px;background:rgba(0,0,0,.35);font-size:13px}
-.hdm-host{display:flex;gap:8px;align-items:baseline}
-.hdm-host span{opacity:.6;font-size:12px}
-.hdm-barclock{font-variant-numeric:tabular-nums}
-.hdm-right{display:flex;justify-content:flex-end;gap:4px}
-.hdm-btn{display:flex;align-items:center;justify-content:center;width:34px;height:28px;border:0;border-radius:6px;background:none;color:#fff!important;cursor:pointer}
-.hdm-btn:hover{background:rgba(255,255,255,.15)}
-.hdm-main{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;padding:20px 16px}
-.hdm-clock{text-align:center}
-.hdm-time{font:300 64px/1 var(--ui);font-variant-numeric:tabular-nums;letter-spacing:.02em}
-.hdm-date{margin-top:6px;opacity:.8}
-.hdm-card{width:min(380px,100%);display:flex;flex-direction:column;align-items:center;gap:12px;padding:22px 20px;border-radius:16px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);backdrop-filter:blur(8px);text-align:center}
-.hdm-sub,.gr-name{margin:0}
-.gr-name{font-size:20px;font-weight:600}
-.hdm-form{display:flex;flex-direction:column;gap:8px;width:100%}
-.hdm-form .btn.primary{padding:5px 10px}
-.hdm-sesrow{display:flex;align-items:center;gap:8px;color:rgba(255,255,255,.8)}
-.hdm-session{flex:1;min-width:0}
-.hdm-desc{font-size:12px;opacity:.7;text-align:left;min-height:2.6em}
-.gr-users{display:flex;flex-wrap:wrap;gap:12px;justify-content:center}
-.gr-user{display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 14px;min-width:100px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);border-radius:12px;color:#fff!important;cursor:pointer}
-.gr-user:hover{background:rgba(255,255,255,.18)}
-.gr-form{display:flex;gap:8px;width:100%}
-.gr-msg{min-height:1.4em;color:#ffd7d7}
-.hdm-foot{flex:none;text-align:center;font-size:11.5px;opacity:.45;padding:6px;letter-spacing:.06em}
+/* ==================================================== hdm（ログイン画面）。#htui に .hdm と .hdm-<テーマ> が付く */
+#htui.hdm{color:#fff}
 .os-logo{font:700 15px/1 var(--mono);letter-spacing:.02em}
 .os-logo b{color:#5fa8f5}
+.hdm .avatar.sq{border-radius:0}
+.hdm-ovsel{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;font-size:16px}
+.hdm [data-shake].shake{animation:hdm-shake .4s ease-in-out}
+@keyframes hdm-shake{20%,60%{transform:translateX(-10px)}40%,80%{transform:translateX(10px)}}
+.gr-msg{min-height:1.4em}
+.hdm-lock{position:absolute;inset:0;z-index:50;transition:transform .42s cubic-bezier(.4,0,.2,1),opacity .42s;touch-action:none;cursor:pointer}
+.hdm-lock.out{transform:translateY(-100%)!important;opacity:.6;pointer-events:none}
+
+/* ---- HTUi（独自デザイン） */
+.hdm-htui{background-size:cover}
+.hh-panel{flex:none;height:32px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:0 6px 0 12px;background:var(--panel);color:var(--panel-ink);font-size:13px;z-index:2}
+.hh-brand{display:flex;align-items:center;gap:8px;font-weight:600}
+.hh-clock{font-variant-numeric:tabular-nums}
+.hh-right{display:flex;justify-content:flex-end;gap:2px}
+.hh-pbtn{display:flex;align-items:center;justify-content:center;width:34px;height:26px;border:0;border-radius:6px;background:none;color:inherit!important;cursor:pointer}
+.hh-pbtn:hover{background:rgba(255,255,255,.14)}
+.hh-main{flex:1;min-height:0;overflow:auto;display:flex;align-items:center;justify-content:center;padding:24px 16px}
+.hh-card{width:min(360px,100%);display:flex;flex-direction:column;align-items:center;gap:10px;padding:30px 26px 22px;border-radius:18px;background:rgba(250,250,251,.94);color:var(--ink);box-shadow:0 24px 60px rgba(0,0,0,.35);text-align:center}
+.hh-ring{padding:4px;border-radius:50%;background:conic-gradient(from 210deg,var(--accent),color-mix(in srgb,var(--accent) 40%,#fff),var(--accent))}
+.hh-ring .avatar{border:3px solid #fff}
+.hh-name{margin:4px 0 0;font-size:22px;font-weight:700}
+.hh-title{margin:0;font-size:24px}
+.hh-sub{margin:0;color:var(--ink-2);font-size:13px}
+.hh-form{width:100%;margin-top:8px}
+.hh-pwrow{display:flex;align-items:center;gap:0;border:1.5px solid var(--line);border-radius:10px;background:#fff;overflow:hidden;transition:border-color .15s,box-shadow .15s}
+.hh-pwrow:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 25%,transparent)}
+.hh-pw{flex:1;min-width:0;border:0!important;outline:0!important;background:none;padding:11px 12px;font:inherit;font-size:15px;color:var(--ink)}
+.hh-go{flex:none;width:44px;align-self:stretch;border:0;background:var(--accent);color:#fff!important;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.hh-go:hover{filter:brightness(1.08)}
+.hh-msg{color:#c01c28;font-size:13px}
+.hh-ses{position:relative;display:flex;align-items:center;gap:6px;padding:4px 6px 4px 10px;border-radius:999px;background:var(--surface-2);color:var(--ink-2);font-size:13px}
+.hh-sel{border:0;background:none;font:inherit;color:var(--ink);padding:2px 2px;cursor:pointer;max-width:240px}
+.hh-desc{margin:0;color:var(--ink-2);font-size:12px;line-height:1.5;min-height:3em}
+.hh-users{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:8px}
+.hh-user{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:96px;padding:12px;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--ink)!important;cursor:pointer}
+.hh-user:hover{border-color:var(--accent)}
+.hh-others{position:absolute;left:14px;bottom:14px;display:flex;flex-wrap:wrap;gap:6px;max-width:calc(100% - 28px)}
+.hh-chip{display:flex;align-items:center;gap:8px;padding:4px 12px 4px 4px;border:0;border-radius:999px;background:rgba(0,0,0,.35);color:#fff!important;cursor:pointer;backdrop-filter:blur(6px);font-size:13px}
+.hh-chip.cur{background:rgba(255,255,255,.9);color:var(--ink)!important}
+.hh-foot{position:absolute;right:14px;bottom:16px;font-size:11.5px;opacity:.6;letter-spacing:.05em;text-shadow:0 1px 2px rgba(0,0,0,.5)}
+.phone .hh-foot{display:none}
+
+/* ---- hShell（GDM 風） */
+.hdm-gdm{background:#2c2c30;font-family:var(--ui)}
+.gd-bar{flex:none;height:30px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:0 6px;background:#000;font-size:13.5px}
+.gd-clock{font-variant-numeric:tabular-nums}
+.gd-sys{display:flex;justify-content:flex-end;gap:2px}
+.gd-ibtn{display:flex;align-items:center;justify-content:center;width:34px;height:24px;border:0;border-radius:12px;background:none;color:#fff!important;cursor:pointer}
+.gd-ibtn:hover{background:rgba(255,255,255,.16)}
+.gd-main{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:16px}
+.gd-list{width:min(360px,100%);display:flex;flex-direction:column;gap:2px}
+.gd-row{display:flex;align-items:center;gap:16px;padding:10px 14px;border:0;border-radius:12px;background:none;color:#fff!important;font-size:17px;cursor:pointer;text-align:left}
+.gd-row:hover,.gd-row:focus-visible{background:rgba(255,255,255,.1)}
+.gd-link{border:0;background:none;color:rgba(255,255,255,.7)!important;font-size:13px;cursor:pointer;text-decoration:underline}
+.gd-auth{display:flex;flex-direction:column;align-items:center;gap:14px;width:min(340px,100%)}
+.gd-name{font-size:20px;font-weight:700}
+.gd-form{width:100%}
+.gd-pwrow{display:flex;align-items:center;gap:8px}
+.gd-pw{flex:1;min-width:0;height:40px;border:2px solid transparent;border-radius:8px;background:#3d3d42;color:#fff;padding:0 12px;font:inherit;font-size:15px;outline:0!important}
+.gd-pw:focus{border-color:color-mix(in srgb,var(--accent) 70%,#fff)}
+.gd-go,.gd-back{flex:none;width:40px;height:40px;border:0;border-radius:50%;background:#3d3d42;color:#fff!important;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.gd-go{background:var(--accent)}
+.gd-back:hover{background:#4a4a50}
+.gd-msg{color:#ff8080;font-size:13px}
+.gd-gear{position:absolute;right:20px;bottom:20px;width:44px;height:44px;border-radius:50%;background:#3d3d42;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.gd-gear:hover{background:#4a4a50}
+.gd-logo{position:absolute;left:50%;bottom:22px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;font-size:16px;font-weight:700;opacity:.85}
+
+/* ---- hWin デスクトップ（Windows 11 風） */
+.hdm-w11{background:#000;font-family:"Segoe UI Variable","Segoe UI",var(--ui)}
+.w11-bg{position:absolute;inset:-30px;background:var(--wall);filter:blur(28px) brightness(.7);transform:scale(1.05)}
+.w11-center{position:relative;flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:16px}
+.w11-name{font-size:28px;font-weight:600;margin-top:6px}
+.w11-form{width:min(300px,100%)}
+.w11-pwbox{display:flex;align-items:center;height:36px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);border-bottom:2px solid rgba(255,255,255,.55);border-radius:5px;backdrop-filter:blur(10px)}
+.w11-pwbox:focus-within{border-bottom-color:var(--accent);background:rgba(0,0,0,.35)}
+.w11-pw{flex:1;min-width:0;border:0!important;outline:0!important;background:none;color:#fff;padding:0 10px;font:inherit;font-size:14px}
+.w11-pw::placeholder{color:rgba(255,255,255,.75)}
+.w11-go{flex:none;width:32px;height:28px;margin-right:3px;border:0;border-radius:4px;background:rgba(255,255,255,.12);color:#fff!important;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.w11-go:hover{background:rgba(255,255,255,.22)}
+.w11-msg{font-size:13px;color:#fff}
+.w11-opt{font-size:13px;opacity:.85}
+.w11-users{position:absolute;left:20px;bottom:20px;display:flex;flex-direction:column;gap:2px}
+.w11-user{display:flex;align-items:center;gap:12px;padding:6px 16px 6px 6px;border:0;border-radius:5px;background:none;color:#fff!important;font-size:14px;cursor:pointer;text-align:left}
+.w11-user:hover,.w11-user.cur{background:rgba(255,255,255,.12)}
+.w11-icons{position:absolute;right:20px;bottom:20px;display:flex;gap:6px}
+.w11-ibtn{position:relative;width:40px;height:40px;display:flex;align-items:center;justify-content:center;border:0;border-radius:5px;background:none;color:#fff!important;cursor:pointer}
+.w11-ibtn:hover{background:rgba(255,255,255,.12)}
+.w11-lock{display:flex;flex-direction:column;align-items:center;padding-top:9vh;text-shadow:0 2px 12px rgba(0,0,0,.35);overflow:hidden}
+.w11-lockbg{position:absolute;inset:0;background:var(--wall);z-index:-1}
+.w11-ltime{font-size:clamp(64px,13vw,120px);font-weight:600;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.w11-ldate{margin-top:10px;font-size:clamp(17px,2.5vw,24px);font-weight:500}
+
+/* ---- hWin タブレット（Windows 8.1 風） */
+.hdm-w8{background:var(--accent);font-family:"Segoe UI",var(--ui)}
+.w8l-main{flex:1;display:flex;align-items:center;justify-content:center;gap:28px;padding:16px}
+.w8l-back,.w8l-back-sp{flex:none;width:42px;height:42px}
+.w8l-back{border:2px solid #fff;border-radius:50%;background:none;color:#fff!important;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.w8l-back:hover{background:rgba(255,255,255,.15)}
+.w8l-side{display:flex;flex-direction:column;gap:12px;min-width:0}
+.w8l-name{font:300 34px/1.1 var(--ui)}
+.w8l-pwbox{display:flex;width:min(300px,60vw);height:36px;background:#fff}
+.w8l-pw{flex:1;min-width:0;border:0!important;outline:0!important;padding:0 10px;font:inherit;font-size:15px;color:#000}
+.w8l-go{flex:none;width:40px;border:0;background:#fff;color:#000!important;display:flex;align-items:center;justify-content:center;cursor:pointer;border-left:1px solid #ccc}
+.w8l-go:hover{background:#e6e6e6}
+.w8l-msg{font-size:14px;color:#fff}
+.w8l-pick{display:none;position:absolute;left:0;right:0;bottom:84px;justify-content:center;gap:14px;padding:12px}
+.w8l-pick.on{display:flex}
+.w8l-user{display:flex;flex-direction:column;align-items:flex-start;gap:6px;border:0;background:none;color:#fff!important;cursor:pointer;font-size:14px}
+.w8l-user.cur .avatar{outline:3px solid #fff}
+.w8l-icons{position:absolute;right:26px;bottom:24px;display:flex;gap:14px}
+.w8l-ibtn{position:relative;width:46px;height:46px;border:2px solid #fff;border-radius:50%;background:none;color:#fff!important;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.w8l-ibtn:hover{background:rgba(255,255,255,.15)}
+.w8l-lock{background-size:cover!important}
+.w8l-lclock{position:absolute;left:5vw;bottom:9vh;text-shadow:0 2px 10px rgba(0,0,0,.35)}
+.w8l-ltime{font:200 clamp(80px,14vw,140px)/1 var(--ui);font-variant-numeric:tabular-nums}
+.w8l-ldate{white-space:pre;font:300 clamp(20px,3vw,32px)/1.25 var(--ui);margin-top:8px}
+.phone .w8l-main{flex-direction:column}
+
+/* ---- hWin スマートフォン（Windows Phone 風） */
+.hdm-wp{background:#000;font-family:"Segoe WP","Segoe UI",var(--ui)}
+.wpl-status{flex:none;height:32px;display:flex;align-items:center;gap:10px;padding:0 10px 0 14px;font-size:14px;font-variant-numeric:tabular-nums}
+.wpl-sbtns{margin-left:auto;display:flex;gap:2px}
+.wpl-ibtn{width:32px;height:28px;border:0;background:none;color:#fff!important;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.wpl-main{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:12px;padding:10px 20px 20px}
+.wpl-app{font-size:14px;font-weight:600;letter-spacing:.06em}
+.wpl-title{margin:0;font:300 46px/1.1 var(--ui);letter-spacing:-.01em}
+.wpl-who{display:flex;align-items:center;gap:12px;font-size:17px}
+.wpl-form{display:flex;flex-direction:column;gap:14px}
+.wpl-pw{height:44px;border:2px solid #fff;background:#fff;color:#000;padding:0 10px;font:inherit;font-size:17px;outline:0!important;border-radius:0}
+.wpl-pw:focus{border-color:var(--accent)}
+.wpl-btns{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.wpl-ok,.wpl-alt{height:46px;border:2px solid #fff;background:none;color:#fff!important;font:inherit;font-size:16px;cursor:pointer}
+.wpl-ok{background:var(--accent);border-color:var(--accent)}
+.wpl-ok:active,.wpl-alt:active{filter:brightness(1.2)}
+.wpl-msg{color:#fff;font-size:14px}
+.wpl-ses{display:flex;flex-direction:column;gap:6px;font-size:14px;opacity:.9}
+.wpl-sel{height:44px;border:2px solid #fff;background:#000;color:#fff;font:inherit;font-size:16px;padding:0 8px;border-radius:0}
+.wpl-users{display:none;flex-direction:column;gap:6px}
+.wpl-users.on{display:flex}
+.wpl-user{display:flex;align-items:center;gap:12px;border:0;background:none;color:#fff!important;font-size:17px;cursor:pointer;padding:4px 0;text-align:left}
+.wpl-user.cur span{color:var(--accent)}
+.wpl-lock{background-size:cover!important}
+.wpl-lclock{position:absolute;left:24px;bottom:18%;text-shadow:0 2px 10px rgba(0,0,0,.4)}
+.wpl-ltime{font:200 92px/1 var(--ui);font-variant-numeric:tabular-nums}
+.wpl-ldate{white-space:pre;font:300 26px/1.25 var(--ui);margin-top:6px}
+.wpl-hint{position:absolute;left:0;right:0;bottom:24px;text-align:center;font-size:13px;opacity:.85;text-shadow:0 1px 4px rgba(0,0,0,.5)}
+
+/* ---- hwc（シンプル） */
+.hdm-wm{background:#15171b;align-items:center;justify-content:center;font-family:var(--mono)}
+.wm-box{width:min(380px,calc(100% - 32px));display:flex;flex-direction:column;gap:14px;padding:20px 22px;border:1px solid #33363e;background:#1d2026;color:#d9dbe0}
+.wm-head{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;color:#8b93a1;padding-bottom:10px;border-bottom:1px solid #2c3038}
+.wm-head b{color:#e9eaee;font-size:14px}
+.wm-form{display:flex;flex-direction:column;gap:10px}
+.wm-row{display:grid;grid-template-columns:96px 1fr;align-items:center;gap:10px;font-size:13px;color:#9aa0aa}
+.wm-in{width:100%;min-width:0;height:32px;border:1px solid #3a3f4a;border-radius:2px;background:#121418;color:#e9eaee;font:13.5px var(--mono);padding:0 8px;outline:0!important}
+.wm-in:focus{border-color:var(--accent)}
+.wm-acts{display:flex;justify-content:flex-end}
+.wm-go{height:32px;padding:0 18px;border:1px solid var(--accent);border-radius:2px;background:var(--accent);color:#fff!important;font:13px var(--mono);cursor:pointer}
+.wm-msg{font-size:12.5px;color:#ff7b72}
+.wm-foot{position:absolute;right:12px;bottom:10px;display:flex;gap:4px}
+.wm-ibtn{width:30px;height:28px;border:1px solid transparent;border-radius:2px;background:none;color:#8b93a1!important;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.wm-ibtn:hover{border-color:#3a3f4a;color:#fff!important}
+.phone .wm-row{grid-template-columns:1fr}
+
 @media (prefers-reduced-motion:no-preference){
-  #htui.hdm .hdm-card{animation:rise .4s cubic-bezier(.2,.8,.2,1) both}
-  #htui.hdm .hdm-clock{animation:fade-in .5s ease-out both}
+  .hdm-htui .hh-card{animation:rise .45s cubic-bezier(.2,.8,.2,1) both}
+  .hdm-gdm .gd-auth,.hdm-gdm .gd-list{animation:fade-in .35s ease-out both}
+  .hdm-w11 .w11-center{animation:pop .4s cubic-bezier(.2,.8,.2,1) both}
+  .hdm-w8 .w8l-main{animation:w8-in .45s cubic-bezier(.2,.8,.2,1) both}
+  .hdm-wp .wpl-main>*{animation:w8-in .35s cubic-bezier(.2,.8,.2,1) both}
+  .hdm-wm .wm-box{animation:fade-in .25s ease-out both}
 }
 
 /* ==================================================== hWin（Windows 風） */
@@ -4564,6 +4890,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   .wp-tcard{animation:pop .25s cubic-bezier(.2,.8,.2,1) both}
   .wp-jump .wp-jl{animation:w8-in .3s cubic-bezier(.2,.8,.2,1) both}
 }
+.hdm-w8 .avatar.sq{box-shadow:0 0 0 2px rgba(255,255,255,.55);filter:brightness(.85)}
 </script>
 <script>
 /* ============================================================
@@ -4574,7 +4901,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
    ============================================================ */
 (function () {
   'use strict';
-  var MEDIA_VERSION = '1.10.0';
+  var MEDIA_VERSION = '1.11.0';
   var P = 'htmlos:';
 
   // ---- ストレージ (LocalStorageが使えない環境ではRAMディスクで動く)
