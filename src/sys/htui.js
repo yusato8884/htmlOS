@@ -154,9 +154,10 @@
     fill(); htui.el.append(ov);
   }
   // モードが変わったとき: タッチ系は全ウィンドウを全画面に、デスクトップに戻ったら元の大きさに
-  htui.onMode = function () {
+  htui.onMode = function (changed) {
     if (!htui.running || !htui.user) return;
     htui.syncMode();
+    if (changed === false) return;
     htui.wins.forEach(w => {
       if (!OS.touch) { w.free = false; w.el.classList.remove('free'); }
       if (OS.touch && !w.free) w.snap('max', true); else if (!OS.touch && w.zone === 'max') w.unsnap(true);

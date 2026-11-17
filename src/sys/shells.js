@@ -52,9 +52,23 @@
     el.addEventListener('pointerup', fin); el.addEventListener('pointercancel', fin);
     el.addEventListener('click', e => { if (swiped) { swiped = false; e.stopPropagation(); e.preventDefault(); } }, true);
   }
+  // 要素を押してから離すまでの移動量を渡す（タップなら tap=true）。capture=true なら子要素の上から始めても拾う
+  function dragOn(el, onEnd, capture) {
+    let s = null;
+    el.addEventListener('pointerdown', e => { if (e.button > 0) return; s = { x: e.clientX, y: e.clientY, lx: e.clientX, ly: e.clientY }; }, !!capture);
+    el.addEventListener('pointermove', e => { if (s) { s.lx = e.clientX; s.ly = e.clientY; } }, !!capture);
+    const fin = e => {
+      if (!s) return;
+      const x = e.type === 'pointercancel' ? s.lx : e.clientX, y = e.type === 'pointercancel' ? s.ly : e.clientY;
+      const dx = x - s.x, dy = y - s.y; s = null;
+      onEnd(dx, dy, Math.abs(dx) < 10 && Math.abs(dy) < 10 && e.type !== 'pointercancel');
+    };
+    el.addEventListener('pointerup', fin, !!capture); el.addEventListener('pointercancel', fin, !!capture);
+  }
   // 外側を押す・Esc で閉じるポップアップ
   function popup(el, anchor, onClose) {
-    const off = e => { if (!el.contains(e.target) && !(anchor && anchor.contains(e.target)) && !e.target.closest('.menu,.modal-ov')) close(); };
+    // ナビゲーションバー（スマートフォン）のボタンは自分で閉じ方を決めるので、外側を押した扱いにしない
+    const off = e => { if (!el.contains(e.target) && !(anchor && anchor.contains(e.target)) && !e.target.closest('.menu,.modal-ov,.wp-nav')) close(); };
     const esc = e => { if (e.key === 'Escape' && !htui.el.querySelector('.menu')) { e.stopPropagation(); close(); } };
     function close() { el.remove(); document.removeEventListener('pointerdown', off, true); document.removeEventListener('keydown', esc, true); if (onClose) onClose(); }
     el._close = close;
@@ -77,7 +91,9 @@
 
   // ======================================================== hWin（Windows 風）
   //   マウス（デスクトップモード）: 下にタスクバー、スタートメニュー
-  //   タッチ（タブレット・スマートフォン）: Windows 8.1 風
+  //   スマートフォン: Windows Phone 8.1 風（上のステータスバー → 下へスワイプでアクションセンター、下のナビバー: 戻る・スタート・検索。
+  //     戻る長押し／ナビバーを上へスワイプでタスク切り替え。スタート画面を左へスワイプでアプリ一覧）
+  //   タッチ（タブレット）: Windows 8.1 風
   //     スタート画面（タイル）／すべてのアプリ（タブレットは上スワイプ、スマートフォンは左スワイプ）
   //     「デスクトップ」タイル → タスクバーつきのデスクトップ。ここで開いたアプリはふつうのウィンドウ。スタートボタンでスタート画面へ
   //     右端からスワイプ → チャーム／左端から → 前のアプリ（少し出して戻すと切り替え一覧）
@@ -123,7 +139,7 @@
 
       // ---- タッチ用: 画面の端
       const edges = [
-        edge('r', { end: v => { if (v.max > 30) this.charms(); } }),
+        edge('r', { end: v => { if (v.max > 30 && OS.uiMode !== 'phone') this.charms(); } }),
         edge('l', { end: v => this.leftSwipe(v) }),
         edge('t', { move: v => this.dragClose(v), end: v => this.dragClose(v, true) }),
         edge('b', { end: v => {
@@ -133,11 +149,130 @@
           if (!el.classList.contains('w8-desk-on') && (v.max > 30 || v.max < 12) && !v.cancel) this.appBar();
         } })
       ];
-      htui.el.append(desk, h('div', { class: 'taskbar' }, start, tasks, h('div', { class: 'tb-tray' }, k.modeButton('tb-btn', { up: true }), clock, showDesk)), ...edges);
+      htui.el.append(desk, h('div', { class: 'taskbar' }, start, tasks, h('div', { class: 'tb-tray' }, k.modeButton('tb-btn', { up: true }), clock, showDesk)), ...edges, ...this.buildPhone(k));
       htui.el.classList.add('w8-start-on');
       this.startBtn = start;
     },
-    onStop() { this.tiles = null; this.lastApp = null; },
+    onStop() { this.tiles = null; this.lastApp = null; if (this._unbind) this._unbind(); this._unbind = null; },
+
+    // ---- スマートフォン用（Windows Phone 8.1 風）: ステータスバーとナビゲーションバー
+    buildPhone(k) {
+      const self = this;
+      // ステータスバー: 回線・電池（分かるときだけ）・時刻。下へスワイプ（またはタップ）でアクションセンター
+      const net = h('span', { class: 'wp-net', title: '回線' }, OS.icon('globe', 16));
+      const batt = h('span', { class: 'wp-batt', hidden: true });
+      const syncNet = () => { net.classList.toggle('off', navigator.onLine === false); net.title = navigator.onLine === false ? 'オフライン' : 'オンライン'; };
+      syncNet(); addEventListener('online', syncNet); addEventListener('offline', syncNet);
+      this._unbind = () => { removeEventListener('online', syncNet); removeEventListener('offline', syncNet); };
+      if (navigator.getBattery) navigator.getBattery().then(b => {
+        const upd = () => { batt.hidden = false; batt.textContent = Math.round(b.level * 100) + '%' + (b.charging ? ' ⚡' : ''); };
+        upd(); b.addEventListener('levelchange', upd); b.addEventListener('chargingchange', upd);
+      }).catch(() => {});
+      const status = h('div', { class: 'wp-status', role: 'button', 'aria-label': 'アクションセンターを開く' },
+        h('span', { class: 'wp-sicons' }, net, batt), k.clock(h('span', { class: 'wp-time' }), d => pad(d.getHours()) + ':' + pad(d.getMinutes())));
+      dragOn(status, (dx, dy, tap) => { if (tap || dy > 30) self.actionCenter(); });
+      // ナビゲーションバー: 戻る（長押しでタスク切り替え）・スタート・検索。上へスワイプでもタスク切り替え
+      const back = h('button', { class: 'wp-nbtn', type: 'button', title: '戻る（長押しでタスク切り替え）', 'aria-label': '戻る' }, OS.icon('back', 26));
+      let lp = null, long = false;
+      // 指を離した瞬間に反応する（直前のスワイプなどでブラウザがクリックを出さないことがあるため）。キーボードからはクリックで
+      let downAt = 0, handled = 0;
+      back.addEventListener('pointerdown', () => { long = false; downAt = Date.now(); clearTimeout(lp); lp = setTimeout(() => { long = true; self.taskSwitcher(); }, 550); });
+      back.addEventListener('pointerup', e => {
+        clearTimeout(lp);
+        const r = back.getBoundingClientRect();
+        if (long || !downAt || e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return;
+        downAt = 0; handled = Date.now(); self.phoneBack();
+      });
+      ['pointercancel', 'pointerleave'].forEach(t => back.addEventListener(t, () => { clearTimeout(lp); downAt = 0; }));
+      back.addEventListener('click', e => { if (long || Date.now() - handled < 800) { long = false; e.preventDefault(); return; } self.phoneBack(); });
+      back.addEventListener('contextmenu', e => e.preventDefault());
+      const nav = h('div', { class: 'wp-nav' }, back,
+        h('button', { class: 'wp-nbtn', type: 'button', title: 'スタート', 'aria-label': 'スタート', onclick: () => { if (htui.el.classList.contains('w8-start-on') && self.startEl.classList.contains('apps')) self.showApps(false); else self.showStart(); } }, OS.icon('win', 24)),
+        h('button', { class: 'wp-nbtn', type: 'button', title: '検索', 'aria-label': '検索', onclick: () => { self.showStart(); self.showApps(true); setTimeout(() => self.q.focus(), 60); } }, OS.icon('search', 24)));
+      dragOn(nav, (dx, dy) => { if (dy < -30) self.taskSwitcher(); }, true);
+      return [status, nav];
+    },
+    // 戻るボタン: 開いているものを順に閉じる。アプリなら終了して前のアプリ（なければスタート）へ
+    phoneBack() {
+      const el = htui.el;
+      const modal = el.querySelector('.modal-ov');
+      if (modal) { modal.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return; }
+      if (el.querySelector('.menu')) { htui.closeMenus(); return; }
+      const pop = el.querySelector('.wp-ac,.wp-tasks,.wp-jump,.w8-appbar,.w8-charmwrap,.w8-pane,.w8-switch');
+      if (pop && pop._close) { pop._close(); return; }
+      if (el.classList.contains('w8-start-on')) { if (this.startEl.classList.contains('apps')) this.showApps(false); return; }
+      const w = htui.active();
+      if (w) w.close(); else this.showStart();
+    },
+    // タスク切り替え: 開いているアプリを横に並べる。タップで切り替え、下へはじくと閉じる
+    taskSwitcher() {
+      if (htui.el.querySelector('.wp-tasks')) return;
+      const list = h('div', { class: 'wp-tlist' });
+      const box = h('div', { class: 'wp-tasks', role: 'dialog', 'aria-label': 'タスク切り替え' }, list);
+      const fill = () => {
+        list.textContent = '';
+        const wins = byZ();
+        if (!wins.length) { list.append(h('p', { class: 'wp-tempty' }, '開いているアプリはありません')); return; }
+        wins.forEach(w => {
+          const a = OS.apps[w.app] || {};
+          const card = h('div', { class: 'wp-tcard' },
+            h('button', { class: 'wp-tthumb', type: 'button', style: 'background:' + (a.color || '#5e5c64'), 'aria-label': w.title + ' に切り替え', onclick: () => { close(); w.focus(); } }, OS.icon(a.icon || 'file', 48)),
+            h('div', { class: 'wp-ttitle' }, h('span', null, w.title), h('button', { class: 'wp-tx', type: 'button', 'aria-label': w.title + ' を閉じる', onclick: async () => { if (await w.close()) { fill(); if (!htui.wins.length) close(); } } }, OS.icon('x', 16))));
+          // 下へはじくと閉じる
+          card.addEventListener('pointerdown', e => {
+            if (e.target.closest('.wp-tx')) return;
+            const y0 = e.clientY; let dy = 0;
+            const mv = ev => { dy = Math.max(0, ev.clientY - y0); if (dy > 8) { card.style.transition = 'none'; card.style.transform = 'translateY(' + dy + 'px)'; card.style.opacity = String(1 - dy / 400); } };
+            const up = async () => {
+              document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up);
+              card.style.transition = ''; card.style.transform = ''; card.style.opacity = '';
+              if (dy > 90) { card.addEventListener('click', ev => ev.stopPropagation(), { capture: true, once: true }); if (await w.close()) { fill(); if (!htui.wins.length) close(); } }
+            };
+            document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
+          });
+          list.append(card);
+        });
+      };
+      fill();
+      const close = popup(box, null);
+    },
+    // アクションセンター: 日時・クイック操作・通知
+    actionCenter() {
+      if (htui.el.querySelector('.wp-ac')) return;
+      const k = htui.kit, self = this, d = new Date();
+      const list = h('div', { class: 'wp-alist' });
+      const fill = () => {
+        list.textContent = '';
+        if (!htui.notices.length) list.append(h('p', { class: 'wp-aempty' }, '新しい通知はありません'));
+        htui.notices.forEach(n => list.append(h('div', { class: 'wp-note' }, h('span', { class: 'wp-nico' }, OS.icon(n.icon || 'bell', 18)),
+          h('span', { class: 'wp-ntext' }, h('b', null, n.title), n.body ? h('span', null, n.body) : null, h('small', null, (n.app || 'htmlOS'))),
+          h('button', { class: 'wp-nx', type: 'button', 'aria-label': n.title + ' を消す', onclick: () => { htui.notices = htui.notices.filter(x => x !== n); fill(); } }, OS.icon('x', 14)))));
+        htui.notices.forEach(n => { n.unread = false; });
+      };
+      const quick = (icon, label, fn, on) => h('button', { class: 'wp-q' + (on ? ' on' : ''), type: 'button', onclick: fn }, OS.icon(icon, 22), h('span', null, label));
+      const dnd = quick('bell', 'おやすみ', () => { htui.setPrefs({ dnd: !htui.prefs.dnd }); close(); self.actionCenter(); }, htui.prefs.dnd);
+      const ac = h('div', { class: 'wp-ac', role: 'dialog', 'aria-label': 'アクションセンター' },
+        h('div', { class: 'wp-adate' }, h('b', null, pad(d.getHours()) + ':' + pad(d.getMinutes())), h('span', null, (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + WEEK[d.getDay()] + '曜日')),
+        h('div', { class: 'wp-quick' },
+          quick(OS.modeIcons[OS.uiMode], '画面モード', e => k.menu(e.currentTarget, k.modeItems())),
+          dnd,
+          quick('gear', 'すべての設定', () => { close(); self.launch('settings'); }),
+          quick('power', '電源', e => k.menu(e.currentTarget, k.powerItems(), true))),
+        h('div', { class: 'wp-ahead' }, h('span', null, '通知'), h('button', { class: 'wp-aclear', type: 'button', onclick: () => { htui.notices = []; fill(); } }, 'すべてクリア')),
+        list, h('div', { class: 'wp-agrip', 'aria-hidden': 'true' }));
+      dragOn(ac, (dx, dy) => { if (dy < -50) close(); }, true);
+      fill();
+      const close = popup(ac, null);
+    },
+    // スマートフォン: 通知は上にバナーで出す
+    onNotify(n) {
+      if (n.silent || htui.prefs.dnd) return;
+      if (!(OS.touch && OS.uiMode === 'phone')) { OS.ui.toast(n.title + (n.body ? '：' + n.body : '')); return; }
+      const old = htui.el.querySelector('.wp-toast'); if (old) old.remove();
+      const t = h('button', { class: 'wp-toast', type: 'button', onclick: () => { t.remove(); this.actionCenter(); } }, OS.icon(n.icon || 'bell', 18), h('b', null, n.title), n.body ? h('span', null, n.body) : null);
+      htui.el.append(t);
+      setTimeout(() => t.remove(), 4500);
+    },
 
     // ---- スタート画面・デスクトップ・アプリの切り替え
     showStart() {
@@ -188,6 +323,8 @@
     onMode() {
       if (OS.touch) this.showStart();
       else htui.el.classList.remove('w8-start-on', 'w8-desk-on');
+      if (OS.uiMode === 'phone') htui.el.classList.remove('w8-desk-on');
+      this.onApps();
     },
 
     // ---- タイルとアプリ一覧
@@ -200,7 +337,8 @@
       k.clock(clock.lastChild, d => (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + WEEK[d.getDay()] + '曜日');
       const deskTile = h('button', { class: 'w8-tile w8-wide w8-desktile', type: 'button', style: 'background:' + (htui.wallpapers[htui.prefs.wallpaper | 0] || htui.wallpapers[0]).css + ';--i:1', onclick: () => this.launch('@desktop') },
         h('span', { class: 'w8-mini-bar' }), h('span', { class: 'w8-name' }, 'デスクトップ'));
-      g.append(clock, deskTile);
+      g.append(clock);
+      if (OS.uiMode !== 'phone') g.append(deskTile); // Windows Phone にはデスクトップがない
       k.apps().forEach((a, i) => g.append(h('button', { class: 'w8-tile' + (WIDE.includes(a.id) ? ' w8-wide' : ''), type: 'button', title: a.desc || a.name, style: 'background:' + (a.color || '#5e5c64') + ';--i:' + (i + 2), onclick: () => this.launch(a.id) },
         OS.icon(a.icon, 40), h('span', { class: 'w8-name' }, a.name))));
       this.fillApps();
@@ -208,7 +346,7 @@
     fillApps() {
       if (!this.alist) return;
       const t = this.q.value.trim().toLowerCase();
-      const list = [{ id: '@desktop', name: 'デスクトップ', icon: 'monitor', color: '#1c71d8', desc: 'タスクバーのあるデスクトップ' }].concat(htui.kit.apps())
+      const list = (OS.uiMode === 'phone' ? [] : [{ id: '@desktop', name: 'デスクトップ', icon: 'monitor', color: '#1c71d8', desc: 'タスクバーのあるデスクトップ' }]).concat(htui.kit.apps())
         .filter(a => !t || (a.name + ' ' + (a.desc || '') + ' ' + a.id).toLowerCase().includes(t))
         .sort((a, b) => a.name.localeCompare(b.name, 'ja'));
       this.alist.textContent = '';
@@ -216,10 +354,20 @@
       let last = null;
       list.forEach(a => {
         const c = a.name.charAt(0).toUpperCase(), grp = /[A-Z]/.test(c) ? c : 'あ';
-        if (grp !== last && !t) { this.alist.append(h('div', { class: 'w8-letter' }, grp)); last = grp; }
+        if (grp !== last && !t) { this.alist.append(h('button', { class: 'w8-letter', type: 'button', 'data-letter': grp, onclick: () => { if (OS.uiMode === 'phone') this.jumpGrid(); } }, grp)); last = grp; }
         this.alist.append(h('button', { class: 'w8-aitem', type: 'button', title: a.desc || a.name, onclick: () => this.launch(a.id) },
           h('span', { class: 'w8-aico', style: 'background:' + (a.color || '#5e5c64') }, OS.icon(a.icon, 20)), h('span', null, a.name)));
       });
+    },
+
+    // スマートフォンのアプリ一覧: 頭文字を押すと、文字の一覧から飛べる（Windows Phone のジャンプリスト）
+    jumpGrid() {
+      const have = new Set([...this.alist.querySelectorAll('.w8-letter')].map(b => b.dataset.letter));
+      const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').concat(['あ']);
+      const box = h('div', { class: 'wp-jump', role: 'dialog', 'aria-label': '頭文字で移動' }, h('div', { class: 'wp-jgrid' }, letters.map(c => h('button', { class: 'wp-jl', type: 'button', disabled: !have.has(c), onclick: () => {
+        close(); const t = this.alist.querySelector('.w8-letter[data-letter="' + c + '"]'); if (t) t.scrollIntoView({ block: 'start' });
+      } }, c))));
+      const close = popup(box, null);
     },
 
     // ---- チャーム（右端からのスワイプ）
@@ -341,6 +489,7 @@
     },
     onKey(e) {
       if (e.ctrlKey && e.key === 'Escape') { if (OS.touch) this.toggleStartScreen(); else this.toggleStart(); return true; }
+      if (e.key === 'Escape' && OS.touch && OS.uiMode === 'phone' && !htui.el.querySelector('.modal-ov,.menu,.wp-ac,.wp-tasks,.wp-jump')) { const a = document.activeElement; if (!a || !/^(INPUT|TEXTAREA)$/.test(a.tagName)) { this.phoneBack(); return true; } }
     }
   });
 

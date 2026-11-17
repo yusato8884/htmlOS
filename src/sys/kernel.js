@@ -68,7 +68,7 @@
     bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 21h4"/>',
     share: '<circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M8.2 10.8l7.6-4.4M8.2 13.2l7.6 4.4"/>',
     monitor: '<rect x="3" y="4" width="18" height="12" rx="1"/><path d="M8 20h8M12 16v4"/>',
-    win: '<path d="M3 5.5l7.5-1v7H3zM12.5 4.2L21 3v8.5h-8.5zM3 13.5h7.5v7L3 19.5zM12.5 13.5H21V21l-8.5-1.2z"/>',
+    win: '<path d="M8 7l-5 5 5 5M16 7l5 5-5 5M13.5 5l-3 14"/>', // htmlOS のマーク </>（Windows 風の環境のスタートに使う）
     down: '<path d="M6 9l6 6 6-6"/>',
     grid: '<rect x="4" y="4" width="6" height="6"/><rect x="14" y="4" width="6" height="6"/><rect x="4" y="14" width="6" height="6"/><rect x="14" y="14" width="6" height="6"/>'
   };
@@ -555,13 +555,14 @@
   };
   OS.setMode = function (pref) {
     OS.modePref = ['desktop', 'tablet', 'phone'].includes(pref) ? pref : 'auto';
+    const prev = OS.uiMode;
     const m = OS.uiMode = OS.modePref === 'auto' ? OS.autoMode() : OS.modePref;
     OS.touch = m !== 'desktop';
     if (!OS.root) return m;
     OS.root.classList.toggle('touch', OS.touch);
     OS.root.classList.toggle('tablet', m === 'tablet');
     OS.root.classList.toggle('phone', m === 'phone');
-    if (OS.htui && OS.htui.onMode) OS.htui.onMode();
+    if (OS.htui && OS.htui.onMode) OS.htui.onMode(prev !== m); // 表示が実際に変わったときだけ、ウィンドウの並べ直しなどをする
     return m;
   };
   OS.modeIcons = { desktop: 'cursor', tablet: 'tablet', phone: 'phone' };

@@ -707,3 +707,81 @@
 .w8-abtn:active .w8-aring,.w8-abtn:focus-visible .w8-aring{background:rgba(255,255,255,.18)}
 .phone .w8-appbar{padding:8px 6px}.phone .w8-abar-title{display:none}.phone .w8-abtns{flex:1;justify-content:space-around}.phone .w8-abtn{min-width:0}
 @media (prefers-reduced-motion:no-preference){ .w8-appbar{animation:w8-ab-in .22s cubic-bezier(.2,.8,.2,1)} @keyframes w8-ab-in{from{transform:translateY(100%);opacity:0}to{transform:none;opacity:1}} }
+
+/* ==================================================== hWin のスマートフォン表示（Windows Phone 8.1 風）
+   上 56px: ステータスバー（下へスワイプでアクションセンター）、下 56px: ナビゲーションバー（戻る・スタート・検索） */
+.wp-status,.wp-nav{display:none}
+.phone #htui.de-win{padding:56px 0}
+.phone .de-win .edge{display:none!important}
+.phone .de-win:not(.w8-start-on):not(.w8-desk-on) .win.tiled:not(.free){top:0!important;height:100%!important}
+.phone .de-win .wp-status{display:flex;position:absolute;left:0;right:0;top:0;height:56px;z-index:97000;align-items:center;justify-content:space-between;padding:0 16px;background:#000;color:#fff;font-size:15px;touch-action:none;cursor:pointer;user-select:none}
+.wp-sicons{display:flex;align-items:center;gap:12px}
+.wp-net.off{opacity:.35}
+.wp-batt{font-variant-numeric:tabular-nums;font-size:14px}
+.wp-time{font-variant-numeric:tabular-nums;font-size:16px}
+.phone .de-win .wp-nav{display:flex;position:absolute;left:0;right:0;bottom:0;height:56px;z-index:97000;background:#000;touch-action:none}
+.wp-nbtn{flex:1;display:flex;align-items:center;justify-content:center;border:0;background:none;color:#fff!important;cursor:pointer;-webkit-touch-callout:none;user-select:none}
+.wp-nbtn:active{background:rgba(255,255,255,.14)}
+/* スタート画面: 黒地にアクセントカラーのタイル、見出しなし */
+.phone .de-win.w8-start-on .w8-start{background:#000}
+.phone .de-win .w8-apps{background:#000}
+.phone .de-win .w8-home .w8-head{display:none}
+.phone .de-win .w8-page{padding-top:14px}
+.phone .de-win .w8-tile:not(.w8-desktile){background:var(--accent)!important}
+.phone .de-win .w8-clock{background:color-mix(in srgb,var(--accent) 70%,#000)!important}
+.phone .de-win .w8-start{--gap:6px;--t:calc((100vw - 2 * 10px - 2 * 6px) / 3)}
+.phone .de-win .w8-grid{padding:0 10px 70px}
+.phone .de-win .w8-more{left:auto;right:14px;bottom:14px;width:44px;height:44px}
+.phone .de-win .w8-home .w8-more svg{transform:rotate(-90deg)}
+.phone .de-win .w8-apps .w8-more{display:none}
+/* アプリ一覧: 検索欄、頭文字はアクセントカラーの四角 */
+.phone .de-win .w8-apps .w8-head{flex-direction:column;align-items:stretch;gap:10px}
+.phone .de-win .w8-apps .w8-head h1{display:none}
+.phone .de-win .w8-q{max-width:none}
+.w8-letter{display:block;width:auto;border:0;background:none;color:inherit;text-align:left;cursor:default;padding:0;font:300 26px/48px var(--ui);padding-left:4px;opacity:.9}
+.phone .de-win .w8-letter{width:48px;height:48px;margin:8px 0 2px;padding:0 0 4px 8px;display:flex;align-items:flex-end;background:var(--accent);opacity:1;font-size:24px;line-height:1;cursor:pointer}
+.phone .de-win .w8-aico{background:var(--accent)!important}
+.wp-jump{position:absolute;left:0;right:0;top:56px;bottom:56px;z-index:98000;background:rgba(0,0,0,.92);display:flex;align-items:center;justify-content:center;padding:16px}
+.wp-jgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;width:100%;max-width:340px}
+.wp-jl{aspect-ratio:1;border:0;background:var(--accent);color:#fff!important;font:300 30px var(--ui);display:flex;align-items:flex-end;padding:0 0 6px 8px;cursor:pointer}
+.wp-jl:disabled{background:#2a2a2a;color:#666!important;cursor:default}
+/* タスク切り替え */
+.wp-tasks{position:absolute;left:0;right:0;top:56px;bottom:56px;z-index:98000;background:rgba(0,0,0,.93);display:flex;align-items:center}
+.wp-tlist{flex:1;display:flex;gap:18px;overflow-x:auto;padding:0 18%;scroll-snap-type:x mandatory;scrollbar-width:none;touch-action:pan-x}
+.wp-tcard{flex:none;width:64vw;max-width:300px;display:flex;flex-direction:column;gap:10px;scroll-snap-align:center;touch-action:pan-x}
+.wp-tthumb{width:100%;aspect-ratio:9/14;border:0;display:flex;align-items:center;justify-content:center;color:#fff!important;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,.6)}
+.wp-ttitle{display:flex;align-items:center;justify-content:space-between;gap:8px;color:#fff;font-size:14px}
+.wp-ttitle span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wp-tx{flex:none;width:34px;height:34px;border-radius:50%;border:2px solid #fff;background:none;color:#fff!important;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.wp-tempty{flex:1;text-align:center;color:#aaa}
+/* アクションセンター */
+.wp-ac{position:absolute;left:0;right:0;top:0;z-index:98500;max-height:calc(100% - 56px);display:flex;flex-direction:column;background:#111;color:#fff;box-shadow:0 10px 30px rgba(0,0,0,.6);touch-action:none}
+.wp-alist{touch-action:pan-y}
+.wp-adate{display:flex;align-items:baseline;gap:14px;padding:14px 16px 6px}
+.wp-adate b{font:200 40px/1 var(--ui);font-variant-numeric:tabular-nums}
+.wp-adate span{opacity:.8}
+.wp-quick{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:10px 12px}
+.wp-q{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:10px 8px;border:0;background:#2a2a2a;color:#fff!important;font-size:11.5px;text-align:left;cursor:pointer;min-height:68px}
+.wp-q.on{background:var(--accent)}
+.wp-q:active{filter:brightness(1.25)}
+.wp-ahead{display:flex;justify-content:space-between;align-items:center;padding:10px 16px 4px;font-size:13px;opacity:.85}
+.wp-aclear{border:0;background:none;color:#fff!important;text-decoration:underline;cursor:pointer;font-size:13px}
+.wp-alist{flex:1;min-height:60px;overflow:auto;display:flex;flex-direction:column;gap:2px;padding:4px 0 6px}
+.wp-aempty{margin:8px 16px;opacity:.6}
+.wp-note{display:flex;align-items:flex-start;gap:12px;padding:10px 16px;border-left:4px solid var(--accent);margin:0 8px;background:#1b1b1b}
+.wp-nico{flex:none;width:30px;height:30px;display:flex;align-items:center;justify-content:center;background:var(--accent)}
+.wp-ntext{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;font-size:13px}
+.wp-ntext span{overflow-wrap:anywhere;opacity:.85}
+.wp-ntext small{opacity:.55;font-size:11px}
+.wp-nx{flex:none;border:0;background:none;color:#fff!important;cursor:pointer;padding:4px}
+.wp-agrip{flex:none;height:22px;display:flex;align-items:center;justify-content:center}
+.wp-agrip::after{content:"";width:44px;height:5px;border-radius:3px;background:rgba(255,255,255,.35)}
+.wp-toast{position:absolute;left:0;right:0;top:56px;z-index:98200;display:flex;align-items:center;gap:10px;padding:12px 16px;border:0;background:var(--accent);color:#fff!important;text-align:left;font-size:13.5px;cursor:pointer;box-shadow:0 6px 16px rgba(0,0,0,.4)}
+.wp-toast span{opacity:.9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+@media (prefers-reduced-motion:no-preference){
+  .wp-ac{animation:wp-down .25s cubic-bezier(.2,.8,.2,1)} @keyframes wp-down{from{transform:translateY(-100%)}to{transform:none}}
+  .wp-toast{animation:wp-down .25s cubic-bezier(.2,.8,.2,1)}
+  .wp-tasks{animation:fade-in .18s ease-out}
+  .wp-tcard{animation:pop .25s cubic-bezier(.2,.8,.2,1) both}
+  .wp-jump .wp-jl{animation:w8-in .3s cubic-bezier(.2,.8,.2,1) both}
+}
