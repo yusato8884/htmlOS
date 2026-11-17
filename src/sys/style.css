@@ -690,9 +690,20 @@
 .touch .gn-area,.touch .gn-dock{touch-action:pan-x}
 .touch .de-win.w8-start-on .taskbar{display:none}
 .touch .pt-stage{touch-action:none}
-/* hWin（タッチ）でアプリを全画面で開いているとき: 上に細い帯（つまみ）を出し、アプリはその下に置く。
-   画面のいちばん上の端から始まるスワイプは、全画面表示ではブラウザや OS が先に受け取ってしまう（アドレスバーが出る）ので、
-   端から少し離れたこの帯から引き下ろして閉じる。帯をタップするとタイトルバーが出る */
-.touch .de-win:not(.w8-start-on):not(.w8-desk-on) .edge-t{left:0;right:0;height:28px;background:#0d0e12;display:flex;align-items:center;justify-content:center;cursor:grab}
-.touch .de-win:not(.w8-start-on):not(.w8-desk-on) .edge-t::after{content:"";width:48px;height:5px;border-radius:3px;background:rgba(255,255,255,.5)}
-.touch .de-win:not(.w8-start-on):not(.w8-desk-on) .win.tiled:not(.free){top:28px!important;height:calc(100% - 28px)!important}
+/* hWin（タッチ）でアプリを全画面で開いているとき: 上と下に帯（つまみ）を出し、アプリはその間に置く。
+   画面のいちばん端から始まるスワイプは、全画面表示ではブラウザや OS が先に受け取ってしまう（アドレスバーやシェルフが出る）ので、
+   端から離れたこの帯から操作する。上の帯: 引き下ろすと閉じる・タップでタイトルバー。下の帯: 上へスワイプかタップでアプリバー */
+.touch .de-win:not(.w8-start-on):not(.w8-desk-on) .edge-t,
+.touch .de-win:not(.w8-start-on):not(.w8-desk-on) .edge-b{left:0;right:0;height:56px;background:#0d0e12;display:flex;align-items:center;justify-content:center;cursor:grab}
+.touch .de-win:not(.w8-start-on):not(.w8-desk-on) .edge-t::after,
+.touch .de-win:not(.w8-start-on):not(.w8-desk-on) .edge-b::after{content:"";width:56px;height:6px;border-radius:3px;background:rgba(255,255,255,.5)}
+.touch .de-win:not(.w8-start-on):not(.w8-desk-on) .win.tiled:not(.free){top:56px!important;height:calc(100% - 112px)!important}
+/* アプリバー */
+.w8-appbar{position:absolute;left:0;right:0;bottom:56px;z-index:96000;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 20px;background:#1a1b20;color:#fff;box-shadow:0 -6px 20px rgba(0,0,0,.35)}
+.w8-abar-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.8}
+.w8-abtns{display:flex;gap:6px;flex:none}
+.w8-abtn{display:flex;flex-direction:column;align-items:center;gap:5px;min-width:68px;padding:6px 4px;border:0;background:none;color:#fff!important;cursor:pointer;font-size:12.5px}
+.w8-aring{width:44px;height:44px;border:2px solid #fff;border-radius:50%;display:flex;align-items:center;justify-content:center}
+.w8-abtn:active .w8-aring,.w8-abtn:focus-visible .w8-aring{background:rgba(255,255,255,.18)}
+.phone .w8-appbar{padding:8px 6px}.phone .w8-abar-title{display:none}.phone .w8-abtns{flex:1;justify-content:space-around}.phone .w8-abtn{min-width:0}
+@media (prefers-reduced-motion:no-preference){ .w8-appbar{animation:w8-ab-in .22s cubic-bezier(.2,.8,.2,1)} @keyframes w8-ab-in{from{transform:translateY(100%);opacity:0}to{transform:none;opacity:1}} }

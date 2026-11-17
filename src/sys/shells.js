@@ -126,7 +126,12 @@
         edge('r', { end: v => { if (v.max > 30) this.charms(); } }),
         edge('l', { end: v => this.leftSwipe(v) }),
         edge('t', { move: v => this.dragClose(v), end: v => this.dragClose(v, true) }),
-        edge('b', { end: v => { if (v.max > 40 && htui.el.classList.contains('w8-start-on')) this.showApps(true); } })
+        edge('b', { end: v => {
+          const el = htui.el;
+          if (el.classList.contains('w8-start-on')) { if (v.max > 40) this.showApps(true); return; }
+          // アプリを全画面で開いているとき: 下の帯から上へスワイプ（またはタップ）でアプリバー
+          if (!el.classList.contains('w8-desk-on') && (v.max > 30 || v.max < 12) && !v.cancel) this.appBar();
+        } })
       ];
       htui.el.append(desk, h('div', { class: 'taskbar' }, start, tasks, h('div', { class: 'tb-tray' }, k.modeButton('tb-btn', { up: true }), clock, showDesk)), ...edges);
       htui.el.classList.add('w8-start-on');
@@ -243,6 +248,24 @@
           h('button', { class: 'w8-pane-item', type: 'button', onclick: e => k.menu(e.currentTarget, k.modeItems()) }, OS.icon(OS.modeIcons[OS.uiMode], 20), '画面モード: ' + OS.modeNames[OS.modePref]),
           h('button', { class: 'w8-pane-item', type: 'button', onclick: e => k.menu(e.currentTarget, k.powerItems(), false, { up: true }) }, OS.icon('power', 20), '電源')));
       const close = popup(pane, null);
+    },
+
+    // ---- アプリバー（全画面のアプリで、下の帯から上へスワイプ）
+    appBar() {
+      if (htui.el.querySelector('.w8-appbar')) return;
+      const w = htui.active();
+      const btn = (icon, label, fn) => h('button', { class: 'w8-abtn', type: 'button', onclick: () => { close(); fn(); } }, h('span', { class: 'w8-aring' }, OS.icon(icon, 22)), h('span', null, label));
+      const bar = h('div', { class: 'w8-appbar', role: 'toolbar', 'aria-label': 'アプリバー' },
+        h('div', { class: 'w8-abar-title' }, w ? w.title : ''),
+        h('div', { class: 'w8-abtns' },
+          btn('win', 'スタート', () => this.showStart()),
+          btn('grid', '切り替え', () => this.switchList()),
+          btn('share', 'チャーム', () => this.charms()),
+          w ? btn('min', '最小化', () => w.minimize()) : null,
+          w ? btn('x', '閉じる', () => w.close().then(ok => { if (ok) this.showStart(); })) : null));
+      // 帯をタップして出したとき、そのタップの「クリック」が出てきたばかりのボタンに当たらないよう、少しの間は操作を受け付けない
+      bar.style.pointerEvents = 'none'; setTimeout(() => { bar.style.pointerEvents = ''; }, 400);
+      const close = popup(bar, null);
     },
 
     // ---- 左端からのスワイプ: 長く引き出したら前のアプリへ、少し出して戻したら切り替え一覧
