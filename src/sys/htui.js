@@ -98,7 +98,7 @@
     htui.running = true;
     htui.el = h('div', { id: 'htui' });
     OS.root.append(htui.el);
-    document.addEventListener('keydown', hotkeys); document.addEventListener('keyup', keyUp); window.addEventListener('blur', altTabEnd);
+    document.addEventListener('keydown', hotkeys); document.addEventListener('keyup', keyUp); document.addEventListener('contextmenu', onContext); window.addEventListener('blur', altTabEnd);
     if (user && users.get(user)) session(user, sid); else toLogin();
     return true;
   };
@@ -113,7 +113,7 @@
     htui.wins.slice().forEach(w => w.close(true));
     clearShell();
     if (OS.hdm) OS.hdm.stop();
-    document.removeEventListener('keydown', hotkeys); document.removeEventListener('keyup', keyUp); window.removeEventListener('blur', altTabEnd); altTabEnd(true);
+    document.removeEventListener('keydown', hotkeys); document.removeEventListener('keyup', keyUp); document.removeEventListener('contextmenu', onContext); window.removeEventListener('blur', altTabEnd); altTabEnd(true);
     htui.el.remove(); htui.el = null;
     htui.running = false; htui.user = null; htui.fs = null;
     OS.setMode('auto');
@@ -270,6 +270,87 @@
   };
   function run(id, arg) { try { OS.launch(id, arg); } catch (e) { ui.alert(e.message); } }
   htui.run = run;
+
+  // ---------- 右クリックメニュー（文字・タイトルバー・タスクボタン・デスクトップ）
+  //   アプリや環境が自分で contextmenu を処理した（preventDefault した）ときは何もしない。
+  //   環境は onContext(e) でメニューの項目を返せる（ドックなど）。Shift を押しながら右クリックするとブラウザのメニューを出す
+  const isEditable = el => !!el && (el.isContentEditable || el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && /^(text|search|url|email|password|number|tel|)$/.test(el.type || '')));
+  function textMenu(el) {
+    const ed = isEditable(el) ? el : null;
+    const sel = window.getSelection(), selText = ed && 'selectionStart' in ed ? ed.value.slice(ed.selectionStart, ed.selectionEnd) : String(sel || '');
+    const ss = ed && 'selectionStart' in ed ? [ed.selectionStart, ed.selectionEnd] : null;
+    const range = !ed && sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+    // メニューのボタンを押すとフォーカスが移るので、元の場所と選択範囲に戻してから実行する
+    const restore = () => {
+      if (ed) { ed.focus({ preventScroll: true }); if (ss && 'setSelectionRange' in ed) { try { ed.setSelectionRange(ss[0], ss[1]); } catch (e) { /* 選べない種類 */ } } }
+      else if (range) { sel.removeAllRanges(); sel.addRange(range); }
+    };
+    const copy = async (text, cut) => {
+      restore();
+      let ok = false; try { await navigator.clipboard.writeText(text); ok = true; } catch (e) { try { ok = document.execCommand('copy'); } catch (e2) { /* 使えない */ } }
+      if (!ok) { ui.toast('コピーできませんでした。Ctrl+C を使ってください'); return; }
+      if (cut && ed) { restore(); document.execCommand('delete'); }
+    };
+    const paste = async () => {
+      let t = null; try { t = await navigator.clipboard.readText(); } catch (e) { /* 許可がない */ }
+      restore();
+      if (t == null) { ui.toast('貼り付けの許可がありません。Ctrl+V を使ってください'); return; }
+      if (!document.execCommand('insertText', false, t) && 'setRangeText' in ed) { ed.setRangeText(t, ed.selectionStart, ed.selectionEnd, 'end'); ed.dispatchEvent(new Event('input', { bubbles: true })); }
+    };
+    const items = [];
+    if (ed) items.push({ label: '元に戻す', icon: 'back', act: () => { restore(); document.execCommand('undo'); } }, { label: 'やり直す', icon: 'fwd', act: () => { restore(); document.execCommand('redo'); } }, { sep: true },
+      { label: '切り取り', disabled: !selText || ed.readOnly || ed.type === 'password', act: () => copy(selText, true) });
+    items.push({ label: 'コピー', disabled: !selText || (ed && ed.type === 'password'), act: () => copy(selText, false) });
+    if (ed) items.push({ label: '貼り付け', disabled: ed.readOnly || ed.disabled, act: paste }, { label: '削除', disabled: !selText || ed.readOnly, act: () => { restore(); document.execCommand('delete'); } });
+    items.push({ sep: true }, { label: 'すべて選択', act: () => { if (ed) { ed.focus(); if (ed.select) ed.select(); else document.execCommand('selectAll'); } else { const box = el.closest('.win-body,.tty-scr') || el; const r = document.createRange(); r.selectNodeContents(box); sel.removeAllRanges(); sel.addRange(r); } } });
+    if (selText && !(ed && ed.type === 'password')) items.push({ sep: true }, { label: '「' + (selText.length > 14 ? selText.slice(0, 14) + '…' : selText) + '」を hBrowser で検索', icon: 'search', act: () => run('hbrowser', selText) });
+    return items;
+  }
+  function winMenu(w) {
+    const mac = htui.sessionId === 'mac';
+    return [
+      { head: w.title },
+      { label: mac ? 'しまう' : '最小化', icon: 'min', act: () => w.minimize() },
+      { label: w.zone === 'max' ? '元のサイズに戻す' : mac ? '拡大' : '最大化', icon: 'max', act: () => (w.zone === 'max' ? w.unsnap() : w.snap('max')) },
+      { label: '左半分に配置', act: () => w.snap('left') }, { label: '右半分に配置', act: () => w.snap('right') },
+      { label: '左上に配置', act: () => w.snap('tl') }, { label: '右上に配置', act: () => w.snap('tr') },
+      { label: '左下に配置', act: () => w.snap('bl') }, { label: '右下に配置', act: () => w.snap('br') },
+      { sep: true }, { label: '閉じる', icon: 'x', act: () => w.close() }
+    ];
+  }
+  htui.winMenu = winMenu;
+  function deskMenu() {
+    const sid = htui.sessionId, sh = htui.shell || {};
+    const items = [
+      { label: 'Terminal を開く', icon: 'terminal', act: () => run('terminal') },
+      { label: 'ホームフォルダを開く', icon: 'folder', act: () => run('hfile') },
+      { sep: true },
+      { label: '壁紙を変更…', icon: 'image', act: () => run('settings', 'look') },
+      { label: '画面モード…', icon: OS.modeIcons[OS.uiMode], act: () => { const p = htui._ctxAt; setTimeout(() => htui.menuAt(p[0], p[1], kit.modeItems()), 0); } }
+    ];
+    if (sid === 'mac') items.push({ sep: true }, { label: 'Launchpad', icon: 'grid', act: () => sh.launchpad() }, { label: 'Mission Control', icon: 'grid', act: () => sh.missionControl() });
+    if (sid === 'gnome') items.push({ sep: true }, { label: 'アクティビティ', icon: 'grid', act: () => sh.overview() });
+    if (sid === 'win') items.push({ sep: true }, { label: 'タスクマネージャー', icon: 'chart', act: () => run('htask') });
+    const vis = htui.wins.filter(w => !w.el.classList.contains('hidden'));
+    if (htui.wins.length) items.push({ sep: true }, vis.length ? { label: 'すべてのウィンドウを最小化', icon: 'min', act: () => vis.forEach(w => w.minimize()) } : { label: 'すべてのウィンドウを戻す', icon: 'max', act: () => htui.wins.forEach(w => w.focus()) });
+    items.push({ sep: true }, { label: '設定…', icon: 'gear', act: () => run('settings') });
+    return items;
+  }
+  function onContext(e) {
+    if (!htui.user || !htui.el || !htui.el.contains(e.target) || e.defaultPrevented) return;
+    if (e.shiftKey) return; // Shift+右クリックはブラウザのメニュー
+    const t = e.target, at = htui._ctxAt = [e.clientX, e.clientY];
+    let items = null;
+    const selText = String(window.getSelection() || '');
+    if (isEditable(t) || (selText && window.getSelection().containsNode(t, true))) items = textMenu(t);
+    if (!items && htui.shell && htui.shell.onContext) items = htui.shell.onContext(e);
+    if (!items) { const head = t.closest('.win-head'); if (head && !t.closest('.win-btn')) { const w = htui.wins.find(x => x.el.contains(head)); if (w) items = winMenu(w); } }
+    if (!items) { const tb = t.closest('.p-task'); const w = tb && htui.wins.find(x => x.task === tb); if (w) items = [{ head: w.title }, { label: w.el.classList.contains('hidden') ? '元に戻す' : '最小化', icon: 'min', act: () => (w.el.classList.contains('hidden') ? w.focus() : w.minimize()) }, { label: w.zone === 'max' ? '元のサイズに戻す' : '最大化', icon: 'max', act: () => (w.zone === 'max' ? w.unsnap() : w.snap('max')) }, { label: '新しいウィンドウ', icon: 'plus', act: () => run(w.app) }, { sep: true }, { label: '閉じる', icon: 'x', act: () => w.close() }]; }
+    if (!items) { const di = t.closest('.desk-icon'); if (di) { const a = Object.values(OS.apps).find(x => di.title === (x.desc || x.name)); if (a) items = [{ head: a.name }, { label: '開く', icon: a.icon, act: () => run(a.id) }, { label: 'このアプリについて', act: () => ui.alert((a.desc || a.name) + (a.pkg ? '\n（パッケージ ' + a.pkg + '）' : ''), a.name) }]; } }
+    if (!items && (t === htui.desk || t.classList.contains('desk-icons') || t.classList.contains('ios-home') || t.classList.contains('ios-grid'))) items = deskMenu();
+    e.preventDefault(); // ほかの場所でもブラウザのメニューは出さない
+    if (items && items.length) htui.menuAt(at[0], at[1], items);
+  }
 
   // ---------- ポップアップメニュー
   //   items: { label, icon, hint, act } / { sep: true } / { head: '見出し' }

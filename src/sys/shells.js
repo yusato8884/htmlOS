@@ -13,6 +13,18 @@
   const WEEK = '日月火水木金土';
   const byZ = () => htui.wins.slice().sort((a, b) => (+b.el.style.zIndex || 0) - (+a.el.style.zIndex || 0)); // 手前から順
   const visible = w => !w.el.classList.contains('hidden') && !w.el.classList.contains('minimizing');
+  // ドックなどのアプリのアイコンの右クリックメニュー。open(id) はそのアプリを開く・手前に出す
+  function appItems(id, open) {
+    const a = OS.apps[id]; if (!a) return null;
+    const wins = htui.wins.filter(w => w.app === id);
+    const items = [{ head: a.name }];
+    wins.forEach(w => items.push({ label: w.title, icon: a.icon, hint: w.el.classList.contains('hidden') ? 'しまってある' : null, act: () => w.focus() }));
+    if (wins.length) items.push({ sep: true });
+    items.push(wins.length ? { label: '新しいウィンドウ', icon: 'plus', act: () => htui.kit.run(id) } : { label: '開く', icon: a.icon, act: () => open(id) });
+    if (wins.length) items.push({ label: 'すべてのウィンドウを最小化', icon: 'min', act: () => wins.forEach(w => w.minimize()) }, { sep: true }, { label: '終了', icon: 'x', act: () => wins.forEach(w => w.close()) });
+    items.push({ sep: true }, { label: 'このアプリについて', act: () => OS.ui.alert((a.desc || a.name) + (a.pkg ? '\n（パッケージ ' + a.pkg + '）' : ''), a.name) });
+    return items;
+  }
 
   // 画面の端からのスワイプを受け取る帯。side: l / r / t / b。タッチモードのときだけ表示される
   //   on.move(v) / on.end(v)。v = { dx, dy, x, y, max }（max は画面の内側へ動いた最大の距離）
@@ -620,7 +632,7 @@
       }
       function fillDock() {
         dock.textContent = '';
-        k.apps().forEach(a => dock.append(h('button', { class: 'gn-dk' + (htui.wins.some(w => w.app === a.id) ? ' run' : ''), type: 'button', title: a.name, 'aria-label': a.name, onclick: () => {
+        k.apps().forEach(a => dock.append(h('button', { class: 'gn-dk' + (htui.wins.some(w => w.app === a.id) ? ' run' : ''), type: 'button', title: a.name, 'aria-label': a.name, 'data-app': a.id, onclick: () => {
           const w = byZ().find(x => x.app === a.id);
           if (w) pick(w); else { close(); k.run(a.id); }
         } }, k.appIcon(a, 28))));
@@ -731,6 +743,14 @@
       if (!OS.touch) q.focus();
     },
     onKey(e) { if (e.altKey && e.key === 'F1') { this.overview(); return true; } },
+    // 右クリック: ドックのアプリ、アクティビティ画面のウィンドウ
+    onContext(e) {
+      const d = e.target.closest('.gn-dk[data-app]');
+      if (d) return appItems(d.dataset.app, id => { const ov = htui.el.querySelector('.gn-ov:not(.leaving)'); if (ov) ov._close(); const w = byZ().find(x => x.app === id); if (w) w.focus(); else htui.kit.run(id); });
+      const c = e.target.closest('.gn-win');
+      if (c) { const t = c.querySelector('.gn-winbtn'), w = t && htui.wins.find(x => x.title === t.getAttribute('aria-label')); if (w) return htui.winMenu(w); }
+      return null;
+    },
     onSuper() { this.overview(); }
   });
 
@@ -835,17 +855,17 @@
       if (sig === this._sig) return;
       this._sig = sig;
       // デスクトップのドック: Launchpad・よく使うアプリ・（区切り）・ドックにない起動中のアプリ・しまったウインドウ
-      const item = (cls, name, icon, onclick, run) => h('button', { class: 'mc-dk ' + cls + (run ? ' run' : ''), type: 'button', 'data-name': name, 'aria-label': name, onclick: onclick }, icon);
+      const item = (cls, name, icon, onclick, run, app) => h('button', { class: 'mc-dk ' + cls + (run ? ' run' : ''), type: 'button', 'data-name': name, 'data-app': app || '', 'aria-label': name, onclick: onclick }, icon);
       this.dock.textContent = '';
       this.dock.append(item('mc-lp', 'Launchpad', h('span', { class: 'app-ico mc-lpico' }, glyph(G_LP, 30)), () => this.launchpad()));
       const pinned = MAC_DOCK.filter(id => OS.apps[id]), extra = [...new Set(htui.wins.map(w => w.app))].filter(id => OS.apps[id] && !pinned.includes(id));
-      pinned.concat(extra).forEach(id => { const a = OS.apps[id]; this.dock.append(item('', a.name, k.appIcon(a, 28), e => this.openApp(id, e.currentTarget), htui.wins.some(w => w.app === id))); });
+      pinned.concat(extra).forEach(id => { const a = OS.apps[id]; this.dock.append(item('', a.name, k.appIcon(a, 28), e => this.openApp(id, e.currentTarget), htui.wins.some(w => w.app === id), id)); });
       const mins = htui.wins.filter(w => w.el.classList.contains('hidden'));
       this.dock.append(h('span', { class: 'mc-dsep' }));
-      mins.forEach(w => { const a = OS.apps[w.app] || {}; this.dock.append(item('mc-min', w.title, h('span', { class: 'mc-thumb' }, k.appIcon(a.icon ? a : { icon: 'file' }, 18)), () => w.focus())); });
+      mins.forEach(w => { const a = OS.apps[w.app] || {}; const b = item('mc-min', w.title, h('span', { class: 'mc-thumb' }, k.appIcon(a.icon ? a : { icon: 'file' }, 18)), () => w.focus()); b._win = w; this.dock.append(b); });
       this.dock.append(item('mc-trash', 'ゴミ箱', h('span', { class: 'app-ico mc-trashico' }, OS.icon('trash', 26)), () => OS.ui.toast('htmlOS ではファイルはすぐに削除されます（ゴミ箱はありません）')));
       // ホーム画面
-      const tile = a => h('button', { class: 'ios-app', type: 'button', title: a.desc || a.name, onclick: () => self.openApp(a.id) }, k.appIcon(a, 30), h('span', null, a.name));
+      const tile = a => h('button', { class: 'ios-app', type: 'button', title: a.desc || a.name, 'data-app': a.id, onclick: () => self.openApp(a.id) }, k.appIcon(a, 30), h('span', null, a.name));
       const dockIds = (IOS_DOCK[OS.uiMode] || IOS_DOCK.phone).filter(id => OS.apps[id]);
       this.grid.textContent = ''; this.iosDock.textContent = '';
       k.apps().filter(a => OS.uiMode !== 'phone' || !dockIds.includes(a.id)).forEach((a, i) => { const t = tile(a); t.style.setProperty('--i', i); this.grid.append(t); });
@@ -1203,6 +1223,14 @@
       if (onShown) setTimeout(onShown, 220);
     },
 
+    // 右クリック: ドックとホーム画面のアプリ
+    onContext(e) {
+      const b = e.target.closest('.mc-dk,.ios-app'); if (!b) return null;
+      if (b._win) { const w = b._win; return [{ head: w.title }, { label: '元に戻す', icon: 'max', act: () => w.focus() }, { sep: true }, { label: '閉じる', icon: 'x', act: () => w.close() }]; }
+      if (b.classList.contains('mc-lp')) return [{ label: 'Launchpad を開く', icon: 'grid', act: () => this.launchpad() }];
+      if (b.classList.contains('mc-trash')) return [{ label: 'ゴミ箱は空です', disabled: true, act: () => {} }];
+      return appItems(b.dataset.app, id => this.openApp(id));
+    },
     onSuper() { this.launchpad(); },
     onKey(e) {
       if (e.key === 'F4') { this.launchpad(); return true; }

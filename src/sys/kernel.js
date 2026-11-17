@@ -648,7 +648,7 @@
     }
     const apps = fs.list('/sys/apps').filter(n => n.endsWith('.js'));
     const pkgs = OS.pkg.list();
-    const core = ['/sys/jsh.js', '/sys/htui.js', '/sys/hdm.js', '/sys/shells.js'];
+    const core = ['/sys/cursor.js', '/sys/jsh.js', '/sys/htui.js', '/sys/hdm.js', '/sys/shells.js'];
     const total = 2 + core.length + apps.length + pkgs.length; let done = 0;
     const step = async (s, failed) => {
       tty.print('['); tty.print(failed ? 'FAILED' : '  OK  ', failed ? 'err' : 'ok'); tty.println('] ' + s);

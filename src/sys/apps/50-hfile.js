@@ -48,10 +48,43 @@
           const b = h('button', { class: 'hf-item' + (r.d ? ' dir' : '') + (r.p === sel ? ' sel' : ''), type: 'button', title: r.n }, OS.icon(r.d ? 'folder' : OS.htui.fileIcon(r.p), 34), h('span', { class: 'hf-name' }, r.n));
           b.addEventListener('click', () => { if (sel === r.p) return open(r.p); sel = r.p; grid.querySelectorAll('.sel').forEach(x => x.classList.remove('sel')); b.classList.add('sel'); status(); });
           b.addEventListener('dblclick', () => open(r.p));
+          b.addEventListener('contextmenu', e => { e.preventDefault(); select(r.p, b); itemMenu(e, r); });
           grid.append(b);
         });
         status();
       }
+      function select(p, b) { sel = p; grid.querySelectorAll('.sel').forEach(x => x.classList.remove('sel')); if (b) b.classList.add('sel'); status(); }
+      // 右クリック: ファイル・フォルダのメニューと、空いている場所のメニュー
+      function itemMenu(e, r) {
+        const kind = r.d ? 'dir' : OS.fs.kind(r.p), link = OS.fs.isLink(r.p);
+        const items = [{ head: r.n + (link ? '（リンク）' : '') }, { label: '開く', icon: r.d ? 'folder' : OS.htui.fileIcon(r.p), act: () => open(r.p) }];
+        if (!r.d && (kind === 'text' || kind === 'html' || kind === 'other')) items.push({ label: 'hedit で開く', icon: 'edit', act: () => OS.launch('hedit', r.p) });
+        if (r.d) items.push({ label: 'ここで Terminal を開く', icon: 'terminal', act: () => OS.launch('terminal', { cmd: 'cd "' + r.p + '"' }) });
+        items.push({ sep: true },
+          { label: 'コピー', act: () => setClip(false) }, { label: '切り取り', act: () => setClip(true) },
+          { label: '名前を変更…', act: rename }, { label: '削除…', icon: 'trash', act: del },
+          { sep: true });
+        if (!r.d) items.push({ label: 'PC に書き出す', icon: 'download', act: exportSel });
+        items.push({ label: 'パスをコピー', act: () => { navigator.clipboard.writeText(r.p).then(() => ui.toast('コピーしました: ' + r.p), () => ui.toast(r.p)); } },
+          { label: '情報を見る', act: () => info(r.p) });
+        OS.htui.menuAt(e.clientX, e.clientY, items);
+      }
+      function areaMenu(e) {
+        OS.htui.menuAt(e.clientX, e.clientY, [
+          { label: '新しいフォルダ…', icon: 'plus', act: newDir }, { label: '新しいファイル…', icon: 'plus', act: newFile },
+          { label: '貼り付け' + (clip ? '（' + path.base(clip.path) + '）' : ''), disabled: !clip, act: paste },
+          { sep: true }, { label: 'PC から取り込む…', icon: 'upload', act: () => up.click() },
+          { label: 'ここで Terminal を開く', icon: 'terminal', act: () => OS.launch('terminal', { cmd: 'cd "' + dir + '"' }) },
+          { sep: true }, { label: showHidden ? '隠しファイルを隠す' : '隠しファイルを表示', act: () => { showHidden = !showHidden; bHidden.classList.toggle('on', showHidden); render(); } },
+          { label: '更新', icon: 'reload', act: () => render() }]);
+      }
+      function info(p) {
+        const ls = OS.fs.lstat(p), s = OS.fs.stat(p) || ls;
+        const rows = [['場所', p], ['種類', ls.t === 'l' ? 'シンボリックリンク → ' + ls.c : s.t === 'd' ? 'フォルダ' : (OS.fs.kind(p) + (s.b ? '（バイナリ）' : ''))],
+          ['大きさ', s.t === 'd' ? OS.fs.list(p).length + ' 個の項目' : fmtSize(s.c.length)], ['所有者', s.o || 'root'], ['変更日時', new Date(s.m).toLocaleString('ja-JP')]];
+        ui.modal({ title: path.base(p) + ' の情報', body: h('dl', { class: 'hf-info' }, rows.map(r => [h('dt', null, r[0]), h('dd', null, r[1])])), buttons: [{ label: '閉じる', primary: true, cancel: true, value: true }] });
+      }
+      grid.addEventListener('contextmenu', e => { if (e.target === grid || e.target.classList.contains('hf-empty')) { e.preventDefault(); select(null); areaMenu(e); } });
       function status() {
         const s = sel && OS.fs.stat(sel);
         if (!s) { sel = null; stSel.textContent = 'クリックで選択、もう一度クリックで開く'; }
