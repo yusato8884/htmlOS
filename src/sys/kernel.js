@@ -65,6 +65,11 @@
     phone: '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>',
     tablet: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M18.5 11v2"/>',
     cursor: '<path d="M5 3l14 8.5-6.2 1.6 3.6 6.3-2.6 1.5-3.6-6.3L5.6 19z"/>',
+    bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 21h4"/>',
+    share: '<circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M8.2 10.8l7.6-4.4M8.2 13.2l7.6 4.4"/>',
+    monitor: '<rect x="3" y="4" width="18" height="12" rx="1"/><path d="M8 20h8M12 16v4"/>',
+    win: '<path d="M3 5.5l7.5-1v7H3zM12.5 4.2L21 3v8.5h-8.5zM3 13.5h7.5v7L3 19.5zM12.5 13.5H21V21l-8.5-1.2z"/>',
+    down: '<path d="M6 9l6 6 6-6"/>',
     grid: '<rect x="4" y="4" width="6" height="6"/><rect x="14" y="4" width="6" height="6"/><rect x="4" y="14" width="6" height="6"/><rect x="14" y="14" width="6" height="6"/>'
   };
   OS.icon = function (name, size) {

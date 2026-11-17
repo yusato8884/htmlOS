@@ -78,7 +78,7 @@
           if (!ok) return;
           if (!(await ui.asRoot(name + ' をインストールします。'))) return;
           const n = OS.pkg.install(name, code, 'root');
-          ui.toast(n + ' をインストールしました'); tab = 'list'; render();
+          OS.notify({ app: 'hStore', icon: 'box', title: 'インストールしました', body: n }); tab = 'list'; render();
         } catch (e) { ui.alert(e.message); }
       }
       const pages = {

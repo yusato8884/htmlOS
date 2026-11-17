@@ -320,6 +320,11 @@
         throw new Error('pkg list | install ファイルかURL | remove 名前');
       });
 
+      def('notify', 'notify タイトル [本文]', 'HTUi に通知を出す', (title, ...body) => {
+        if (!OS.htui.running || !OS.htui.user) throw new Error('HTUi にログインしているときだけ使えます');
+        if (!title) throw new Error('タイトルを指定してください');
+        OS.notify({ app: 'jsh', icon: 'terminal', title: String(title), body: body.join(' ') });
+      });
       def('bootmode', 'bootmode [gui|cui]', '既定の起動モードを表示・変更', m => {
         if (m == null) return OS.config.get('bootMode', 'gui');
         needAdmin(); if (m !== 'gui' && m !== 'cui') throw new Error('gui か cui を指定してください');

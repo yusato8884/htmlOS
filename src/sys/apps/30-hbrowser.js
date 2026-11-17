@@ -182,7 +182,7 @@
           try { const U = new URL(cur); name = (U.pathname.split('/').filter(Boolean).pop() || U.hostname).replace(/\.[a-z0-9]+$/i, '') + '.html'; } catch (e) { name = path.base(cur.slice(4)); }
           const dest = fsx.unique(path.join(dlDir(), decodeURIComponent(name)));
           fsx.write(dest, html);
-          status.textContent = ''; ui.toast('保存しました: ' + dest);
+          status.textContent = ''; OS.notify({ app: 'hBrowser', icon: 'save', title: 'ページを保存しました', body: dest });
         } catch (e) { status.textContent = ''; ui.alert('保存できませんでした。\n' + e.message); }
       }
       async function download(u) {
@@ -196,7 +196,7 @@
           const c = await OS.net.blobToContent(blob, name);
           const dest = fsx.unique(path.join(dlDir(), name));
           fsx.write(dest, c.content, { bin: c.bin });
-          status.textContent = ''; ui.toast('ダウンロードしました: ' + dest);
+          status.textContent = ''; OS.notify({ app: 'hBrowser', icon: 'download', title: 'ダウンロードが完了しました', body: dest });
         } catch (e) { status.textContent = ''; ui.alert('ダウンロードできませんでした。\n' + e.message); }
       }
 

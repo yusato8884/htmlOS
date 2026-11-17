@@ -101,12 +101,16 @@
     sh.build(kit);
     if (!htui.desk) kit.desk(false, true);
     if (!htui.tasks) htui.tasks = h('div'); // タスクボタンを出さない環境でも、ウィンドウ側が参照するので置き場だけ作る
-    // タッチ用の下部ナビ（タブレット・スマートフォンモードのときだけ表示される）
-    const navBtn = (icon, label, fn) => h('button', { class: 'nav-btn', type: 'button', onclick: fn }, OS.icon(icon, 22), h('span', null, label));
-    htui.el.append(h('div', { class: 'tabbar' },
-      navBtn('x', '閉じる', () => { const w = htui.active(); if (w) w.close(); }),
-      navBtn('home', 'ホーム', goHome),
-      navBtn('grid', 'タスク', switcher)));
+    // タッチ用の下部ナビ。HTUi だけが使う（ほかの環境は、それぞれのやり方で操作する）
+    if (sh.touchNav) {
+      const navBtn = (icon, label, fn) => h('button', { class: 'nav-btn', type: 'button', onclick: fn }, OS.icon(icon, 22), h('span', null, label));
+      htui.el.append(h('div', { class: 'tabbar' },
+        navBtn('x', '閉じる', () => { const w = htui.active(); if (w) w.close(); }),
+        navBtn('home', 'ホーム', goHome),
+        navBtn('grid', 'タスク', switcher)));
+    }
+    htui.notices = [];
+    OS.notify({ app: 'htmlOS', icon: 'user', title: 'ようこそ、' + user + ' さん', body: sh.name + ' にログインしました', silent: true });
     const tick = () => ticks.forEach(f => { try { f(new Date()); } catch (e) { /* 無視 */ } });
     tick(); clockTimer = setInterval(tick, 5000);
     htui.refreshApps(); htui.refreshUser(); htui.syncMode(); htui.syncTitle();
@@ -153,8 +157,26 @@
   htui.onMode = function () {
     if (!htui.running || !htui.user) return;
     htui.syncMode();
-    htui.wins.forEach(w => { if (OS.touch) w.snap('max', true); else if (w.zone === 'max') w.unsnap(true); });
+    htui.wins.forEach(w => {
+      if (!OS.touch) { w.free = false; w.el.classList.remove('free'); }
+      if (OS.touch && !w.free) w.snap('max', true); else if (!OS.touch && w.zone === 'max') w.unsnap(true);
+    });
     htui.syncTitle();
+    if (htui.shell && htui.shell.onMode) htui.shell.onMode();
+  };
+
+  // ---------- 通知。OS.notify({ app, icon, title, body, silent }) / OS.notify('文字列')
+  //   ため込んだ通知は htui.notices（ログインごとに空になる）。表示のしかたは環境ごとに onNotify で変えられる
+  htui.notices = [];
+  let noticeSeq = 0;
+  OS.notify = function (n) {
+    n = typeof n === 'string' ? { title: n } : Object.assign({}, n);
+    n.id = ++noticeSeq; n.time = Date.now(); n.unread = !n.silent;
+    if (!htui.running || !htui.user) return n;
+    htui.notices.unshift(n); htui.notices.length = Math.min(htui.notices.length, 50);
+    if (htui.shell && htui.shell.onNotify) htui.shell.onNotify(n);
+    else if (!n.silent && !htui.prefs.dnd) ui.toast(n.title + (n.body ? '：' + n.body : ''));
+    return n;
   };
   // デスクトップのアイコンを作り直す（パッケージの追加・削除のあとにも呼ばれる）
   htui.refreshApps = function () {
@@ -302,6 +324,7 @@
       htui.wins.forEach(x => { x.el.classList.remove('active'); x.task.classList.remove('active'); });
       el.classList.add('active'); task.classList.add('active');
       el.style.zIndex = ++htui.z;
+      if (htui.shell && htui.shell.onFocus) htui.shell.onFocus(win);
       htui.syncTitle();
       if (win.onFocus) win.onFocus();
     };
@@ -352,12 +375,12 @@
       menu(bMax, [['左半分', 'left'], ['右半分', 'right'], ['左上', 'tl'], ['右上', 'tr'], ['左下', 'bl'], ['右下', 'br'], ['最大化', 'max']]
         .map(x => ({ label: x[0], act: () => win.snap(x[1]) })).concat([{ label: '元のサイズに戻す', act: () => win.unsnap() }]), true);
     });
-    head.addEventListener('dblclick', e => { if (!e.target.closest('.win-btn') && !OS.touch) toggleMax(); });
+    head.addEventListener('dblclick', e => { if (!e.target.closest('.win-btn') && (!OS.touch || win.free)) toggleMax(); });
     el.addEventListener('pointerdown', () => { if (!el.classList.contains('active')) win.focus(); }, true);
 
     // ---- タイトルバーのドラッグで移動。画面の端まで運ぶとスナップ
     head.addEventListener('pointerdown', e => {
-      if (e.target.closest('.win-btn') || e.button > 0 || OS.touch) return;
+      if (e.target.closest('.win-btn') || e.button > 0 || (OS.touch && !win.free)) return;
       const dr = desk.getBoundingClientRect(), x0 = e.clientX, y0 = e.clientY;
       let sx = e.clientX - dr.left - el.offsetLeft, sy = e.clientY - dr.top - el.offsetTop, moved = false, zone = null;
       const startRect = win.zone ? win.rect : curRect();
@@ -408,7 +431,10 @@
 
     desk.append(el);
     htui.wins.push(win);
-    if (dw < 700 || OS.touch) win.snap('max', true);
+    // タッチでは全画面。ただし環境が「ふつうのウィンドウ」を許す場面（hWin のデスクトップ）なら free にして動かせるようにする
+    win.free = !!(OS.touch && htui.shell && htui.shell.freeWindows && htui.shell.freeWindows());
+    if (win.free) el.classList.add('free');
+    if (dw < 700 || (OS.touch && !win.free)) win.snap('max', true);
     win.focus();
     return win;
   };
