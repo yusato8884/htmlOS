@@ -66,6 +66,8 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 @media (pointer:coarse){.bs-item,.bs-tab{padding-top:10px;padding-bottom:10px}}
 .panic{width:min(720px,100%);white-space:pre-wrap}
 .panic b{color:#ff6b6b}
+#kb-notice{position:fixed;left:50%;bottom:24px;z-index:2147483647;max-width:calc(100% - 24px);transform:translate(-50%,16px);padding:10px 18px;border-radius:12px;background:rgba(20,22,26,.94);color:#f4f4f5;font:14px/1.5 system-ui,-apple-system,"Segoe UI","Hiragino Sans","Noto Sans JP",sans-serif;box-shadow:0 8px 28px rgba(0,0,0,.45);text-align:center;opacity:0;pointer-events:none;transition:opacity .25s,transform .25s}
+#kb-notice.on{opacity:1;transform:translate(-50%,0)}
 </style>
 </head>
 <body>
@@ -5048,7 +5050,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
    ============================================================ */
 (function () {
   'use strict';
-  var MEDIA_VERSION = '1.12.0';
+  var MEDIA_VERSION = '1.12.1';
   var P = 'htmlos:';
 
   // ---- ストレージ (LocalStorageが使えない環境ではRAMディスクで動く)
@@ -5153,11 +5155,30 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     .concat('ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(function (c) { return 'Key' + c; }))
     .concat('0123456789'.split('').map(function (c) { return 'Digit' + c; }))
     .concat([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map(function (n) { return 'F' + n; }));
+  // 捕捉の状態を画面下にしばらく出す（ブラウザの「Esc 長押しで全画面を終了」の表示は上に出るので重ならないよう下に）
+  function kbNotice(text) {
+    var n = document.getElementById('kb-notice');
+    if (!n) { n = document.createElement('div'); n.id = 'kb-notice'; n.setAttribute('role', 'status'); document.body.appendChild(n); }
+    n.textContent = text; n.offsetWidth; n.className = 'on';
+    clearTimeout(n._t); n._t = setTimeout(function () { n.className = ''; }, 4000);
+  }
+  var kbLocked = false, kbWarned = false;
   document.addEventListener('pointerdown', function (e) {
-    if (e.pointerType !== 'mouse' || e.button !== 0 || navigator.webdriver || document.fullscreenElement) return;
-    if (!navigator.keyboard || !navigator.keyboard.lock || !document.documentElement.requestFullscreen) return;
-    document.documentElement.requestFullscreen({ navigationUI: 'hide' }).then(function () { return navigator.keyboard.lock(LOCK_KEYS); }).catch(function () { /* 使えないブラウザでは何もしない */ });
+    if (e.pointerType !== 'mouse' || e.button !== 0 || (navigator.webdriver && !window.__kblockTest) || document.fullscreenElement) return;
+    if (!navigator.keyboard || !navigator.keyboard.lock || !document.documentElement.requestFullscreen) {
+      if (!kbWarned) { kbWarned = true; kbNotice('このブラウザはキーボードの捕捉（Keyboard Lock）に対応していません。Chrome か Edge で使えます'); }
+      return;
+    }
+    document.documentElement.requestFullscreen({ navigationUI: 'hide' })
+      .then(function () { return navigator.keyboard.lock(LOCK_KEYS); })
+      .then(function () { kbLocked = true; kbNotice('⌨ キーボードを捕捉しました。Alt+Tab や Super キーも htmlOS に届きます（Esc 長押しで解除）'); })
+      .catch(function (err) { kbNotice('キーボードを捕捉できませんでした: ' + ((err && err.message) || err)); });
   }, true);
+  document.addEventListener('fullscreenchange', function () {
+    if (document.fullscreenElement || !kbLocked) return;
+    kbLocked = false;
+    kbNotice('キーボードの捕捉を解除しました。クリックするとまた捕捉します');
+  });
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
   function show(node, cls) { scr.style.display = 'flex'; scr.className = cls || ''; scr.textContent = ''; scr.appendChild(node); }
 
