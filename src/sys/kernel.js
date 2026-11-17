@@ -30,6 +30,12 @@
     return e;
   }
   OS.h = h;
+  // スクリプトから送られた click（仮想カーソルなど）が、使えない（disabled）ボタンに届かないようにする
+  document.addEventListener('click', e => {
+    if (e.isTrusted) return;
+    const t = e.target;
+    if (t && t.closest && t.closest(':disabled')) { e.stopImmediatePropagation(); e.preventDefault(); }
+  }, true);
 
   const ICONS = {
     terminal: '<path d="M4 6l5 5-5 5M12 17h8"/>',
@@ -561,7 +567,10 @@
     if (OS._down) return;
     const gui = !!(OS.htui && OS.htui.running);
     // 未保存の変更があるウィンドウは確認を出す。キャンセルされたら終了を取りやめる
-    if (gui && OS.htui.user) { for (const w of OS.htui.wins.slice()) { if ((await w.close()) === false) return; } }
+    if (gui && OS.htui.user) {
+      OS.shuttingDown = true; // ウィンドウ側が「終了のための close」だとわかるように
+      try { for (const w of OS.htui.wins.slice()) { if ((await w.close()) === false) return; } } finally { OS.shuttingDown = false; }
+    }
     OS._down = true;
     if (flag) store.set('bootflag', flag);
     const t0 = Date.now(), tty = OS.tty1, label = reboot ? '再起動しています…' : 'シャットダウンしています…';

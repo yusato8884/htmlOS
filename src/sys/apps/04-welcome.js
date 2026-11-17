@@ -1,4 +1,4 @@
-/* Welcome — htmlOS i を用途に合わせて使うためのアプリ。
+/* htmlOSセットアップ（id: welcome）— htmlOS i を用途に合わせて使うためのアプリ。
    ロゴ・バージョン・ビルド番号と、2×2 のタイル「htmlOS を試す」「インストール」「アップデート」「htmlOS を回復」を出す。
    アップデートと回復は、インストール先（本物の LocalStorage）を操作する（BOOT.updateReal など、ブートローダの関数を使う）。 */
 (function () {
@@ -8,16 +8,28 @@
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   OS.registerApp({
-    id: 'welcome', name: 'Welcome', icon: 'star', color: '#1c71d8', desc: 'htmlOS i — 試す・インストール・アップデート・回復',
+    id: 'welcome', name: 'htmlOSセットアップ', icon: 'star', color: '#1c71d8', desc: 'htmlOS i — 試す・インストール・アップデート・回復',
     launch() {
       const ex = OS.htui.wins.find(w => w.app === 'welcome');
       if (ex) { ex.focus(); return ex; }
-      const win = OS.htui.open({ title: 'Welcome — htmlOS i', icon: 'star', w: 720, h: 600, app: 'welcome' });
+      const win = OS.htui.open({ title: 'htmlOSセットアップ', icon: 'star', w: 720, h: 600, app: 'welcome' });
       const body = h('div', { class: 'wl' });
       win.body.append(body);
       if (OS.imode && !OS.touch) win.snap('max', true); // htmlOS i ではセットアップ画面として全体に広げる
-      let busy = false;
-      win.onClose = () => !busy;
+      let busy = false, asking = false;
+      // htmlOS i で閉じようとしたら、セットアップを終えてシャットダウンするかを聞く（試している Live 環境ではふつうに閉じる）
+      win.onClose = async () => {
+        if (busy || asking) return false;
+        if (!OS.imode || OS.shuttingDown) return true;
+        const st = BOOT.realHealth ? BOOT.realHealth() : (BOOT.realHasOS() ? 'ok' : 'none');
+        const msg = st === 'ok' ? 'htmlOSセットアップを終了し、シャットダウンしますか？' : 'htmlOSセットアップはまだ完了していません。htmlOSセットアップを終了し、シャットダウンしますか？';
+        asking = true;
+        const yes = await ui().modal({ title: 'htmlOSセットアップ', body: h('p', { class: 'modal-msg', id: 'wl-quit-msg' }, msg),
+          buttons: [{ label: 'いいえ', cancel: true, value: false }, { label: 'はい', primary: true, value: true }] });
+        asking = false;
+        if (yes) OS.poweroff();
+        return false;
+      };
 
       const tile = (id, icon, title, sub, fn, disabled) => h('button', { class: 'wl-tile wl-' + id, type: 'button', id: 'wl-' + id, disabled: !!disabled, onclick: fn },
         h('span', { class: 'wl-ico' }, OS.icon(icon, 34)), h('b', null, title), h('small', null, sub));
@@ -61,7 +73,7 @@
         OS.imode = false;
         OS.htui.stop();
         OS.htui.start('live', OS.hdm.defaultSession());
-        setTimeout(() => OS.notify({ app: 'htmlOS', icon: 'play', title: 'Live 環境で試しています', body: 'インストールするときは Welcome（アプリの一覧）の「インストール」を選んでください。ここでの変更は再読み込みすると消えます' }), 800);
+        setTimeout(() => OS.notify({ app: 'htmlOS', icon: 'play', title: 'Live 環境で試しています', body: 'インストールするときは htmlOSセットアップ（アプリの一覧）の「インストール」を選んでください。ここでの変更は再読み込みすると消えます' }), 800);
       }
 
       // アップデート: /sys をメディアの内容で書き直す
@@ -78,10 +90,10 @@
           BOOT.updateReal(s => { n++; pg.say(s, n / files * 100); });
           pg.say('完了しました', 100); pg.stat.textContent = doneMsg;
           busy = false;
-          pg.stat.after(h('div', { class: 'wl-row' }, h('button', { class: 'btn primary', type: 'button', id: 'wl-reboot', onclick: () => OS.reboot() }, '再起動'), h('button', { class: 'btn', type: 'button', onclick: home }, 'Welcome に戻る')));
+          pg.stat.after(h('div', { class: 'wl-row' }, h('button', { class: 'btn primary', type: 'button', id: 'wl-reboot', onclick: () => OS.reboot() }, '再起動'), h('button', { class: 'btn', type: 'button', onclick: home }, '最初の画面に戻る')));
         } catch (e) {
           busy = false; pg.stat.textContent = '失敗しました: ' + e.message; pg.stat.classList.add('gi-errtext');
-          pg.stat.after(h('button', { class: 'btn', type: 'button', onclick: home }, 'Welcome に戻る'));
+          pg.stat.after(h('button', { class: 'btn', type: 'button', onclick: home }, '最初の画面に戻る'));
         }
       }
 
@@ -93,7 +105,7 @@
           h('span', { class: 'wl-aico' }, OS.icon(icon, 20)), h('div', { class: 'wl-atext' }, h('b', null, title), h('small', null, desc)),
           h('button', { class: 'btn' + (opt && opt.danger ? ' danger' : ''), type: 'button', id: 'wl-' + id, disabled: opt && opt.disabled, onclick: fn }, label));
         body.append(
-          h('div', { class: 'wl-sub' }, h('button', { class: 'tbtn', type: 'button', onclick: home, 'aria-label': '戻る' }, OS.icon('back', 16), 'Welcome'), h('h2', null, 'htmlOS を回復')),
+          h('div', { class: 'wl-sub' }, h('button', { class: 'tbtn', type: 'button', onclick: home, 'aria-label': '戻る' }, OS.icon('back', 16), 'htmlOSセットアップ'), h('h2', null, 'htmlOS を回復')),
           h('p', { class: 'gi-lead' }, has ? 'インストール先の htmlOS ' + (BOOT.realMeta() || {}).version + ' を直します。' : 'インストール先に htmlOS が見つかりません。バックアップからの復元だけ使えます。'),
           h('div', { class: 'wl-acts' },
             row('repair', 'reload', 'システムを修復', '/sys をメディアの内容で書き直します。ユーザー・ファイル・設定は残ります', '修復', async () => {

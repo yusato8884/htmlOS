@@ -1,4 +1,4 @@
-/* htmlOS インストーラー（GUI）。htmlOS i（とそこから始めた Live 環境）で使う。Welcome の「インストール」から開く。
+/* htmlOS インストーラー（GUI）。htmlOS i（とそこから始めた Live 環境）で使う。htmlOSセットアップの「インストール」から開く。
    ユーザー → 設定 → 確認 → インストール の順に進み、本物の LocalStorage に htmlOS を入れる。
    書き込みはブートローダの BOOT.installReal が行う（Live の OS 自体はメモリ上のストレージで動いている）。 */
 (function () {

@@ -229,6 +229,21 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   BOOT.build = MEDIA_BUILD;
   BOOT.realHasOS = function () { return onReal(function () { return !!getMeta() && store.get('f:/sys/kernel.js') != null; }); };
   BOOT.realMeta = function () { return onReal(getMeta); };
+  // インストール先の状態: 'none'（何もない）/ 'broken'（壊れている）/ 'ok'
+  BOOT.realHealth = function () {
+    return onReal(function () {
+      var keys = store.keys(), meta = getMeta();
+      var any = !!meta || keys.some(function (k) { return k.indexOf('f:') === 0; });
+      if (!any) return 'none';
+      if (!meta || !meta.version) return 'broken';
+      var need = ['/sys/kernel.js', '/sys/htui.js', '/sys/jsh.js', '/sys/style.css', '/etc/passwd'];
+      for (var i = 0; i < need.length; i++) {
+        try { var n = JSON.parse(store.get('f:' + need[i])); if (!n || n.t !== 'f' || !n.c) return 'broken'; } catch (e) { return 'broken'; }
+      }
+      try { var list = JSON.parse(JSON.parse(store.get('f:/etc/passwd')).c); if (!Array.isArray(list) || !list.length) return 'broken'; } catch (e) { return 'broken'; }
+      return 'ok';
+    });
+  };
   BOOT.realIsRam = function () { return realStore.ram; };
   // アップデート・システム修復: /sys をメディアの内容で書き直す（ユーザー・ファイル・設定は残る）
   BOOT.updateReal = function (log) { onReal(function () { writeSys(log); }); };
@@ -336,6 +351,8 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   }
   function vcFire(type, t, src, extra) {
     if (!t.el) return true;
+    // 本物のブラウザと同じく、使えない（disabled）ボタンなどには click を出さない（合成のイベントだと Chrome は出してしまう）
+    if (/^(click|dblclick|auxclick)$/.test(type) && t.el.closest && t.el.closest(':disabled')) return false;
     var V = t.view || window, x = VC.x - t.ox, y = VC.y - t.oy;
     var init = { bubbles: !/enter$|leave$/.test(type), cancelable: !/enter$|leave$/.test(type), composed: true, view: V,
       clientX: x, clientY: y, screenX: VC.x, screenY: VC.y, button: src ? src.button : 0, buttons: src ? src.buttons : 0,
