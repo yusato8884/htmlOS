@@ -240,7 +240,9 @@
 
 /* ---- hPaint */
 .pt-stage{flex:1;min-height:0;overflow:auto;background:#8d9098;display:flex;padding:12px}
-.pt-canvas{margin:auto;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.4);max-width:100%;height:auto;touch-action:none;cursor:crosshair;image-rendering:pixelated}
+.pt-canvas{flex:none;margin:auto;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.4);touch-action:none;cursor:crosshair;image-rendering:pixelated}
+.pt-canvas.hand{cursor:grab}
+.pt-zoom{min-width:58px;justify-content:center;font-variant-numeric:tabular-nums}
 .pt-colors{display:flex;gap:3px;align-items:center}
 .pt-sw{width:18px;height:18px;border-radius:4px;border:1px solid rgba(0,0,0,.35);padding:0;cursor:pointer}
 .pt-sw.on{outline:2px solid var(--accent);outline-offset:1px}
@@ -687,3 +689,10 @@
 .phone .de-win .w8-grid,.phone .de-win .w8-alist{touch-action:pan-y}
 .touch .gn-area,.touch .gn-dock{touch-action:pan-x}
 .touch .de-win.w8-start-on .taskbar{display:none}
+.touch .pt-stage{touch-action:none}
+/* hWin（タッチ）でアプリを全画面で開いているとき: 上に細い帯（つまみ）を出し、アプリはその下に置く。
+   画面のいちばん上の端から始まるスワイプは、全画面表示ではブラウザや OS が先に受け取ってしまう（アドレスバーが出る）ので、
+   端から少し離れたこの帯から引き下ろして閉じる。帯をタップするとタイトルバーが出る */
+.touch .de-win:not(.w8-start-on):not(.w8-desk-on) .edge-t{left:0;right:0;height:28px;background:#0d0e12;display:flex;align-items:center;justify-content:center;cursor:grab}
+.touch .de-win:not(.w8-start-on):not(.w8-desk-on) .edge-t::after{content:"";width:48px;height:5px;border-radius:3px;background:rgba(255,255,255,.5)}
+.touch .de-win:not(.w8-start-on):not(.w8-desk-on) .win.tiled:not(.free){top:28px!important;height:calc(100% - 28px)!important}
