@@ -1308,3 +1308,47 @@
 .touch .de-mac .desk-icons,.touch .de-gnome .desk-icons{display:none}
 .mc-dk.mc-trash.full .mc-trashico{background:rgba(255,255,255,.75);color:#a35a00}
 .tbtn[hidden]{display:none}
+/* セーフモードの印（四隅） */
+.safe-mark{position:absolute;inset:0;z-index:95500;pointer-events:none;color:rgba(255,255,255,.85);font-weight:700;font-size:15px;text-shadow:0 1px 3px rgba(0,0,0,.6)}
+.safe-mark span{position:absolute}
+.safe-mark span:nth-child(1){left:12px;top:36px}.safe-mark span:nth-child(2){right:12px;top:36px}
+.safe-mark span:nth-child(3){left:12px;bottom:56px}.safe-mark span:nth-child(4){right:12px;bottom:56px}
+/* ---- hwm（htmlOS i） */
+#htui.de-hwm{background:radial-gradient(1200px 700px at 70% 30%,#1d3157,#0c1220 70%)!important}
+.hwm-mark{position:absolute;right:14px;bottom:10px;z-index:5;display:flex;align-items:center;gap:8px;color:rgba(255,255,255,.55);font-size:12.5px;pointer-events:none}
+.hwm-mark b{color:rgba(255,255,255,.8)}
+.de-hwm .desk-icons{display:none}
+/* ---- Welcome（htmlOS i） */
+.wl{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;align-items:center;gap:14px;padding:24px 20px;background:radial-gradient(900px 500px at 50% 0%,color-mix(in srgb,var(--accent) 12%,var(--surface)),var(--surface))}
+.wl-head{display:flex;flex-direction:column;align-items:center;gap:2px;text-align:center}
+.wl-head h1{margin:6px 0 0;font-size:30px;letter-spacing:.02em}
+.wl-head p{margin:0;color:var(--ink-2);font-size:13.5px}
+.wl-mark{color:var(--accent)}
+.wl-mark path{stroke-dasharray:1;stroke-dashoffset:1;animation:sp-draw .7s cubic-bezier(.4,0,.2,1) forwards}
+.wl-mark path:nth-child(2){animation-delay:.15s}.wl-mark path:nth-child(3){animation-delay:.3s}
+.wl-mark.spin svg{animation:sp-glow 2s ease-in-out infinite}
+.wl-grid{display:grid;grid-template-columns:repeat(2,min(200px,38vw,calc((100vh - 300px) / 2)));gap:14px;margin-top:6px}
+.wl-tile{aspect-ratio:1;min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:14px;border:1.5px solid var(--line);border-radius:18px;background:var(--surface);color:var(--ink)!important;cursor:pointer;text-align:center;box-shadow:0 4px 14px rgba(0,0,0,.06);transition:transform .15s,box-shadow .15s,border-color .15s}
+.wl-tile:hover:not(:disabled),.wl-tile:focus-visible{transform:translateY(-3px);border-color:var(--accent);box-shadow:0 10px 24px rgba(0,0,0,.12)}
+.wl-tile:disabled{opacity:.5}
+.wl-tile b{font-size:16px}
+.wl-tile small{font-size:12px;color:var(--ink-2);line-height:1.4}
+.wl-ico{width:58px;height:58px;border-radius:16px;display:flex;align-items:center;justify-content:center;color:#fff;background:var(--accent)}
+.wl-try .wl-ico{background:#2ec27e}.wl-install .wl-ico{background:#1c71d8}.wl-update .wl-ico{background:#e66100}.wl-recover .wl-ico{background:#5e5c64}
+.wl-foot{margin:4px 0 0;color:var(--ink-2);font-size:12.5px;text-align:center}
+.wl-prog{width:min(520px,100%);display:flex;flex-direction:column;align-items:center;gap:10px;margin:auto 0}
+.wl-prog .gi-bar,.wl-prog .wl-log{width:100%}
+.wl-row{display:flex;gap:8px;justify-content:center}
+.wl-sub{align-self:stretch;display:flex;align-items:center;gap:10px}
+.wl-sub h2{margin:0;font-size:20px}
+.wl-acts{align-self:stretch;display:flex;flex-direction:column;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface)}
+.wl-act{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.wl-act:last-child{border-bottom:0}
+.wl-aico{flex:none;width:36px;height:36px;border-radius:10px;background:var(--surface-2);display:flex;align-items:center;justify-content:center}
+.wl-act.danger .wl-aico{background:#fde4e6;color:#c01c28}
+.wl-atext{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.wl-atext small{color:var(--ink-2);font-size:12px}
+.wl-act .btn{flex:none}
+.wl-form{display:flex;flex-direction:column;gap:10px;min-width:260px}
+.wl-form label{display:flex;flex-direction:column;gap:4px;font-size:13px}
+.phone .wl-act{flex-wrap:wrap}

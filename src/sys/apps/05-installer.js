@@ -1,11 +1,11 @@
-/* htmlOS インストーラー（GUI）。Live モードのときだけ使える。
-   ようこそ → ユーザー → 設定 → 確認 → インストール の順に進み、本物の LocalStorage に htmlOS を入れる。
+/* htmlOS インストーラー（GUI）。htmlOS i（とそこから始めた Live 環境）で使う。Welcome の「インストール」から開く。
+   ユーザー → 設定 → 確認 → インストール の順に進み、本物の LocalStorage に htmlOS を入れる。
    書き込みはブートローダの BOOT.installReal が行う（Live の OS 自体はメモリ上のストレージで動いている）。 */
 (function () {
   const OS = window.OS, h = OS.h, BOOT = window.BOOT;
   if (!OS.live || !BOOT || !BOOT.installReal) return;
 
-  const STEPS = ['ようこそ', 'ユーザー', '設定', '確認', 'インストール'];
+  const STEPS = ['ユーザー', '設定', '確認', 'インストール'];
 
   OS.registerApp({
     id: 'installer', name: 'htmlOS をインストール', icon: 'download', color: '#c01c28', desc: 'このブラウザに htmlOS をインストールする',
@@ -41,15 +41,15 @@
         side.textContent = '';
         STEPS.forEach((s, i) => side.append(h('li', { class: i === st.step ? 'on' : i < st.step ? 'ok' : '' }, h('span', { class: 'gi-num' }, i < st.step ? '✓' : String(i + 1)), s)));
         page.textContent = ''; err.textContent = '';
-        back.hidden = st.step === 0 || st.step === 4; next.hidden = st.step === 0 || (st.step === 4 && !st.done);
-        next.textContent = st.step === 3 ? 'インストール' : st.step === 4 ? '再起動して使い始める' : '次へ';
-        next.classList.toggle('danger', st.step === 3 && BOOT.realHasOS());
+        back.hidden = st.step === 0 || st.step === 3; next.hidden = st.step === 3 && !st.done;
+        next.textContent = st.step === 2 ? 'インストール' : st.step === 3 ? '再起動して使い始める' : '次へ';
+        next.classList.toggle('danger', st.step === 2 && BOOT.realHasOS());
         PAGES[st.step]();
         const f = page.querySelector('input:not([type=radio]):not([type=checkbox])'); if (f && !OS.touch) setTimeout(() => f.focus(), 30);
       }
       function go(i) { if (st.busy) return; st.step = Math.max(0, Math.min(STEPS.length - 1, i)); render(); }
       function forward() {
-        if (st.step === 1) {
+        if (st.step === 0) {
           const u = st.user.trim();
           if (!/^[a-z_][a-z0-9_-]{0,15}$/.test(u)) return fail('ユーザー名は英小文字で始め、英小文字・数字・_ - で16文字までにしてください。');
           if (u === 'root' || u === 'live') return fail(u + ' は使えません。別のユーザー名にしてください。');
@@ -57,28 +57,17 @@
           if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,62}$/.test(st.host.trim())) return fail('コンピューター名は英数字と - で、63文字までにしてください。');
           st.user = u; st.host = st.host.trim();
         }
-        if (st.step === 3) return run();
-        if (st.step === 4) { OS.reboot(); return; }
+        if (st.step === 2) return run();
+        if (st.step === 3) { OS.reboot(); return; }
         go(st.step + 1);
       }
       function fail(m) { err.textContent = m; const b = page.querySelector('.gi-form'); if (b) { b.classList.remove('shake'); void b.offsetWidth; b.classList.add('shake'); } }
 
       const PAGES = [
-        // ようこそ: 試すか、インストールするか
-        () => page.append(h('div', { class: 'gi-hello' },
-          OS.mark(84, 'gi-mark'),
-          h('h1', null, 'htmlOS へようこそ'),
-          h('p', null, 'インストールせずにこのまま試すことも、このブラウザに htmlOS をインストールすることもできます。'),
-          h('div', { class: 'gi-choices' },
-            h('button', { class: 'gi-choice', type: 'button', id: 'gi-try', onclick: () => { win.close(); OS.notify({ app: 'htmlOS', icon: 'download', title: 'Live モードで試しています', body: 'インストールするときは「htmlOS をインストール」を開いてください' }); } },
-              OS.icon('play', 34), h('b', null, 'htmlOS を試す'), h('span', null, 'インストールせずに使う。再読み込みすると、ここでの変更は消えます')),
-            h('button', { class: 'gi-choice primary', type: 'button', id: 'gi-install', onclick: () => go(1) },
-              OS.icon('download', 34), h('b', null, 'htmlOS をインストール'), h('span', null, 'このブラウザの LocalStorage に入れて、次からはそこから起動します'))),
-          BOOT.realIsRam() ? h('p', { class: 'gi-warn' }, OS.icon('bell', 16), 'このブラウザは LocalStorage が使えないため、インストールしても再読み込みで消えます。') : null)),
         // ユーザー
         () => page.append(h('h2', null, 'ユーザーを作成'), h('p', { class: 'gi-lead' }, '最初のユーザーは管理者になります。何でもできる root アカウントも一緒に作られます（jsh の su で入ります）。'),
           h('div', { class: 'gi-form' },
-            field('ユーザー名', inp('gi-user', 'user', 'text', '例: yu'), '英小文字で始め、英小文字・数字・_ - で16文字まで'),
+            field('ユーザー名', inp('gi-user', 'user', 'text', '例: user'), '英小文字で始め、英小文字・数字・_ - で16文字まで'),
             h('div', { class: 'gi-two' }, field('パスワード', inp('gi-pw1', 'pw1', 'password')), field('もう一度', inp('gi-pw2', 'pw2', 'password'))),
             field('root のパスワード', inp('gi-rpw', 'rpw', 'password', '空欄なら上と同じ')),
             field('コンピューター名', inp('gi-host', 'host'), 'jsh のプロンプト（ユーザー@名前）に出ます'))),
@@ -92,7 +81,7 @@
             h('h3', null, '起動したときの画面'),
             h('div', { class: 'gi-opts' }, radio('mode', 'gui', 'GUI（デスクトップ）', 'ログイン画面からデスクトップを使う'), radio('mode', 'cui', 'CUI（jsh コンソール）', '文字だけの画面。htui start でデスクトップも開ける')),
             h('h3', null, 'デスクトップ環境'),
-            h('div', { class: 'gi-opts gi-ses' }, Object.values(OS.sessions).map(s => radio('session', s.id, s.name, s.desc))),
+            h('div', { class: 'gi-opts gi-ses' }, Object.values(OS.sessions).filter(s => !s.hidden).map(s => radio('session', s.id, s.name, s.desc))),
             h('h3', null, 'Live のファイル'),
             h('label', { class: 'gi-check' }, h('input', { type: 'checkbox', id: 'gi-keep', checked: st.keep, onchange: e => { st.keep = e.target.checked; } }),
               n ? 'Live で作ったファイル（' + n + ' 個）と外観の設定を、新しいユーザーに引き継ぐ' : 'Live での外観の設定（壁紙など）を、新しいユーザーに引き継ぐ'));
@@ -122,7 +111,7 @@
 
       async function run() {
         if (st.busy) return;
-        st.step = 4; st.busy = true; render();
+        st.step = 3; st.busy = true; render();
         const { bar, log, stat } = st.ui;
         const total = Object.keys(BOOT.media).length + 4; let n = 0;
         const say = s => { log.textContent += s + '\n'; log.scrollTop = log.scrollHeight; n++; bar.style.width = Math.min(100, n / total * 100) + '%'; };
@@ -147,7 +136,7 @@
           say('失敗: ' + e.message);
           stat.textContent = 'インストールに失敗しました: ' + e.message + '（ブラウザのストレージが使えない、または空きがない可能性があります）';
           stat.classList.add('gi-errtext');
-          back.hidden = false; back.onclick = () => { st.failed = false; go(3); };
+          back.hidden = false; back.onclick = () => { st.failed = false; go(2); };
         }
       }
       render();

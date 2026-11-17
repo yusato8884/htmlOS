@@ -3,7 +3,7 @@
 (function () {
   'use strict';
   const BOOT = window.BOOT, store = BOOT.store;
-  const OS = window.OS = { version: BOOT.installedVersion, apps: {}, store: store, live: !!BOOT.live };
+  const OS = window.OS = { version: BOOT.installedVersion, apps: {}, store: store, live: !!BOOT.live, imode: !!BOOT.imode, safe: !!BOOT.safe };
 
   // ---------- DOM ヘルパー
   function h(tag, attrs, ...kids) {
@@ -592,7 +592,8 @@
   async function ttyLogin(tty) {
     for (;;) {
       tty.println(); tty.println('htmlOS ' + OS.version + ' (tty1)'); tty.println();
-      let user = null;
+      let user = OS.imode ? 'root' : null; // htmlOS i はシングルユーザーモード（root で自動ログイン）
+      if (user) tty.println('シングルユーザーモード: root でログインしました', 'dim');
       while (!user) {
         const name = (await tty.read('htmlos login: ')).trim();
         if (!name) continue;
@@ -631,6 +632,17 @@
 
   // ---------- 起動（起動画面は最低でも約1.2秒表示する。GUIはスプラッシュ、CUIは起動ログ）
   const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const I_APPS = ['04-welcome.js', '05-installer.js', '10-terminal.js', '20-hedit.js', '50-hfile.js'];
+  // htmlOS i の「htmlOS を試す」: まだ読み込んでいないアプリを読み込む（each(名前) を 1 つごとに呼ぶ）
+  OS.loadMoreApps = async function (each) {
+    const all = fs.list('/sys/apps').filter(n => n.endsWith('.js') && !I_APPS.includes(n)), done = [];
+    for (const n of all) {
+      try { OS.loadFile('/sys/apps/' + n); done.push(n); } catch (e) { /* 読めないアプリは飛ばす */ }
+      if (each) await each(n);
+    }
+    if (OS.htui && OS.htui.refreshApps) OS.htui.refreshApps();
+    return done;
+  };
   OS.hostname = () => { try { return OS.config.get('hostname', 'htmlos') || 'htmlos'; } catch (e) { return 'htmlos'; } };
   OS.boot = async function (mode) {
     const t0 = OS.bootTime = Date.now();
@@ -657,8 +669,11 @@
       splash = h('div', { id: 'splash', class: BOOT.quiet ? 'quiet' : '', role: 'status', 'aria-label': 'htmlOS ' + OS.version + ' を起動しています' }, OS.mark(120, 'sp-mark'), spinner());
       root.append(splash);
     }
-    const apps = fs.list('/sys/apps').filter(n => n.endsWith('.js'));
-    const pkgs = OS.pkg.list();
+    // htmlOS i は最小構成: Welcome・インストーラー・Terminal・hedit・hFile だけ。セーフモードと htmlOS i ではパッケージ（/apps）を読み込まない
+    let apps = fs.list('/sys/apps').filter(n => n.endsWith('.js'));
+    if (OS.imode) apps = apps.filter(n => I_APPS.includes(n));
+    const pkgs = OS.safe || OS.imode ? [] : OS.pkg.list();
+    try { OS.build = (JSON.parse(store.get('meta')) || {}).build || BOOT.build || '?'; } catch (e) { OS.build = BOOT.build || '?'; }
     const core = ['/sys/cursor.js', '/sys/jsh.js', '/sys/htui.js', '/sys/hdm.js', '/sys/shells.js'];
     const total = 2 + core.length + apps.length + pkgs.length; let done = 0;
     const step = async (s, failed) => {
@@ -666,7 +681,7 @@
       done++; bar.style.width = Math.min(100, done / total * 100) + '%'; msg.textContent = s;
       await sleep(85);
     };
-    tty.println('htmlOS ' + OS.version + ' を起動しています…');
+    tty.println((OS.imode ? 'htmlOS i ' : 'htmlOS ') + OS.version + (OS.safe ? '（セーフモード）' : '') + ' を起動しています…');
     await sleep(120);
     await step('LocalStorage ファイルシステムをマウントしました' + (store.ram ? '（RAMディスク: 再読み込みで消えます）' : ''));
     for (const f of core) { OS.loadFile(f); await step(f + ' を読み込みました'); }
@@ -686,8 +701,8 @@
     if (rest > 0) await sleep(rest);
     ttyLogin(tty);
     if (mode === 'gui') {
-      // Live モードは live ユーザーで自動ログインし、インストーラーを開く
-      if (OS.live) { OS.htui.start('live'); if (OS.apps.installer) setTimeout(() => { try { OS.launch('installer'); } catch (e) { /* 開けなくても Live は使える */ } }, 350); }
+      // htmlOS i はシングルユーザーモード: root で自動ログインし、hwm の上で Welcome を開く
+      if (OS.imode) { OS.htui.start('root', 'hwm'); setTimeout(() => { try { OS.launch('welcome'); } catch (e) { /* 開けなくても hwm は使える */ } }, 350); }
       else OS.htui.start();
       splash.classList.add('out');
       setTimeout(() => splash.remove(), 450);

@@ -82,6 +82,7 @@
       if (this.opt.login) { try { this.tty.print(fs0.read('/etc/motd'), 'dim'); } catch (e) { /* motdなし */ } }
       // ~/.jshrc があれば、1 行ずつ実行する（エイリアスや環境変数の設定を書いておける）
       try {
+        if (OS.safe) throw new Error('セーフモードでは ~/.jshrc を読まない');
         const rc = this.fs.read(this.home + '/.jshrc');
         for (const l of rc.split('\n')) { const t = l.trim(); if (t && !t.startsWith('#')) await this.exec(t, true); }
       } catch (e) { /* なければ何もしない */ }
@@ -348,7 +349,7 @@
           if (OS.htui.running && OS.htui.user) OS.htui.setPrefs({ mode: arg }); else OS.setMode(arg);
           return '画面モード: ' + OS.modeNames[arg] + (arg === 'auto' ? '（' + OS.modeNames[OS.uiMode] + '）' : '');
         }
-        if (sub === 'sessions') return Object.values(OS.sessions).map(s => s.id.padEnd(7) + s.name + (OS.htui.sessionId === s.id ? '  ← 使用中' : '')).join('\n');
+        if (sub === 'sessions') return Object.values(OS.sessions).filter(s => !s.hidden).map(s => s.id.padEnd(7) + s.name + (OS.htui.sessionId === s.id ? '  ← 使用中' : '')).join('\n');
         if (sub === 'start') {
           if (arg != null && !OS.sessions[arg]) throw new Error(arg + ': そのようなデスクトップ環境はありません（htui sessions で一覧）');
           if (!OS.htui.start(self.user, arg)) throw new Error('HTUi はすでに起動しています');
@@ -411,7 +412,7 @@
         needAdmin(); if (m !== 'gui' && m !== 'cui') throw new Error('gui か cui を指定してください');
         OS.config.set('bootMode', m); return '既定の起動モード: ' + m;
       });
-      def('reboot', 'reboot', '再起動', () => { OS.reboot(); });
+      def('reboot', 'reboot [i|safe|cui|gui]', '再起動（i: htmlOS i、safe: セーフモード、cui: jsh、gui: デスクトップで起動）', m => { if (m != null && !['i', 'safe', 'cui', 'gui'].includes(m)) throw new Error('reboot i / safe / cui / gui のどれかにしてください'); OS.reboot(m || undefined); });
       def('poweroff', 'poweroff', '電源を切る', () => { OS.poweroff(); });
       alias('shutdown', 'poweroff');
       def('reinstall', 'reinstall', '全消去して再インストール（管理者のみ）', async () => {

@@ -778,6 +778,31 @@
     },
   });
 
+  // ======================================================== hwm（htmlOS i のウィンドウマネージャ）
+  //   htmlOS i 専用（ログイン画面や設定の一覧には出ない）。パネルなし、右下にバージョンとビルド番号。
+  //   デスクトップを右クリック（タッチではタップ）すると、アプリ・ウィンドウ・再起動・電源を切るのメニュー
+  OS.registerSession({
+    id: 'hwm', name: 'hwm', hidden: true, desc: 'htmlOS i のウィンドウマネージャ',
+    build(k) {
+      const desk = k.desk(false, true), self = this;
+      desk.addEventListener('contextmenu', e => { if (e.target === desk) { e.preventDefault(); self.rootMenu(e.clientX, e.clientY); } });
+      desk.addEventListener('click', e => { if (e.target === desk && OS.touch) self.rootMenu(e.clientX, e.clientY); });
+      htui.el.append(h('div', { class: 'hwm-mark' }, OS.mark(18), h('b', null, 'htmlOS i'), h('span', null, OS.version + ' ・ ビルド ' + OS.build + ' ・ シングルユーザーモード（root）')));
+    },
+    rootMenu(x, y) {
+      const k = htui.kit;
+      const items = [{ head: 'htmlOS i' }].concat(k.apps().map(a => ({ label: a.name, icon: a.icon, act: () => k.run(a.id) })));
+      if (htui.wins.length) {
+        items.push({ sep: true }, { head: 'ウィンドウ' });
+        htui.wins.forEach(w => items.push({ label: w.title, icon: (OS.apps[w.app] || {}).icon || 'file', act: () => w.focus() }));
+      }
+      items.push({ sep: true }, { label: '画面モード: ' + OS.modeNames[OS.modePref], icon: OS.modeIcons[OS.uiMode], act: () => setTimeout(() => htui.menuAt(x, y, k.modeItems()), 0) },
+        { sep: true }, { label: '再起動', icon: 'reload', act: () => OS.reboot() }, { label: '電源を切る', icon: 'power', act: () => OS.poweroff() });
+      htui.menuAt(x, y, items);
+    },
+    onKey(e) { if (e.ctrlKey && e.altKey && e.key === 'Enter') { htui.kit.run('terminal'); return true; } }
+  });
+
   // ======================================================== hAqua（macOS 風）
   //   デスクトップ: 上にメニューバー（</> メニュー・アプリ名・ファイル/編集/表示/ウインドウ/ヘルプ・コントロールセンター・Spotlight・日時）、
   //     下に拡大するドック、左上に信号機ボタンのウインドウ。Launchpad（F4 / Super）・Mission Control（F3 / Ctrl+↑）・Spotlight（Alt+Space）

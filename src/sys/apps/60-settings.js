@@ -88,7 +88,7 @@
             h('p', null, 'CUIで起動しても、jsh で「htui start」と入力すればデスクトップを起動できます。逆に「htui stop」でデスクトップを終了して CUI に戻れます。'),
             h('h3', null, 'ログイン画面（hdm）の既定のデスクトップ環境'),
             h('div', { class: 'st-row' }, h('select', { class: 'sel', id: 'st-defses', disabled: !admin, 'aria-label': '既定のデスクトップ環境', onchange: e => { try { OS.config.set('session', e.target.value); ui.toast('既定のデスクトップ環境を変更しました'); } catch (ex) { err(ex); } } },
-              Object.values(OS.sessions).map(s => h('option', { value: s.id, selected: OS.hdm.defaultSession() === s.id }, s.name)))),
+              Object.values(OS.sessions).filter(s => !s.hidden).map(s => h('option', { value: s.id, selected: OS.hdm.defaultSession() === s.id }, s.name)))),
             h('p', null, 'まだ一度もログインしていないユーザーは、この環境で起動します。各ユーザーが最後に選んだ環境は hdm が覚えています。'),
             h('h3', null, 'ブートメニューの待ち時間'),
             h('div', { class: 'st-row' }, t, '秒（0 にするとメニューを出さずに起動します）'),
@@ -124,7 +124,7 @@
             h('h3', null, 'アクセントカラー'),
             h('div', { class: 'st-swatches' }, OS.htui.accents.map(c => h('button', { class: 'st-sw' + ((p.accent || OS.htui.accents[0]) === c ? ' on' : ''), type: 'button', style: 'background:' + c, title: c, 'aria-label': 'アクセントカラー ' + c, onclick: () => { OS.htui.setPrefs({ accent: c }); show('look'); } })),
             h('h3', null, 'デスクトップ環境'),
-            h('div', { class: 'st-sessions' }, Object.values(OS.sessions).map(s => {
+            h('div', { class: 'st-sessions' }, Object.values(OS.sessions).filter(s => !s.hidden).map(s => {
               const cur = OS.hdm.sessionFor(OS.htui.user) === s.id;
               return h('label', { class: 'st-card st-ses' + (cur ? ' on' : '') },
                 h('input', { type: 'radio', name: 'st-ses-' + win.pid, id: 'st-ses-' + s.id, checked: cur, onchange: () => { OS.hdm.setUserSession(OS.htui.user, s.id); show('look'); } }),
@@ -167,12 +167,14 @@
             h('h3', null, '使用量'),
             h('div', { class: 'st-meter' }, h('i', { style: 'width:' + Math.min(100, u.used / u.total * 100) + '%' })),
             h('p', null, fmtSize(u.used) + ' / 約 5 MB（ブラウザによって上限は多少違います）'),
-            h('h3', null, '修復と再インストール'),
-            h('p', null, 'このHTMLファイルはインストールメディア兼ブートローダです。OS本体は LocalStorage の /sys に展開されていて、起動のたびにそこから読み込まれます。/sys・/etc・/apps を直接書き換えられるのは root だけです。'),
+            h('h3', null, 'htmlOS i（インストール・アップデート・回復）'),
+            h('p', null, 'このHTMLファイルはインストールメディア兼ブートローダです。OS本体は LocalStorage の /sys に展開されていて、起動のたびにそこから読み込まれます。アップデート・システム修復・パスワードのリセット・バックアップ・アンインストールは htmlOS i から行います。'),
+            h('p', null, '起動するときに押すキー: 何も押さない → htmlOS ／ Alt → htmlOS i ／ Ctrl → jsh ／ Shift → セーフモード ／ Esc → ブートメニュー ／ Del・F2 → BIOS SETUP'),
             adminNote(),
             h('div', { class: 'st-row' },
-              h('button', { class: 'btn', type: 'button', disabled: !admin, onclick: async () => { if (await ui.confirm('/sys をメディアの内容で上書きして再起動します。ユーザーとファイルは残ります。/sys を自分で書き換えていた場合、その変更は消えます。', { ok: '修復して再起動', title: 'システム修復' })) OS.reboot('repair'); } }, 'システム修復（データ保持）'),
-              h('button', { class: 'btn danger', type: 'button', disabled: !admin, onclick: async () => { if (await ui.confirm('すべてのユーザー・ファイル・設定を消去して、インストーラからやり直します。元に戻せません。', { ok: '消去して再インストール', danger: true, title: '再インストール' })) OS.reboot('reinstall'); } }, '再インストール（全消去）')));
+              h('button', { class: 'btn', type: 'button', disabled: !admin, onclick: () => OS.reboot('i') }, 'htmlOS i で再起動'),
+              h('button', { class: 'btn', type: 'button', onclick: () => OS.reboot('safe') }, 'セーフモードで再起動'),
+              h('button', { class: 'btn', type: 'button', disabled: !admin, onclick: async () => { if (await ui.confirm('/sys をメディアの内容で上書きして再起動します。ユーザーとファイルは残ります。/sys を自分で書き換えていた場合、その変更は消えます。', { ok: '修復して再起動', title: 'システム修復' })) OS.reboot('repair'); } }, 'システム修復')));
         }]
       };
       const btns = {};

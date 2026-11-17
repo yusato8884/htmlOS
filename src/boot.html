@@ -41,12 +41,18 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 .post .ok,.dim.ok{color:#7ee787}
 .post .warn{color:#f5c211}
 .dim{color:#8b93a1}
-.post-hint{align-self:flex-start;background:none;border:0;color:#9aa0a6;font:inherit;padding:8px 0;cursor:pointer;text-align:left}
-.post-hint.on{color:#fff}
+.post-hint{align-self:flex-start;display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;padding:8px 0;color:#9aa0a6}
+.post-key{background:none;border:1px solid #3a3f47;border-radius:4px;color:#9aa0a6;font:inherit;font-size:13px;padding:3px 8px;cursor:pointer}
+.post-key b{color:#e8eaed;font-weight:700}
+.post-key:hover,.post-key.sel{border-color:#5fa8f5;color:#fff}
+.post-key.sel{background:#1c3a5e}
+.post-say{color:#fff;margin-left:4px}
 .post-quiet{position:fixed;left:50%;top:42%;transform:translate(-50%,-50%);display:flex;animation:q-in .5s ease-out both}
 @keyframes q-in{from{opacity:0}to{opacity:1}}
 #boot.quiet{background:#000}
-#boot.quiet .post-hint{position:fixed;left:0;right:0;bottom:16px;text-align:center;align-self:auto;color:#55585e;font-size:12px}
+#boot.quiet .post-hint{position:fixed;left:0;right:0;bottom:16px;justify-content:center;align-self:auto;color:#55585e;font-size:12px}
+#boot.quiet .post-key{border-color:#222;color:#55585e;font-size:12px}
+#boot.quiet .post-key b{color:#8a8f96}
 #boot.bios-scr{background:#00003a}
 .bs{width:min(780px,100%);background:#b4b4b4;color:#000;border:2px solid #e8e8e8;display:flex;flex-direction:column}
 .bs-title{background:#0b2a8a;color:#fff;text-align:center;padding:3px}
@@ -89,7 +95,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
    ============================================================ */
 (function () {
   'use strict';
-  var MEDIA_VERSION = '__VERSION__';
+  var MEDIA_VERSION = '__VERSION__', MEDIA_BUILD = '__BUILD__';
   var BOOT = window.BOOT = {};
   var P = 'htmlos:';
 
@@ -181,7 +187,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       if (log) log('展開: ' + path + ' (' + media[path].length + ' 文字)');
     });
     var meta = getMeta() || { installedAt: Date.now() };
-    meta.version = MEDIA_VERSION; meta.updatedAt = Date.now();
+    meta.version = MEDIA_VERSION; meta.build = MEDIA_BUILD; meta.updatedAt = Date.now();
     store.set('meta', JSON.stringify(meta));
   }
   function getMeta() { try { return JSON.parse(store.get('meta')); } catch (e) { return null; } }
@@ -202,26 +208,57 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     log('ユーザー ' + user + ' と root を作成しました');
   }
 
-  // ---- Live モード: メディアの中身をメモリ上のストレージに展開して、インストールせずに GUI で起動する
-  //      ユーザー live（パスワードなし・管理者）で自動ログインし、GUI のインストーラーを開く
-  async function liveBoot() {
+  // ---- htmlOS i（インストール・回復のための最小構成の htmlOS）
+  //   メディアの中身をメモリ上のストレージに展開し、シングルユーザーモード（root で自動ログイン）で起動する。
+  //   ウィンドウマネージャ hwm の上で Welcome アプリが開く。「htmlOS を試す」を選ぶと、その都度ほかのアプリを追加して Live 環境になる
+  async function iBoot() {
     keyHandler = null;
     var ramS = memStore();
     store = ramS;
-    ['/sys/apps', '/etc', '/home', '/tmp', '/bin'].forEach(mkdirp);
+    ['/sys/apps', '/etc', '/home', '/tmp', '/bin', '/root'].forEach(mkdirp);
     writeSys();
     var now = Date.now();
-    put('/etc/passwd', { t: 'f', m: now, o: 'root', c: JSON.stringify([{ name: 'live', pw: await hash(''), admin: true, color: '#3584e4', created: now },
-      { name: 'root', pw: await hash(''), admin: true, root: true, color: '#c01c28', created: now }], null, 1) });
-    put('/etc/config.json', { t: 'f', m: now, o: 'root', c: JSON.stringify({ bootMode: 'gui', timeout: 3, hostname: 'htmlos-live' }, null, 1) });
-    put('/etc/motd', { t: 'f', m: now, o: 'root', c: 'htmlOS Live へようこそ。ここでの変更は再読み込みすると消えます。ユーザー live と root のパスワードは空です。\n' });
-    BOOT.live = true; BOOT.store = ramS;
+    put('/etc/passwd', { t: 'f', m: now, o: 'root', c: JSON.stringify([{ name: 'root', pw: await hash(''), admin: true, root: true, color: '#c01c28', created: now }], null, 1) });
+    put('/etc/config.json', { t: 'f', m: now, o: 'root', c: JSON.stringify({ bootMode: 'gui', timeout: 3, hostname: 'htmlos-i' }, null, 1) });
+    put('/etc/motd', { t: 'f', m: now, o: 'root', c: 'htmlOS i ' + MEDIA_VERSION + '（ビルド ' + MEDIA_BUILD + '）。メモリ上で動いているので、ここでの変更は再読み込みすると消えます。\n' });
+    BOOT.live = true; BOOT.imode = true; BOOT.store = ramS;
     boot('gui');
   }
-  // Live の中から、本物の LocalStorage にインストールする（GUI インストーラーが使う）
+  // 本物の LocalStorage（インストール先）を操作する。htmlOS i の Welcome アプリが使う
   function onReal(fn) { var cur = store; store = realStore; try { return fn(); } finally { store = cur; } }
+  BOOT.build = MEDIA_BUILD;
   BOOT.realHasOS = function () { return onReal(function () { return !!getMeta() && store.get('f:/sys/kernel.js') != null; }); };
+  BOOT.realMeta = function () { return onReal(getMeta); };
   BOOT.realIsRam = function () { return realStore.ram; };
+  // アップデート・システム修復: /sys をメディアの内容で書き直す（ユーザー・ファイル・設定は残る）
+  BOOT.updateReal = function (log) { onReal(function () { writeSys(log); }); };
+  BOOT.realUsers = function () { return onReal(function () { try { return JSON.parse(JSON.parse(store.get('f:/etc/passwd')).c).map(function (u) { return { name: u.name, admin: !!u.admin, root: !!u.root }; }); } catch (e) { return []; } }); };
+  BOOT.realSetPassword = async function (name, pw) {
+    var hv = await hash(pw);
+    onReal(function () {
+      var node = JSON.parse(store.get('f:/etc/passwd')), list = JSON.parse(node.c), u = list.find(function (x) { return x.name === name; });
+      if (!u) throw new Error(name + ': そのようなユーザーはいません');
+      u.pw = hv; node.c = JSON.stringify(list, null, 1); node.m = Date.now(); store.set('f:/etc/passwd', JSON.stringify(node));
+    });
+  };
+  // 起動の設定を初期化（既定の起動を GUI に、ログイン画面の既定のデスクトップ環境を HTUi に）
+  BOOT.realResetBoot = function () {
+    onReal(function () {
+      var node = JSON.parse(store.get('f:/etc/config.json')), c = JSON.parse(node.c);
+      c.bootMode = 'gui'; c.timeout = 3; delete c.session; node.c = JSON.stringify(c, null, 1); node.m = Date.now();
+      store.set('f:/etc/config.json', JSON.stringify(node));
+    });
+  };
+  // バックアップ（htmlos: のキーをすべて JSON に）と、その復元
+  BOOT.realExport = function () { return onReal(function () { var o = {}; store.keys().forEach(function (k) { if (k !== 'bios') o[k] = store.get(k); }); return JSON.stringify({ format: 'htmlos-backup', version: 1, media: MEDIA_VERSION, at: Date.now(), keys: o }); }); };
+  BOOT.realImport = function (text) {
+    var d = JSON.parse(text);
+    if (!d || d.format !== 'htmlos-backup' || !d.keys) throw new Error('htmlOS のバックアップファイルではありません');
+    onReal(function () { store.wipe(); Object.keys(d.keys).forEach(function (k) { if (k !== 'bios') store.set(k, d.keys[k]); }); });
+    return Object.keys(d.keys).length;
+  };
+  // アンインストール: htmlOS のデータをすべて消す（BIOS の設定は残す）
+  BOOT.realWipe = function () { onReal(function () { store.wipe(); }); };
   BOOT.installReal = async function (o, log) {
     var cur = store; store = realStore;
     try {
@@ -534,30 +571,25 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       paint();
     };
     if (left === 0) { run(0); return; }
-    timer = setInterval(function () { left--; if (left <= 0) run(sel); else paint(); }, 1000);
+    if (left > 0) timer = setInterval(function () { left--; if (left <= 0) run(sel); else paint(); }, 1000);
     show(box); paint();
   }
 
+  // ブートメニュー（POST 中に Esc を押したときだけ出る）
   function menu() {
-    var meta = getMeta(), cfg = getConfig();
-    var def = cfg.bootMode === 'cui' ? 'cui' : 'gui';
+    var hasOS = !!getMeta() && store.get('f:/sys/kernel.js') != null, cfg = getConfig(), def = cfg.bootMode === 'cui' ? 'cui' : 'gui';
     var items = [];
-    if (meta.version !== MEDIA_VERSION) items.push({ label: 'システムを ' + meta.version + ' → ' + MEDIA_VERSION + ' に更新して起動', act: function () { writeSys(); boot(def); } });
-    items.push({ label: 'htmlOS を起動（既定: ' + (def === 'gui' ? 'HTUi' : 'jsh') + '）', act: function () { boot(def); } });
-    items.push({ label: 'htmlOS を起動（GUI: HTUi）', act: function () { boot('gui'); } });
-    items.push({ label: 'htmlOS を起動（CUI: jsh）', act: function () { boot('cui'); } });
-    items.push({ label: 'Live モードで起動（インストール済みのデータは使わず、変更も保存しない）', act: liveBoot });
-    items.push({ label: 'システム修復（/sys をメディアから再展開。データは保持）', act: function () { writeSys(); boot(def); } });
-    items.push({ label: '再インストール（すべて消去）', act: function () { confirmWipe(); } });
-    var left = Number(cfg.timeout); if (!(left >= 0)) left = 3;
-    bootMenu('htmlOS Boot Loader ' + MEDIA_VERSION, items, left);
-  }
-  // インストールされていないとき（インストールメディアとして起動したとき）のメニュー
-  function mediaMenu() {
-    bootMenu('htmlOS ' + MEDIA_VERSION + ' インストールメディア', [
-      { label: 'htmlOS を試す・インストールする（Live モード・GUI）', act: liveBoot },
-      { label: 'htmlOS をインストールする（テキストモード）', act: installer }
-    ], 10);
+    if (hasOS) {
+      items.push({ label: 'htmlOS を起動（既定: ' + (def === 'gui' ? 'GUI' : 'jsh') + '）', act: function () { boot(def); } });
+      items.push({ label: 'htmlOS i を起動（インストール・アップデート・回復）', act: iBoot });
+      items.push({ label: 'htmlOS を起動（jsh）', act: function () { boot('cui'); } });
+      items.push({ label: 'htmlOS をセーフモードで起動（追加したアプリとコマンドを無効にする）', act: function () { BOOT.safe = true; boot(def); } });
+      items.push({ label: 'テキストモードで再インストール（すべて消去）', act: function () { confirmWipe(); } });
+    } else {
+      items.push({ label: 'htmlOS i を起動（試す・インストール・回復）', act: iBoot });
+      items.push({ label: 'テキストモードでインストール', act: installer });
+    }
+    bootMenu('htmlOS Boot Loader ' + MEDIA_VERSION + '（ビルド ' + MEDIA_BUILD + '）', items, -1);
   }
 
   function confirmWipe() {
@@ -566,7 +598,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     body.appendChild(el('p', '', 'LocalStorage上のhtmlOS（全ユーザー・全ファイル・設定）を消去してインストーラを起動します。元に戻せません。'));
     var no = el('button', 'in-btn', 'やめる'), yes = el('button', 'in-btn', '消去して再インストール');
     no.onclick = function () { main(); };
-    yes.onclick = function () { store.wipe(); mediaMenu(); };
+    yes.onclick = function () { store.wipe(); installer(); };
     btns.appendChild(no); btns.appendChild(yes); body.appendChild(btns); box.appendChild(body);
     keyHandler = null; show(box, 'inst'); no.focus();
   }
@@ -639,15 +671,20 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     } catch (e) { panic(e); }
   }
 
+  // POST のあとの起動: 何も押さない → 既定、Alt → htmlOS i、Ctrl → jsh、Shift → セーフモード。インストールされていなければ htmlOS i
   function main() {
     var flag = store.get('bootflag'); if (flag) store.del('bootflag');
     if (flag === 'reinstall') store.wipe();
-    if (!getMeta() || store.get('f:/sys/kernel.js') == null) { mediaMenu(); return; }
-    if (flag === 'repair') { writeSys(); boot(getConfig().bootMode === 'cui' ? 'cui' : 'gui'); return; }
+    var hold = BOOT.hold; BOOT.hold = null;
+    if (BOOT.wantMenu) { BOOT.wantMenu = false; menu(); return; }
+    var hasOS = !!getMeta() && store.get('f:/sys/kernel.js') != null;
+    if (!hasOS || flag === 'i' || hold === 'i') { iBoot(); return; }
+    var def = getConfig().bootMode === 'cui' ? 'cui' : 'gui';
+    if (flag === 'repair') { writeSys(); boot(def); return; }
+    if (flag === 'safe' || hold === 'safe') { BOOT.safe = true; boot(def); return; }
     if (flag === 'gui' || flag === 'cui') { boot(flag); return; }
-    // Quiet Boot のときはブートメニューを出さずに既定の項目で起動する（POST 中に Esc を押したとき・更新があるときは出す）
-    if (BOOT.quiet && !BOOT.wantMenu && getMeta().version === MEDIA_VERSION) { boot(getConfig().bootMode === 'cui' ? 'cui' : 'gui'); return; }
-    menu();
+    if (hold === 'cui') { boot('cui'); return; }
+    boot(def);
   }
 
   // ---- BIOS。設定は LocalStorage の "htmlos:bios" に保存する（CMOS の代わり）
@@ -679,13 +716,30 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   async function post() {
     var cfg = nvram(), k = cfg.speed === 'slow' ? 2.5 : 1, t0 = Date.now(), wantSetup = false;
     var wrap = el('div', 'post-wrap'), box = el('div', 'post');
-    var hint = el('button', 'post-hint', 'DEL または F2 : SETUP を起動（ここをタップしても入れます）'); hint.type = 'button';
-    function ask() { wantSetup = true; hint.textContent = 'SETUP を起動します…'; hint.classList.add('on'); }
-    hint.onclick = ask;
+    // 起動のしかたは、POST のあいだに押したキーで選ぶ（タッチでは下のボタンを押す）
+    //   何も押さない → htmlOS（既定の UI）  Alt → htmlOS i  Ctrl → htmlOS（jsh）  Shift → セーフモード  Esc → ブートメニュー  Del / F2 → SETUP
+    var hint = el('div', 'post-hint'), say = el('span', 'post-say');
+    var KEYS = [['Del / F2', 'SETUP', 'setup'], ['Alt', 'htmlOS i', 'i'], ['Ctrl', 'jsh', 'cui'], ['Shift', 'セーフモード', 'safe'], ['Esc', 'ブートメニュー', 'menu']];
+    var SAY = { setup: 'SETUP を起動します…', i: 'htmlOS i で起動します…', cui: 'jsh（CUI）で起動します…', safe: 'セーフモードで起動します…', menu: 'ブートメニューを出します…' };
+    BOOT.hold = null; BOOT.wantMenu = false;
+    function choose(m) {
+      if (m === 'setup') wantSetup = true; else if (m === 'menu') BOOT.wantMenu = true; else BOOT.hold = m;
+      say.textContent = SAY[m]; hint.classList.add('on');
+      hint.querySelectorAll('.post-key').forEach(function (b) { b.classList.toggle('sel', b.dataset.m === m); });
+    }
+    function ask() { choose('setup'); }
+    KEYS.forEach(function (k) { var b = el('button', 'post-key'); b.type = 'button'; b.dataset.m = k[2]; b.appendChild(el('b', '', k[0])); b.appendChild(document.createTextNode(' ' + k[1])); b.onclick = function () { choose(k[2]); }; hint.appendChild(b); });
+    hint.appendChild(say);
     keyHandler = function (e) {
-      if (e.key === 'Delete' || e.key === 'F2') { e.preventDefault(); ask(); }
-      else if (e.key === 'Escape' && cfg.quiet) { e.preventDefault(); BOOT.wantMenu = true; hint.textContent = 'ブートメニューを出します…'; hint.classList.add('on'); }
+      if (e.key === 'Delete' || e.key === 'F2') { e.preventDefault(); choose('setup'); }
+      else if (e.key === 'Escape') { e.preventDefault(); choose('menu'); }
+      else if (e.key === 'Alt' || (e.altKey && !e.ctrlKey)) { e.preventDefault(); choose('i'); }
+      else if (e.key === 'Control' || (e.ctrlKey && !e.altKey)) { e.preventDefault(); choose('cui'); }
+      else if (e.key === 'Shift' || e.shiftKey) { e.preventDefault(); choose('safe'); }
     };
+    // Alt を離したときにブラウザのメニューへ移らないようにする
+    var altUp = function (e) { if (e.key === 'Alt' && keyHandler) e.preventDefault(); };
+    document.addEventListener('keyup', altUp);
     var meta = getMeta(), hasOS = !!meta && store.get('f:/sys/kernel.js') != null;
     function line(text, cls) { var s = el(cls === 'b' ? 'b' : 'span', cls && cls !== 'b' ? cls : '', text); box.appendChild(s); return s; }
 
@@ -693,7 +747,6 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       // Quiet Boot: 黒い画面に白い </> だけ（OS の起動画面と同じ位置・大きさなので、そのまま続いて見える）
       BOOT.quiet = true;
       var q = el('div', 'post-quiet'); q.innerHTML = MARK_SVG;
-      hint.textContent = 'DEL / F2: SETUP    Esc: ブートメニュー';
       wrap.appendChild(q); wrap.appendChild(hint); show(wrap, 'post-scr quiet');
       await sleep(1100 * k);
     } else {
@@ -725,7 +778,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     }
     if (cfg.beep) beep();
     await sleep(Math.max(350 * k, 1400 - (Date.now() - t0)));
-    keyHandler = null;
+    keyHandler = null; document.removeEventListener('keyup', altUp);
     return wantSetup;
   }
 
@@ -803,7 +856,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     timer = setInterval(function () { if (tab === 0 && keyHandler) render(); }, 1000);
   }
 
-  Object.assign(BOOT, { version: MEDIA_VERSION, store: store, media: media, hash: hash, verify: verify, writeSys: writeSys, getMeta: getMeta, menu: main });
+  Object.assign(BOOT, { version: MEDIA_VERSION, build: MEDIA_BUILD, store: store, media: media, hash: hash, verify: verify, writeSys: writeSys, getMeta: getMeta, menu: main });
   post().then(function (wantSetup) { if (wantSetup) setup(); else main(); });
 })();
 </script>

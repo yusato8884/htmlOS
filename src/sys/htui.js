@@ -197,6 +197,13 @@
     tick(); clockTimer = setInterval(tick, 5000);
     htui.refreshApps(); htui.refreshUser(); htui.syncMode(); htui.syncTitle(); watchDesk();
     if (sh.onStart) sh.onStart(kit);
+    // セーフモードの印と、新しいバージョンのお知らせ
+    if (OS.safe) {
+      htui.el.append(h('div', { class: 'safe-mark', 'aria-hidden': 'true' }, h('span', null, 'セーフモード'), h('span', null, 'セーフモード'), h('span', null, 'セーフモード'), h('span', null, 'セーフモード')));
+      setTimeout(() => OS.notify({ app: 'htmlOS', icon: 'gear', title: 'セーフモードで起動しています', body: '追加したアプリ（パッケージ）と ~/.jshrc は無効です。ふつうに再起動すると元に戻ります' }), 600);
+    } else if (!OS.live && BOOT.version && OS.version && BOOT.version !== OS.version) {
+      setTimeout(() => OS.notify({ app: 'htmlOS', icon: 'download', title: 'htmlOS ' + BOOT.version + ' に更新できます', body: 'Alt を押しながら起動して htmlOS i を開き、「アップデート」を選んでください（いまは ' + OS.version + '）' }), 1500);
+    }
   }
   htui.switchSession = async function (sid) {
     if (!OS.sessions[sid] || !htui.user) return;

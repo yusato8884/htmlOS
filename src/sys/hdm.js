@@ -55,7 +55,7 @@
         // デスクトップ環境の選択。overlay=true なら、アイコンの上に重ねる透明な選択欄にする
         sessionSelect(cls, overlay) {
           const sel = h('select', { class: (cls || 'sel') + (overlay ? ' hdm-ovsel' : ''), id: 'hdm-session', 'aria-label': 'デスクトップ環境', title: 'デスクトップ環境' },
-            Object.values(OS.sessions).map(s => h('option', { value: s.id, selected: s.id === st.sid }, s.name)));
+            Object.values(OS.sessions).filter(s => !s.hidden).map(s => h('option', { value: s.id, selected: s.id === st.sid }, s.name)));
           sel.addEventListener('change', () => { st.sid = sel.value; st.unlocked = true; render(); });
           return sel;
         },
