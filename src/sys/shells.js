@@ -947,6 +947,10 @@
     // ---- 通知: デスクトップは右上、タッチは上にバナー
     onNotify(n) {
       if (n.silent || htui.prefs.dnd) return;
+      // コントロールセンター・通知センターを開いているあいだはバナーを出さない（通知センターには入る）
+      const nc = htui.el.querySelector('.mc-nc:not(.leaving)');
+      if (nc && nc._refresh) { nc._refresh(); return; }
+      if (htui.el.querySelector('.mc-cc:not(.leaving)')) return;
       htui.el.querySelectorAll('.mc-banner').forEach(b => b.remove());
       const b = h('button', { class: 'mc-banner', type: 'button', onclick: () => { b.remove(); this.notifCenter(); } },
         h('span', { class: 'mc-nico' }, OS.icon(n.icon || 'bell', 20)), h('span', { class: 'mc-ntext' }, h('small', null, (n.app || 'htmlOS') + ' ・ 今'), h('b', null, n.title), n.body ? h('span', null, n.body) : null));
@@ -975,6 +979,7 @@
         h('div', { class: 'mc-nhead' }, h('span', null, '通知'), h('button', { class: 'mc-nclear', type: 'button', onclick: () => { htui.notices = []; fill(); } }, 'すべて消去')),
         list, h('div', { class: 'mc-widgets' }, cal), h('div', { class: 'ios-grip', 'aria-hidden': 'true' }));
       dragOn(nc, (dx, dy) => { if (OS.touch && dy < -60) close(); }, true);
+      nc._refresh = fill;
       fill();
       const close = popup(nc, this.clockBtn);
     },
@@ -982,6 +987,7 @@
     controlCenter() {
       if (htui.el.querySelector('.mc-cc:not(.leaving)')) { htui.el.querySelector('.mc-cc')._close(); return; }
       const k = htui.kit, self = this;
+      htui.el.querySelectorAll('.mc-banner').forEach(b => b.remove());
       const tile = (cls, icon, label, sub, on, fn) => h('button', { class: 'mc-tile ' + cls + (on ? ' on' : ''), type: 'button', onclick: fn }, h('span', { class: 'mc-tico' }, icon), h('span', { class: 'mc-tl' }, h('b', null, label), sub ? h('small', null, sub) : null));
       const bright = h('input', { type: 'range', min: '40', max: '100', value: String(Math.round((htui.prefs.brightness || 1) * 100)), 'aria-label': '画面の明るさ', class: 'mc-range',
         oninput: e => { const v = Number(e.target.value) / 100; OS.root.style.filter = v < 1 ? 'brightness(' + v + ')' : ''; }, onchange: e => htui.setPrefs({ brightness: Number(e.target.value) / 100 }) });
@@ -1097,60 +1103,86 @@
     },
 
     // ---- iPadOS / iOS のホームバーのジェスチャー
-    gestureStart() { this.g = { w: htui.active(), t0: Date.now(), last: [] }; },
+    //   上へ引くとアプリが指についてきて小さくなる。勢いよく離せばホーム、少し止めてから離せばアプリスイッチャー。
+    //   指を止めているあいだは移動のイベントが来ないので、「最後に動いてからの時間」で止まったことを見分ける
+    gestureStart() { clearTimeout(this._gp); this.g = { w: htui.active(), t0: Date.now(), last: [], up: 0, paused: false }; },
     gestureMove(v) {
       const g = this.g; if (!g) return;
-      g.last.push({ t: Date.now(), y: v.dy }); if (g.last.length > 6) g.last.shift();
-      // 上へ引くと、アプリが指についてきて小さくなる
-      if (g.w && !g.w.el.classList.contains('hidden') && v.dy < 0 && Math.abs(v.dy) > Math.abs(v.dx)) {
-        const p = Math.min(1, -v.dy / (htui.desk.clientHeight * .6));
-        g.w.el.style.transition = 'none'; g.w.el.style.transformOrigin = '50% 100%';
-        g.w.el.style.transform = 'translateY(' + v.dy * .6 + 'px) scale(' + (1 - p * .45) + ')'; g.w.el.style.borderRadius = '24px';
-      }
+      const now = Date.now();
+      g.last.push({ t: now, y: v.dy }); if (g.last.length > 6) g.last.shift();
+      g.up = -v.dy; g.dx = v.dx;
+      if (g.paused && Math.abs(v.dy - g.pauseY) > 24) { g.paused = false; htui.el.classList.remove('ios-peek'); }
+      clearTimeout(this._gp);
+      // 上へ 70px 以上引いたところで 0.2 秒止まったら「スイッチャーに入る」状態にする（アプリがカードの大きさまで縮む）
+      this._gp = setTimeout(() => { if (this.g === g && g.up > 70 && Math.abs(g.dx || 0) < g.up) { g.paused = true; g.pauseY = -g.up; htui.el.classList.add('ios-peek'); this.dragWin(g, true); } }, 200);
+      this.dragWin(g);
+    },
+    dragWin(g, peek) {
+      const w = g.w; if (!w || w.el.classList.contains('hidden') || g.up <= 0 || Math.abs(g.dx || 0) > g.up) return;
+      if (!htui.el.classList.contains('ios-drag')) { htui.el.style.setProperty('--wall', htui.wallCss(htui.prefs, htui.user)); htui.el.classList.add('ios-drag'); w.el.classList.add('ios-dragwin'); }
+      const p = Math.min(1, g.up / (htui.desk.clientHeight * .6)), sc = peek || g.paused ? .6 : 1 - p * .45;
+      w.el.style.transition = peek ? 'transform .18s ease-out, border-radius .18s' : 'none'; w.el.style.transformOrigin = '50% 100%';
+      w.el.style.transform = 'translateY(' + (-g.up * .6) + 'px) scale(' + sc + ')'; w.el.style.borderRadius = '24px';
     },
     gestureEnd(v) {
-      const g = this.g; this.g = null; if (!g) return;
+      clearTimeout(this._gp);
+      const g = this.g; this.g = null; htui.el.classList.remove('ios-peek'); if (!g) return;
       const w = g.w;
-      const reset = () => { if (w) { w.el.style.transition = ''; w.el.style.transform = ''; w.el.style.borderRadius = ''; setTimeout(() => { w.el.style.transformOrigin = ''; }, 300); } };
-      if (v.cancel) { reset(); return; }
+      const undrag = () => { htui.el.classList.remove('ios-drag'); if (w) w.el.classList.remove('ios-dragwin'); };
+      const reset = anim => { if (!w) { undrag(); return; } w.el.style.transition = anim ? '' : 'none'; w.el.style.transform = ''; w.el.style.borderRadius = ''; setTimeout(() => { w.el.style.transition = ''; w.el.style.transformOrigin = ''; undrag(); }, anim ? 300 : 30); };
+      if (v.cancel && !g.paused) { reset(true); return; }
       // 横にスワイプ: 前・次のアプリへ
       if (Math.abs(v.dx) > 70 && Math.abs(v.dx) > Math.abs(v.dy) * 1.5) {
-        reset();
+        reset(true);
         const list = byZ(); if (list.length < 2) return;
         const cur = htui.active(), next = v.dx > 0 ? list[1] : list[list.length - 1];
         if (next && next !== cur) next.focus();
         return;
       }
-      const up = -v.dy;
-      // 最後の動きが遅い（指を止めた）ならアプリスイッチャー、勢いよく上げたらホーム
-      const a = g.last[0], b = g.last[g.last.length - 1];
-      const speed = a && b && b.t > a.t ? (a.y - b.y) / (b.t - a.t) : 1;
-      if (up > 70 && speed < .25 && Date.now() - g.t0 > 300) { reset(); this.appSwitcher(); return; }
+      const up = -v.dy, now = Date.now(), a = g.last[0], b = g.last[g.last.length - 1];
+      // 最後に動いてから 0.15 秒以上たっていれば、止まっていたとみなす
+      const speed = !b || now - b.t > 150 ? 0 : a && b.t > a.t ? (a.y - b.y) / (b.t - a.t) : 1;
+      if (g.paused || (up > 70 && speed < .25 && now - g.t0 > 300)) { this.appSwitcher(() => reset(false)); return; }
       if (up > 50 || (up > 20 && speed > .5)) { this.goHome(w); return; }
-      reset();
+      reset(true);
     },
     goHome(w) {
       htui.closeMenus();
-      const done = () => { htui.goHome(); htui.el.classList.add('ios-home-on'); if (w) { w.el.style.transition = ''; w.el.style.transform = ''; w.el.style.borderRadius = ''; w.el.style.transformOrigin = ''; } this.onApps(); };
+      const done = () => { htui.goHome(); htui.el.classList.add('ios-home-on'); htui.el.classList.remove('ios-drag'); if (w) w.el.classList.remove('ios-dragwin'); if (w) { w.el.style.transition = ''; w.el.style.transform = ''; w.el.style.borderRadius = ''; w.el.style.transformOrigin = ''; } this.onApps(); };
       if (w && !htui.animOff()) { w.el.style.transition = 'transform .25s ease-in, opacity .25s'; w.el.style.transform = 'translateY(30%) scale(.2)'; w.el.style.opacity = '0'; setTimeout(() => { w.el.style.opacity = ''; done(); }, 240); }
       else done();
     },
     // アプリスイッチャー: アプリのカードを横に並べる。上へはじくと終了、タップで切り替え、空いたところでホーム
-    appSwitcher() {
-      if (htui.el.querySelector('.ios-sw:not(.leaving)')) return;
+    appSwitcher(onShown) {
+      if (htui.el.querySelector('.ios-sw:not(.leaving)')) { if (onShown) onShown(); return; }
       const row = h('div', { class: 'ios-swrow' });
       const box = h('div', { class: 'ios-sw', role: 'dialog', 'aria-label': 'アプリスイッチャー' }, row);
       box.style.setProperty('--wall', htui.el.style.background);
+      // カードには、ウインドウの中身を縮小した写しを入れる（キャンバスは絵も写す）
+      const preview = (w, card) => {
+        const W = w.el.offsetWidth || htui.desk.clientWidth, H = w.el.offsetHeight || htui.desk.clientHeight;
+        const c = w.el.cloneNode(true);
+        c.querySelectorAll('[id]').forEach(x => x.removeAttribute('id')); c.removeAttribute('id');
+        c.classList.remove('hidden', 'active', 'minimizing', 'closing');
+        c.style.cssText = 'position:absolute;left:0;top:0;width:' + W + 'px;height:' + H + 'px;transform-origin:0 0;animation:none;transition:none;border-radius:0;pointer-events:none;display:flex';
+        const src = w.el.querySelectorAll('canvas'), dst = c.querySelectorAll('canvas');
+        dst.forEach((cv, i) => { try { cv.getContext('2d').drawImage(src[i], 0, 0); } catch (e) { /* 写せないものは空のまま */ } });
+        c.inert = true;
+        card.style.aspectRatio = W + ' / ' + H;
+        const fit = () => { const r = card.clientWidth / W; c.style.transform = 'scale(' + r + ')'; };
+        card.append(c);
+        requestAnimationFrame(fit);
+      };
       const fill = () => {
         row.textContent = '';
         const wins = byZ();
         if (!wins.length) { row.append(h('p', { class: 'ios-swempty' }, '開いているアプリはありません')); return; }
         wins.forEach(w => {
           const a = OS.apps[w.app] || {};
+          const shot = h('button', { class: 'ios-cbody', type: 'button', 'aria-label': w.title + ' に切り替え', style: '--c:' + (a.color || '#5e5c64'), onclick: () => { close(); w.focus(); } });
           const card = h('div', { class: 'ios-card' },
-            h('div', { class: 'ios-chead' }, htui.kit.appIcon(a.icon ? a : { icon: 'file' }, 16), h('span', null, a.name || w.title)),
-            h('button', { class: 'ios-cbody', type: 'button', 'aria-label': w.title + ' に切り替え', style: '--c:' + (a.color || '#5e5c64'), onclick: () => { close(); w.focus(); } },
-              OS.icon(a.icon || 'file', 54), h('span', null, w.title)));
+            h('div', { class: 'ios-chead' }, htui.kit.appIcon(a.icon ? a : { icon: 'file' }, 16), h('span', null, a.name || w.title)), shot);
+          preview(w, shot);
           card.addEventListener('pointerdown', e => {
             const y0 = e.clientY; let dy = 0;
             const mv = ev => { dy = Math.min(0, ev.clientY - y0); if (dy < -8) { card.style.transition = 'none'; card.style.transform = 'translateY(' + dy + 'px)'; card.style.opacity = String(1 + dy / 400); } };
@@ -1167,6 +1199,8 @@
       box.addEventListener('click', e => { if (e.target === box || e.target === row) { close(); this.goHome(null); } });
       fill();
       const close = popup(box, null);
+      // スイッチャーが出きってから、縮めていたアプリを元に戻す（スイッチャーの下で戻るので、ばねのように戻って見えない）
+      if (onShown) setTimeout(onShown, 220);
     },
 
     onSuper() { this.launchpad(); },

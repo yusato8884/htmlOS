@@ -71,7 +71,7 @@
 .desk-icon:hover{background:rgba(255,255,255,.16)}
 .app-ico{display:flex;align-items:center;justify-content:center;width:44px;height:44px;border-radius:11px;color:#fff;box-shadow:0 1px 3px rgba(0,0,0,.35)}
 
-.menu{position:absolute;z-index:100000;color:var(--ink);min-width:200px;max-width:calc(100% - 8px);background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.3);padding:4px;display:flex;flex-direction:column}
+.menu{position:absolute;z-index:250000;color:var(--ink);min-width:200px;max-width:calc(100% - 8px);background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.3);padding:4px;display:flex;flex-direction:column}
 .menu-item{display:flex;align-items:center;gap:8px;padding:6px 10px;border:0;border-radius:5px;background:none;text-align:left;cursor:pointer}
 .menu-item:hover{background:var(--accent);color:#fff!important}
 .menu-hint{margin-left:auto;padding-left:14px;font-size:12px;opacity:.7}
@@ -1172,7 +1172,7 @@
 .ios-status,.ios-homebar,.ios-home{display:none}
 .touch .de-mac .mc-bar,.touch .de-mac .mc-dock{display:none}
 .touch .de-mac .desk{margin-bottom:0}
-.touch .de-mac:not(.ios-home-on) .desk{margin-bottom:26px;background:var(--surface)}
+.touch .de-mac:not(.ios-home-on) .desk{margin-bottom:30px;background:var(--surface)}
 .touch .de-mac .ios-status{display:flex;flex:none;order:-1;height:30px;align-items:center;gap:8px;padding:0 20px;color:#fff;font-size:14px;z-index:6;text-shadow:0 1px 2px rgba(0,0,0,.3);font-variant-numeric:tabular-nums}
 .touch .de-mac:not(.ios-home-on) .ios-status{background:var(--surface);color:var(--ink);text-shadow:none}
 .ios-date{font-weight:500}
@@ -1198,9 +1198,9 @@
 .ios-dock .ios-app>span:not(.app-ico){display:none}
 .phone .ios-dock{align-self:stretch;justify-content:space-around;border-radius:34px;margin-bottom:26px}
 .ios-dsep{width:1px;height:48px;background:rgba(255,255,255,.45)}
-.touch .de-mac .ios-homebar{display:block;position:absolute;left:50%;bottom:9px;width:140px;height:5px;margin-left:-70px;border-radius:3px;background:rgba(0,0,0,.6);z-index:95001;pointer-events:none}
+.touch .de-mac .ios-homebar{display:block;position:absolute;left:50%;bottom:12px;width:140px;height:5px;margin-left:-70px;border-radius:3px;background:rgba(0,0,0,.6);z-index:95001;pointer-events:none}
 .touch .de-mac.ios-home-on .ios-homebar{background:rgba(255,255,255,.85)}
-.touch .de-mac .edge-b{left:0;right:0;height:26px}
+.touch .de-mac .edge-b{left:0;right:0;height:48px}
 .touch .de-mac .edge-t{left:0;right:0;height:14px}
 .touch .de-mac .edge-l,.touch .de-mac .edge-r{display:none}
 .touch .de-mac .win{border-radius:0;border:0;box-shadow:none;animation:ios-open .32s cubic-bezier(.2,.8,.2,1)}
@@ -1223,11 +1223,11 @@
 .ios-sw{position:absolute;inset:0;z-index:130000;display:flex;align-items:center;overflow:hidden;isolation:isolate;animation:fade-in .2s}
 .ios-sw::before{content:"";position:absolute;inset:-40px;background:var(--wall);filter:blur(24px) brightness(.5);z-index:-1}
 .ios-swrow{display:flex;align-items:center;gap:24px;width:100%;height:100%;overflow-x:auto;padding:0 14vw;box-sizing:border-box;scroll-snap-type:x mandatory;touch-action:pan-x;scrollbar-width:none}
-.ios-card{flex:none;width:min(44vw,380px);height:min(64vh,560px);display:flex;flex-direction:column;gap:8px;scroll-snap-align:center;touch-action:pan-x;transition:transform .2s,opacity .2s}
-.phone .ios-card{width:68vw;height:62vh}
+.ios-card{flex:none;width:min(44vw,420px);display:flex;flex-direction:column;justify-content:center;gap:8px;max-height:74%;scroll-snap-align:center;touch-action:pan-x;transition:transform .2s,opacity .2s}
+.phone .ios-card{width:66vw}
 .ios-chead{display:flex;align-items:center;gap:8px;color:#fff;font-weight:600;font-size:13px}
 .ios-chead .app-ico{width:26px;height:26px;border-radius:7px}
-.ios-cbody{flex:1;border:0;border-radius:24px;background:linear-gradient(160deg,var(--c),color-mix(in srgb,var(--c) 50%,#000));color:#fff!important;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;box-shadow:0 18px 40px rgba(0,0,0,.4);cursor:pointer;font-size:15px;padding:16px;text-align:center}
+.ios-cbody{position:relative;flex:none;width:100%;max-height:calc(100% - 30px);padding:0;border:0;border-radius:20px;overflow:hidden;background:var(--surface);box-shadow:0 18px 40px rgba(0,0,0,.4);cursor:pointer}
 .ios-swempty{color:#fff;margin:auto}
 /* ---- hdm: hAqua（macOS 風・iOS 風） */
 .hdm-mac,.hdm-ios{position:relative;overflow:hidden;color:#fff;isolation:isolate}
@@ -1279,3 +1279,11 @@
 .touch .mc-nc,.touch .mc-cc,.touch .de-mac .ios-home,.touch .de-mac .ios-grid{touch-action:none}
 .touch .mc-nc{overflow:hidden}
 .touch .mc-nlist{flex:0 1 auto;min-height:0;overflow:auto;touch-action:pan-y}
+.ios-sw{animation:ios-swin .22s ease-out}
+@keyframes ios-swin{from{opacity:0;transform:scale(1.04)}}
+/* アプリを引き上げているあいだは、後ろにほかのアプリではなくホーム画面（壁紙）を見せる */
+.touch #htui.de-mac.ios-drag{background:var(--wall)!important}
+.touch .de-mac.ios-drag .desk{background:transparent!important}
+.touch .de-mac.ios-drag .win:not(.ios-dragwin){visibility:hidden}
+.touch .de-mac.ios-drag .ios-status{background:transparent;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.3)}
+.touch .de-mac .win.ios-dragwin{box-shadow:0 20px 50px rgba(0,0,0,.45)}
