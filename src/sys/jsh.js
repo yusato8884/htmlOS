@@ -433,6 +433,20 @@
       def('echo', 'echo テキスト...', 'テキストを表示', (...a) => { tty.println(a.map(x => typeof x === 'string' ? x : inspect(x)).join(' ')); });
       alias('print', 'echo');
       def('clear', 'clear', '画面を消去', () => { tty.clear(); });
+      def('bell', 'bell', 'ベルを鳴らす（Terminal に BEL 文字 \\x07 を出したときと、Tab で補完できないときにも鳴ります）', () => { OS.sound.play('bell'); });
+      def('sound', 'sound [on|off|vol 0〜100|play 名前|list]', '効果音の設定（ログイン中はユーザーの設定、ログイン前はシステムの設定）', (sub, arg) => {
+        const S = OS.sound, H = OS.htui, user = H && H.running && H.user;
+        const save = patch => {
+          if (user) H.setPrefs({ sound: Object.assign({}, H.prefs.sound || {}, patch) });
+          else OS.config.set('sound', Object.assign({}, OS.config.get('sound', {}) || {}, patch));
+        };
+        if (!sub) { const p = S.prefs(); return '効果音: ' + (p.on ? 'オン' : 'オフ') + '  音量: ' + Math.round(p.vol * 100) + (user ? '（' + user + ' の設定）' : '（システムの設定）'); }
+        if (sub === 'on' || sub === 'off') { save({ on: sub === 'on' }); return '効果音を' + (sub === 'on' ? 'オン' : 'オフ') + 'にしました'; }
+        if (sub === 'vol') { const v = Number(arg); if (!(v >= 0 && v <= 100)) throw new Error('sound vol 0〜100'); save({ vol: v / 100 }); S.play('confirm', true); return '音量: ' + v; }
+        if (sub === 'list') return S.list().map(n => n.padEnd(10) + S.names[n]).join('\n');
+        if (sub === 'play') { if (!S.list().includes(arg)) throw new Error('sound play ' + S.list().join(' / ')); S.play(arg, true); return; }
+        throw new Error('使い方: sound [on|off|vol 0〜100|play 名前|list]');
+      });
       def('pwd', 'pwd', '現在のディレクトリ', () => self.cwd);
       def('cd', 'cd [ディレクトリ]', 'ディレクトリを移動', p => { const d = A(p == null ? '~' : p); if (!fs.isDir(d)) throw new Error(d + ': ディレクトリではありません'); fs.list(d); self.cwd = d; });
       def('ls', 'ls [-l] [パス]', '一覧を表示（JSでは名前の配列を返す）', (...args) => {

@@ -143,6 +143,24 @@
             h('h3', null, 'ウィンドウ操作'),
             h('p', null, 'タイトルバーを画面の左右の端までドラッグすると半分に、四隅の近くで4分の1に、上端で最大化にスナップします。最大化ボタンの右クリックや Ctrl+Alt+矢印キーでも配置できます。ウィンドウの辺と角をドラッグするとサイズを変えられます。')));
         }],
+        sound: ['サウンド', 'audio', () => {
+          const admin = !!me().admin, S = OS.sound, mine = OS.htui.prefs.sound || {}, p = S.prefs();
+          const set = patch => OS.htui.setPrefs({ sound: Object.assign({}, OS.htui.prefs.sound || {}, patch) });
+          const vol = h('input', { type: 'range', min: 0, max: 100, step: 5, value: Math.round(p.vol * 100), id: 'st-snd-vol', 'aria-label': '音量', style: 'flex:1;max-width:260px' });
+          const volN = h('span', { style: 'min-width:3em' }, Math.round(p.vol * 100) + '%');
+          vol.addEventListener('input', () => { volN.textContent = vol.value + '%'; });
+          vol.addEventListener('change', () => { set({ vol: Number(vol.value) / 100 }); S.play('confirm', true); });
+          page.append(h('h2', null, 'サウンド'), h('p', null, '起動・ログイン・ログオフ・シャットダウン・再起動・Terminal のベル・確認のダイアログ・通知で効果音を鳴らします。この設定はユーザーごとに保存されます。'),
+            h('div', { class: 'st-row' }, h('label', null, h('input', { type: 'checkbox', class: 'switch', id: 'st-snd-on', checked: p.on, onchange: e => set({ on: e.target.checked }) }), ' 効果音を鳴らす')),
+            h('div', { class: 'st-row' }, h('span', null, '音量'), vol, volN),
+            h('h3', null, '試しに鳴らす'),
+            h('div', { class: 'st-row', style: 'flex-wrap:wrap' }, S.list().map(n => h('button', { class: 'btn small', type: 'button', id: 'st-snd-' + n, onclick: () => S.play(n, true) }, OS.icon('audio', 14), ' ' + S.names[n]))));
+          const sys = OS.config.get('sound', {}) || {};
+          page.append(h('h3', null, 'ログイン前（起動音・ログイン画面）'),
+            h('div', { class: 'st-row' }, h('label', null, h('input', { type: 'checkbox', class: 'switch', id: 'st-snd-sys', disabled: !admin, checked: sys.on !== false, onchange: e => { try { OS.config.set('sound', Object.assign({}, OS.config.get('sound', {}) || {}, { on: e.target.checked, vol: Number(vol.value) / 100 })); } catch (er) { err(er); } } }), ' 起動音とログイン音を鳴らす（システム全体）')),
+            adminNote());
+          if (mine.on === undefined && mine.vol === undefined) { /* まだユーザーの設定がない: システムの設定に従っている */ }
+        }],
         net: ['ネットワーク', 'globe', () => {
           const admin = !!me().admin;
           const ta = h('textarea', { class: 'inp st-area', id: 'st-proxies', spellcheck: 'false', disabled: !admin, 'aria-label': 'CORSプロキシ一覧' }, OS.config.get('proxies', OS.net.defaults).join('\n'));

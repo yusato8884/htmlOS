@@ -289,6 +289,75 @@
     set(k, v) { const c = config.all(); c[k] = v; fs.write('/etc/config.json', JSON.stringify(c, null, 1)); }
   };
 
+  // ---------- 効果音（Web Audio でその場で合成する。音のファイルは使わない）
+  //   OS.sound.play('boot' | 'login' | 'logout' | 'shutdown' | 'reboot' | 'bell' | 'confirm' | 'error' | 'notify')
+  //   設定: ログイン前はシステムの設定（/etc/config.json の sound）、ログイン中はユーザーの設定（~/.config/htui.json の sound）
+  //   ブラウザの決まりで、ページを開いてから一度もクリックやキー入力をしていないあいだは鳴らせない
+  OS.sound = (function () {
+    const NAMES = { boot: '起動', login: 'ログイン', logout: 'ログオフ', shutdown: 'シャットダウン', reboot: '再起動', bell: 'ベル（Terminal）', confirm: '確認（ダイアログ）', error: 'エラー', notify: '通知' };
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const active = () => !navigator.userActivation || navigator.userActivation.hasBeenActive;
+    function ctx() {
+      if (!AC) return null;
+      // 再起動（ページを読み込み直さない）をまたいで同じものを使う
+      if (!BOOT.audio || BOOT.audio.state === 'closed') { if (!active()) return null; try { BOOT.audio = new AC(); } catch (e) { return null; } }
+      return BOOT.audio;
+    }
+    const unlock = () => { const c = ctx(); if (c && c.state === 'suspended') c.resume().catch(() => { /* まだ鳴らせない */ }); };
+    ['pointerdown', 'keydown'].forEach(t => window.addEventListener(t, unlock, { capture: true, passive: true }));
+    function prefs() {
+      let sys = {}; try { sys = config.get('sound', {}) || {}; } catch (e) { /* 読めなければ既定 */ }
+      const p = { on: sys.on !== false, vol: typeof sys.vol === 'number' ? sys.vol : 0.6 };
+      const hp = OS.htui && OS.htui.running && OS.htui.user && OS.htui.prefs && OS.htui.prefs.sound;
+      if (hp) { if ('on' in hp) p.on = hp.on !== false; if (typeof hp.vol === 'number') p.vol = hp.vol; }
+      p.vol = Math.max(0, Math.min(1, p.vol));
+      return p;
+    }
+    // 音の部品: 音程 f（Hz）を d 秒。o.type 波形、o.v 大きさ、o.a 立ち上がり、o.to 終わりの音程
+    function tone(c, out, t, f, d, o) {
+      o = o || {};
+      const osc = c.createOscillator(), g = c.createGain(), v = o.v == null ? 1 : o.v, a = o.a || 0.01;
+      osc.type = o.type || 'sine'; osc.frequency.setValueAtTime(f, t);
+      if (o.to) osc.frequency.exponentialRampToValueAtTime(o.to, t + d);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(Math.max(0.0002, v), t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+      osc.connect(g); g.connect(out); osc.start(t); osc.stop(t + d + 0.05);
+    }
+    // やわらかいベルのような音（基音に倍音を少し重ねる）
+    function note(c, out, t, f, d, v) {
+      tone(c, out, t, f, d, { v: v, a: 0.012 });
+      tone(c, out, t, f * 2, d * 0.55, { v: v * 0.22, a: 0.008 });
+      tone(c, out, t, f * 3.01, d * 0.3, { v: v * 0.07, a: 0.005 });
+    }
+    const M = n => 440 * Math.pow(2, (n - 69) / 12); // MIDI の音番号 → Hz（60 = ド）
+    const seq = (c, o, t, list, d, v) => list.forEach((m, i) => note(c, o, t + i * 0.12, M(m), d, v));
+    const SOUNDS = {
+      boot: (c, o, t) => { seq(c, o, t, [60, 67, 72, 76, 79], 1.7, 0.42); tone(c, o, t + 0.45, M(48), 2.2, { type: 'triangle', v: 0.22, a: 0.25 }); tone(c, o, t + 0.45, M(55), 2.0, { type: 'triangle', v: 0.12, a: 0.3 }); },
+      login: (c, o, t) => { note(c, o, t, M(72), 0.6, 0.5); note(c, o, t + 0.1, M(79), 0.7, 0.5); note(c, o, t + 0.2, M(84), 1.0, 0.45); },
+      logout: (c, o, t) => { note(c, o, t, M(84), 0.5, 0.45); note(c, o, t + 0.11, M(79), 0.6, 0.45); note(c, o, t + 0.22, M(72), 0.9, 0.45); },
+      shutdown: (c, o, t) => { seq(c, o, t, [79, 76, 72, 67, 60], 1.3, 0.4); tone(c, o, t + 0.5, M(43), 1.8, { type: 'triangle', v: 0.2, a: 0.2 }); },
+      reboot: (c, o, t) => { note(c, o, t, M(79), 0.4, 0.42); note(c, o, t + 0.11, M(72), 0.5, 0.42); note(c, o, t + 0.34, M(72), 0.4, 0.42); note(c, o, t + 0.45, M(79), 0.9, 0.45); },
+      bell: (c, o, t) => { tone(c, o, t, M(81), 0.15, { type: 'triangle', v: 0.6, a: 0.004 }); tone(c, o, t, M(93), 0.08, { v: 0.15, a: 0.003 }); },
+      confirm: (c, o, t) => { note(c, o, t, M(74), 0.3, 0.4); note(c, o, t + 0.075, M(81), 0.45, 0.38); },
+      error: (c, o, t) => { tone(c, o, t, M(64), 0.2, { type: 'square', v: 0.12, a: 0.005 }); tone(c, o, t + 0.16, M(58), 0.32, { type: 'square', v: 0.12, a: 0.005 }); },
+      notify: (c, o, t) => { note(c, o, t, M(84), 0.35, 0.35); note(c, o, t + 0.09, M(88), 0.6, 0.35); }
+    };
+    const last = {};
+    function play(name, force) {
+      const p = prefs();
+      if (!SOUNDS[name] || (!p.on && !force) || p.vol <= 0) return false;
+      const c = ctx(); if (!c) return false;
+      const now = Date.now(); if (last[name] && now - last[name] < 90) return false; last[name] = now; // 連続で重ならないように
+      const go = () => {
+        const out = c.createGain(), lim = c.createDynamicsCompressor(); out.gain.value = p.vol * 0.5; lim.threshold.value = -6; lim.ratio.value = 12; out.connect(lim); lim.connect(c.destination); // 重なっても音が割れないように
+        try { SOUNDS[name](c, out, c.currentTime + 0.02); } catch (e) { /* 鳴らせなくても続ける */ }
+      };
+      if (c.state === 'running') go();
+      else c.resume().then(() => { if (Date.now() - now < 400 && c.state === 'running') go(); }).catch(() => { /* まだ鳴らせない */ });
+      return true;
+    }
+    return { play: play, prefs: prefs, names: NAMES, list: () => Object.keys(SOUNDS) };
+  })();
+
   // ---------- ユーザー
   const COLORS = ['#3584e4', '#2ec27e', '#e66100', '#c01c28', '#9141ac', '#986a44', '#1c71d8', '#5e5c64'];
   const users = OS.users = {
@@ -512,6 +581,7 @@
     print(s, cls) {
       s = String(s);
       if (this.capture) { this.capture.push(s); return; }
+      if (s.indexOf('\x07') >= 0) { s = s.replace(/\x07/g, ''); OS.sound.play('bell'); if (!s) return; }
       this.out.append(cls ? h('span', { class: 't-' + cls }, s) : document.createTextNode(s));
       while (this.out.childNodes.length > 4000) this.out.firstChild.remove();
       this.scr.scrollTop = this.scr.scrollHeight;
@@ -591,8 +661,9 @@
     _tab() {
       const p = this.pending; if (!p || !p.opt.complete) return;
       const r = p.opt.complete(this.input.value);
-      if (typeof r === 'string') this.input.value = r;
+      if (typeof r === 'string' && r !== this.input.value) this.input.value = r;
       else if (Array.isArray(r) && r.length) { this._echo(p, this.input.value); this.println(r.join('  '), 'dim'); }
+      else OS.sound.play('bell'); // 補完できるものがない
     }
     _cancel() {
       const p = this.pending; if (!p) return;
@@ -732,6 +803,7 @@
       try { for (const w of OS.htui.wins.slice()) { if ((await w.close()) === false) return; } } finally { OS.shuttingDown = false; }
     }
     OS._down = true;
+    OS.sound.play(reboot ? 'reboot' : 'shutdown');
     if (flag) store.set('bootflag', flag);
     const t0 = Date.now(), tty = OS.tty1, label = reboot ? '再起動しています…' : 'シャットダウンしています…';
     tty.pending = null; tty.capture = null; tty.line.style.display = 'none';
@@ -883,6 +955,7 @@
     await step(mode === 'gui' ? (OS.htui && OS.htui.sdk ? OS.htui.sdk.full : 'HTUi') + ' を起動します' : 'tty1 を起動します');
     const rest = 1200 - (Date.now() - t0);
     if (rest > 0) await sleep(rest);
+    OS.sound.play('boot');
     ttyLogin(tty);
     if (mode === 'gui') {
       // htmlOS i はシングルユーザーモード: root で自動ログインし、hwm の上で Welcome を開く

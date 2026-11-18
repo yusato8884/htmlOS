@@ -184,6 +184,7 @@
   };
   htui.logout = async function () {
     for (const w of htui.wins.slice()) { if ((await w.close()) === false) return; }
+    OS.sound.play('logout');
     toLogin();
   };
   // ログイン画面（hdm）へ
@@ -192,7 +193,7 @@
     htui.user = null; htui.fs = null; htui.prefs = {};
     OS.setMode('auto');
     htui.el.textContent = ''; htui.el.removeAttribute('style'); htui.el.className = '';
-    OS.hdm.show(htui.el, (user, sid) => session(user, sid));
+    OS.hdm.show(htui.el, (user, sid) => { session(user, sid); OS.sound.play('login'); });
   }
 
   // ---------- 個人設定（壁紙・アクセント・アニメーション・画面モード）
@@ -328,6 +329,7 @@
     htui.notices.unshift(n); htui.notices.length = Math.min(htui.notices.length, 50);
     if (htui.shell && htui.shell.onNotify) htui.shell.onNotify(n);
     else if (!n.silent && !htui.prefs.dnd) ui.toast(n.title + (n.body ? '：' + n.body : ''));
+    if (!n.silent && !htui.prefs.dnd) OS.sound.play('notify');
     return n;
   };
   // ---------- ゴミ箱（~/.Trash）。元の場所は ~/.Trash/.info.json に覚えておき、「元に戻す」で戻せる
@@ -939,6 +941,7 @@
   htui.open = function (o) {
     const desk = htui.desk, dw = desk.clientWidth, dh = desk.clientHeight;
     const parent = o.parent && !o.parent.closed ? o.parent : null;
+    if (parent && !o.silent) OS.sound.play(o.sound || 'confirm');
     const win = { pid: ++htui.pid, title: o.title, app: o.app || (parent && parent.app), zone: null, rect: null, onClose: null, onDispose: null, onFocus: null, parent: parent, children: [], dialog: !!o.dialog };
     const titleEl = h('span', { class: 'win-title' }, o.title);
     const bMin = h('button', { class: 'win-btn', type: 'button', title: '最小化', 'aria-label': '最小化' }, OS.icon('min', 14));
@@ -1233,6 +1236,7 @@
         else if (e.key === 'Enter' && primary && !e.isComposing && e.target.tagName !== 'TEXTAREA' && e.target.tagName !== 'BUTTON') { e.preventDefault(); fire(primary); }
       });
       (htui.el || OS.root).append(ov);
+      OS.sound.play(o.sound || 'confirm');
       const f = box.querySelector('input,select,textarea') || foot.querySelector('.primary') || foot.querySelector('button');
       if (f) { f.focus(); if (f.select && f.type !== 'password') f.select(); }
       if (o.onOpen) o.onOpen(done);
@@ -1244,7 +1248,7 @@
       const box = h('div', { class: 'modal cw-modal' }, h('div', { class: 'modal-title' }, o.title), h('div', { class: 'modal-body' }, o.body), foot);
       // 持ち主がもう子ウインドウを開いているときは、その子の子にする
       let p = owner; while (p.children.length) p = p.children[p.children.length - 1];
-      const win = htui.open({ title: o.title, icon: o.icon || (OS.apps[p.app] || {}).icon || 'bell', w: (o.width || 380) + 2, h: 'auto', parent: p, dialog: true });
+      const win = htui.open({ title: o.title, icon: o.icon || (OS.apps[p.app] || {}).icon || 'bell', w: (o.width || 380) + 2, h: 'auto', parent: p, dialog: true, sound: o.sound });
       win.body.append(box);
       const prev = document.activeElement;
       let finished = false, cancel = null, primary = null;
@@ -1274,7 +1278,7 @@
   }
   ui.KEEP = {};
   ui.alert = (msg, title) => ui.modal({ title: title || 'お知らせ', body: h('p', { class: 'modal-msg' }, msg), buttons: [{ label: 'OK', primary: true, cancel: true, value: true }] });
-  ui.confirm = (msg, o) => ui.modal({ title: (o && o.title) || '確認', body: h('p', { class: 'modal-msg' }, msg), buttons: [{ label: 'キャンセル', cancel: true, value: false }, { label: (o && o.ok) || 'OK', primary: true, danger: o && o.danger, value: true }] });
+  ui.confirm = (msg, o) => ui.modal({ sound: o && o.danger ? 'error' : 'confirm', title: (o && o.title) || '確認', body: h('p', { class: 'modal-msg' }, msg), buttons: [{ label: 'キャンセル', cancel: true, value: false }, { label: (o && o.ok) || 'OK', primary: true, danger: o && o.danger, value: true }] });
   ui.prompt = (msg, def, o) => {
     const inp = h('input', { class: 'inp', type: o && o.password ? 'password' : 'text', id: 'dlg-input', value: def || '', 'aria-label': msg });
     return ui.modal({ title: (o && o.title) || '入力', body: [h('p', { class: 'modal-msg' }, msg), inp], buttons: [{ label: 'キャンセル', cancel: true, value: null }, { label: 'OK', primary: true, value: () => inp.value }] });
