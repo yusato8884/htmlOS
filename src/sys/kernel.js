@@ -783,7 +783,7 @@
   // ---------- 画面モード（desktop / tablet / phone。auto はタッチ端末かどうかと画面の幅で決める）
   OS.autoMode = function () {
     const mm = q => !!(window.matchMedia && window.matchMedia(q).matches);
-    if (!mm('(pointer: coarse)') || mm('(any-pointer: fine)')) return 'desktop';
+    if (!mm('(pointer: coarse)')) return 'desktop';
     return Math.min(window.innerWidth, window.innerHeight) < 600 ? 'phone' : 'tablet';
   };
   OS.setMode = function (pref) {
@@ -798,6 +798,13 @@
     if (OS.htui && OS.htui.onMode) OS.htui.onMode(prev !== m); // 表示が実際に変わったときだけ、ウィンドウの並べ直しなどをする
     return m;
   };
+  // ChromeOS のタブレットモード切り替え・画面の回転などで、自動のときは選び直す
+  (function () {
+    let tm = 0;
+    const again = () => { clearTimeout(tm); tm = setTimeout(() => { if (OS.root && OS.modePref === 'auto' && OS.autoMode() !== OS.uiMode) OS.setMode('auto'); }, 150); };
+    if (window.matchMedia) ['(pointer: coarse)', '(any-pointer: fine)', '(hover: none)'].forEach(q => { try { const m = window.matchMedia(q); if (m.addEventListener) m.addEventListener('change', again); else m.addListener(again); } catch (e) { /* 古いブラウザ */ } });
+    window.addEventListener('resize', again);
+  })();
   OS.modeIcons = { desktop: 'cursor', tablet: 'tablet', phone: 'phone' };
   OS.modeNames = { auto: '自動', desktop: 'デスクトップ', tablet: 'タブレット', phone: 'スマートフォン' };
 

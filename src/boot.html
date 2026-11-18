@@ -779,10 +779,26 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   BOOT.vcStart = vcStart; BOOT.vcStop = vcStop; // テスト用
   function lockPointer() { try { var p = document.documentElement.requestPointerLock(); if (p && p.catch) p.catch(function () { /* 許可されなければ何もしない */ }); } catch (e) { /* 使えない */ } }
   document.addEventListener('pointerlockchange', function () { if (document.pointerLockElement) vcStart(); else vcStop(); });
+  // タッチ・ペンのイベントか（タッチから作られた互換の mouse / click も含む）
+  function vcTouchy(e) {
+    if (e.pointerType && e.pointerType !== 'mouse') return true;
+    if (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) return true;
+    return !!(e.touches || e.changedTouches);
+  }
+  function vcTouchOut(e) {
+    var p = (e.changedTouches && e.changedTouches[0]) || e;
+    if (p && typeof p.clientX === 'number') { VC.rx = p.clientX; VC.ry = p.clientY; }
+    vcStop();
+    if (document.pointerLockElement) { try { document.exitPointerLock(); } catch (err) { /* 外せない */ } }
+  }
+  BOOT.vcTouchy = vcTouchy;
+  ['touchstart', 'pointerdown'].forEach(function (type) {
+    window.addEventListener(type, function (e) { if (e.isTrusted && VC.on && vcTouchy(e)) vcTouchOut(e); }, { capture: true, passive: true });
+  });
   // ロック中の本物のマウスのイベントは、ここで止めて（アプリには届けない）、仮想カーソルの位置へ作り直して送る
   ['pointerdown', 'pointerup', 'pointermove', 'mousedown', 'mouseup', 'mousemove', 'click', 'dblclick', 'auxclick', 'contextmenu', 'wheel'].forEach(function (type) {
     window.addEventListener(type, function (e) {
-      if (!e.isTrusted) return;
+      if (!e.isTrusted || vcTouchy(e)) return;
       if (!VC.on) { if (type === 'pointermove' || type === 'mousemove') { VC.rx = e.clientX; VC.ry = e.clientY; } return; }
       e.stopImmediatePropagation(); if (type !== 'pointermove' && type !== 'mousemove') e.preventDefault();
       if (type === 'pointermove') { VC.x = Math.max(0, Math.min(innerWidth - 1, VC.x + e.movementX)); VC.y = Math.max(0, Math.min(innerHeight - 1, VC.y + e.movementY)); vcMove(e); }
