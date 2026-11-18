@@ -113,4 +113,4 @@ python3 build.py
 
 [MIT License](LICENSE)
 
-3.0.3 の公開前に [SCANOSS](https://www.scanoss.com/)（scanoss-py 1.54.3）で全ファイルをスキャンし、既存のオープンソースコードとの一致がないことを確認しています（3.1 以降で足したファイルはまだスキャンしていません）。
+4.0.0 の公開時に [SCANOSS](https://www.scanoss.com/)（scanoss-py 1.54.3、`--all-extensions`）で全ファイル（29 個）をスキャンし、既存のオープンソースコードとの一致がないことを確認しています。
