@@ -536,6 +536,54 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   // ---- 画面
   var scr = document.getElementById('boot');
   var keyHandler = null;
+  // ---- ページを読み込み直さない再起動（ウォームブート）
+  //   ページを読み込み直すと、ブラウザの決まりで全画面とキーボードの捕捉が外れてしまう。そこで再起動では、
+  //   OS が足した DOM・イベント・タイマー・監視（MutationObserver など）を片付けてから、POST からやり直す。
+  //   OS が window / document などに足したイベントは、起動（boot）のあとに足されたものを覚えておいて外す
+  var BASE = { body: Array.prototype.slice.call(document.body.childNodes), head: Array.prototype.slice.call(document.head.childNodes), title: document.title,
+    attrs: [document.documentElement, document.body].map(function (n) { return [n, Array.prototype.map.call(n.attributes, function (a) { return [a.name, a.value]; })]; }) };
+  var TRK = { on: false, ls: [], obs: [], t0: 0, r0: 0 };
+  var persist = function (t) { return !(t instanceof Node) || t === document || t === document.documentElement || t === document.body || t === document.head; };
+  (function () {
+    var add = EventTarget.prototype.addEventListener;
+    EventTarget.prototype.addEventListener = function (type, fn, opt) {
+      if (TRK.on && fn && persist(this)) TRK.ls.push([this, type, fn, opt]);
+      return add.call(this, type, fn, opt);
+    };
+    ['MutationObserver', 'ResizeObserver', 'IntersectionObserver'].forEach(function (n) {
+      var C = window[n]; if (!C || !C.prototype.observe) return;
+      var obs = C.prototype.observe;
+      C.prototype.observe = function (target) { if (TRK.on && persist(target) && TRK.obs.indexOf(this) < 0) TRK.obs.push(this); return obs.apply(this, arguments); };
+    });
+  })();
+  function track() {
+    if (TRK.on) return;
+    TRK.on = true; TRK.t0 = setTimeout(function () {}, 0); TRK.r0 = requestAnimationFrame(function () {});
+  }
+  function warmBoot() {
+    TRK.on = false;
+    TRK.ls.forEach(function (l) { try { l[0].removeEventListener(l[1], l[2], l[3]); } catch (e) { /* もうない */ } }); TRK.ls = [];
+    TRK.obs.forEach(function (o) { try { o.disconnect(); } catch (e) { /* もうない */ } }); TRK.obs = [];
+    var i, top = setTimeout(function () {}, 0); for (i = TRK.t0; i <= top; i++) { clearTimeout(i); clearInterval(i); }
+    var rf = requestAnimationFrame(function () {}); for (i = TRK.r0; i <= rf; i++) cancelAnimationFrame(i);
+    try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (e) { /* 無視 */ }
+    Array.prototype.slice.call(document.body.childNodes).forEach(function (n) { if (BASE.body.indexOf(n) < 0) n.remove(); });
+    Array.prototype.slice.call(document.head.childNodes).forEach(function (n) { if (BASE.head.indexOf(n) < 0) n.remove(); });
+    BASE.attrs.forEach(function (x) {
+      var n = x[0], keep = {}; x[1].forEach(function (a) { keep[a[0]] = 1; n.setAttribute(a[0], a[1]); });
+      Array.prototype.slice.call(n.attributes).forEach(function (a) { if (!keep[a.name]) n.removeAttribute(a.name); });
+    });
+    document.title = BASE.title;
+    try { window.getSelection().removeAllRanges(); } catch (e) { /* 無視 */ }
+    try { delete window.OS; } catch (e) { window.OS = undefined; }
+    // ストレージと起動の状態を、ページを開いたときと同じに（HDD1 は読み込み済みならそのまま使う）
+    store = BOOT.hddReady ? realStore : lsStore; BOOT.store = store;
+    BOOT.live = false; BOOT.imode = false; BOOT.safe = false; BOOT.offerUpdate = false; BOOT.hddSkip = false; BOOT.hold = null; BOOT.wantMenu = false;
+    keyHandler = null; scr.textContent = ''; scr.className = ''; scr.removeAttribute('style');
+    BOOT.warm = (BOOT.warm || 0) + 1;
+    post().then(function (wantSetup) { if (wantSetup) setup(); else main(); });
+  }
+  BOOT.warmBoot = warmBoot;
   document.addEventListener('keydown', function (e) { if (keyHandler) keyHandler(e); });
   // Keyboard Lock: 全画面でないときにマウスでクリックしたら全画面にして、ブラウザや OS が先に取るキー
   // （Alt+Tab、Ctrl+W、Windows キーなど）も htmlOS が受け取る。Esc を長押しすると解除される（ブラウザの仕様）
@@ -695,6 +743,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       var old = document.getElementById('os-root'); if (old) old.remove();
       scr.textContent = '';
       var st = document.getElementById('htmlos-style'); if (st) st.remove();
+      track();
       (0, eval)(node.c + '\n//# sourceURL=hfs:///sys/kernel.js');
       await window.OS.boot(mode);
       scr.style.display = 'none'; scr.textContent = '';
@@ -896,7 +945,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         { label: 'Clear CMOS', act: function () { lsStore.del('bios'); leave(true); }, help: '保存してある BIOS 設定を消して再起動します。htmlOS 本体やファイルは消えません。' }
       ] }
     ];
-    function leave(reboot) { if (timer) clearInterval(timer); keyHandler = null; if (reboot) location.reload(); else main(); }
+    function leave(reboot) { if (timer) clearInterval(timer); keyHandler = null; if (reboot) warmBoot(); else main(); }
     function selectable(i) { return !TABS[tab].items[i].info; }
     function move(d) { armed = false; note = ''; var n = TABS[tab].items.length; for (var c = 0; c < n; c++) { sel = (sel + d + n) % n; if (selectable(sel)) return; } }
     function fire() {

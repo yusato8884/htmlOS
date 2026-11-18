@@ -750,10 +750,10 @@
     }
     const rest = 1300 - (Date.now() - t0);
     if (rest > 0) await nap(rest);
-    if (reboot) { location.reload(); return; }
+    if (reboot) { if (BOOT.warmBoot) BOOT.warmBoot(); else location.reload(); return; }
     OS.root.textContent = '';
     OS.root.append(h('div', { class: 'poweroff' },
-      h('button', { class: 'pw-btn', type: 'button', title: '電源を入れる', 'aria-label': '電源を入れる', onclick: () => location.reload() }, OS.icon('power', 34)),
+      h('button', { class: 'pw-btn', type: 'button', title: '電源を入れる', 'aria-label': '電源を入れる', onclick: () => (BOOT.warmBoot ? BOOT.warmBoot() : location.reload()) }, OS.icon('power', 34)),
       h('p', null, '電源が切れています'), h('small', null, 'ボタンを押すと起動します')));
   };
   OS.reboot = function (flag) { return OS.shutdown(true, flag); };

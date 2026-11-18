@@ -51,7 +51,11 @@
     wm: '#os-root .de-wm,#os-root .hdm-wm'
   };
   const TEXT = 'input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=button]):not([type=submit]):not([type=color]):not([type=file]),textarea,[contenteditable=""],[contenteditable="true"],.tty-scr,.tty-scr *';
-  const css = Object.keys(SCOPES).map(t => SCOPES[t] + '{' + vars(t) + '}').join('\n') + '\n' + [
+  // ページ全体（#os-root の外の html・body）も、いまのデスクトップ環境のカーソルにする
+  const ROOTS = { htui: ':root', win: ':root:has(.de-win,.hdm-w11,.hdm-w8,.hdm-wp)', mac: ':root:has(.de-mac,.hdm-mac,.hdm-ios)', gnome: ':root:has(.de-gnome,.hdm-gdm)', wm: ':root:has(.de-wm,.hdm-wm)' };
+  const css = Object.keys(ROOTS).map(t => ROOTS[t] + '{' + vars(t) + '}').join('\n') + '\n' +
+    Object.keys(SCOPES).map(t => SCOPES[t] + '{' + vars(t) + '}').join('\n') + '\n' + [
+    'html,body{cursor:var(--c-arrow)}',
     '#os-root,#os-root *{cursor:var(--c-arrow)}',
     '#os-root :is(a[href],a[href] *,[data-cursor=hand]){cursor:var(--c-hand)}',
     '#os-root :is(' + TEXT + '){cursor:var(--c-text)}',
