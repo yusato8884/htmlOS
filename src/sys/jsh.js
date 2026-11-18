@@ -609,12 +609,183 @@
       def('hserial', 'hserial', 'シリアルモニター', () => { OS.launch('hserial'); });
       def('hmd', 'hmd [ファイル]', 'Markdown エディター（コードとプレビュー）', p => { OS.launch('hmd', p == null ? null : A(p)); });
       def('hmines', 'hmines', 'マインスイーパー風のゲーム', () => { OS.launch('hmines'); });
-      // HTUi Studio の CLI 版（GUI 版と同じ OS.studio を使う）
-      def('hstudio', 'hstudio new app|cmd|de 名前 / list / build / run / install / open [プロジェクト]', 'HTUi Studio（アプリ・コマンド・デスクトップ環境を作る）', async (sub, ...a) => {
+      // ---- HTUi Studio の TUI（矢印キー・Enter・Esc で操作する CLI 版）
+      async function studioTui(S, startDir) {
+        const scr = tty.screen();
+        const W = 56, line = '─'.repeat(W);
+        let logRows = [];
+        const say = (s, c) => { logRows.push([s, c || null]); if (logRows.length > 12) logRows = logRows.slice(-12); };
+        const sayLog = r => r.log.forEach(l => say(S.fmt(l), l.lv === 'err' ? 'err' : l.lv === 'ok' ? 'ok' : l.lv === 'warn' ? 'accent' : 'dim'));
+        const head = sub => [[['HTUi Studio ' + S.version, 'head'], ['  TUI ・ ' + OS.htui.sdk.full + ' ・ ' + OS.name, 'dim']], line].concat(sub ? [[sub, 'accent'], ''] : []);
+        const foot = keys => ['', line, [keys || '↑↓ 選ぶ   Enter 決める   Esc 戻る', 'dim']];
+        const logBlock = () => logRows.length ? ['', ['── 記録 ──', 'dim']].concat(logRows.map(r => r[1] ? [r] : r[0])) : [];
+        // メニュー。items: [{ label, hint, value, disabled }]。選んだ value か、Esc なら null
+        async function menu(sub, items, o) {
+          o = o || {};
+          let i = Math.max(0, items.findIndex(x => !x.disabled)), top = o.info || [];
+          if (o.at !== undefined) { const j = items.findIndex(x => x.value === o.at && !x.disabled); if (j >= 0) i = j; } // 前に選んでいた項目から
+          for (;;) {
+            const rows = head(sub).concat(top, top.length ? [''] : [], items.map((it, k) => k === i ? [['▶ ' + it.label + ' ', 'sel']] : [[(it.disabled ? '  ' + it.label : '  ' + it.label), it.disabled ? 'dim' : null]]),
+              ['', [items[i] && items[i].hint ? '  ' + items[i].hint : ' ', 'dim']], logBlock(), foot(o.keys));
+            scr.render(rows);
+            const k = await scr.key();
+            const step = d => { let j = i; for (let n = 0; n < items.length; n++) { j = (j + d + items.length) % items.length; if (!items[j].disabled) { i = j; return; } } };
+            if (k.key === 'ArrowUp' || (k.key === 'Tab' && k.shift)) step(-1);
+            else if (k.key === 'ArrowDown' || k.key === 'Tab') step(1);
+            else if (k.key === 'Home') { i = -1; step(1); } else if (k.key === 'End') { i = items.length; step(-1); }
+            else if (k.key === 'Enter' || k.key === 'ArrowRight') { if (items[i] && !items[i].disabled) return items[i].value; }
+            else if (k.key === 'Escape' || k.key === 'ArrowLeft' || (k.ctrl && k.key === 'c')) return null;
+            else if (k.key === 'text' && o.letters !== false) { const c = k.text.slice(-1).toLowerCase(), j = items.findIndex((x, n) => n > i && !x.disabled && x.label.toLowerCase().startsWith(c)); const j2 = j >= 0 ? j : items.findIndex(x => !x.disabled && x.label.toLowerCase().startsWith(c)); if (j2 >= 0) i = j2; }
+          }
+        }
+        // 1 行の入力。Enter で決定、Esc で null
+        async function input(sub, label, o) {
+          o = o || {};
+          let v = o.value || '';
+          for (;;) {
+            const shown = o.mask ? '*'.repeat(v.length) : v;
+            scr.render(head(sub).concat(o.info || [], o.info ? [''] : [], [[[label + ' ', 'prompt'], [shown, null], ['▏', 'accent']]], o.preview ? ['', [o.preview(v), 'dim']] : [], o.error ? ['', [o.error, 'err']] : [], foot('文字を入力   Enter 決める   Backspace 消す   Esc やめる')));
+            const k = await scr.key();
+            o.error = null;
+            if (k.key === 'text') v += k.text;
+            else if (k.key === 'Backspace') v = Array.from(v).slice(0, -1).join('');
+            else if (k.key === 'Enter') { if (o.check) { const e = o.check(v); if (e) { o.error = e; continue; } } return v; }
+            else if (k.key === 'Escape' || (k.ctrl && k.key === 'c')) return null;
+            else if (k.ctrl && k.key === 'u') v = '';
+          }
+        }
+        // ↑↓ で送って読むだけの画面
+        async function pager(sub, text) {
+          const ls = String(text).split('\n'); let at = 0;
+          const H = Math.max(8, Math.floor((tty.el.clientHeight || 400) / 20) - 8);
+          for (;;) {
+            scr.render(head(sub).concat(ls.slice(at, at + H).map((l, k) => [[String(at + k + 1).padStart(4) + '  ', 'dim'], [l, null]]), foot('↑↓ PageUp/PageDown 送る   Esc 戻る   （' + (at + 1) + '〜' + Math.min(ls.length, at + H) + ' / ' + ls.length + ' 行）')));
+            const k = await scr.key();
+            if (k.key === 'ArrowDown') at = Math.min(Math.max(0, ls.length - H), at + 1);
+            else if (k.key === 'ArrowUp') at = Math.max(0, at - 1);
+            else if (k.key === 'PageDown' || k.key === 'ArrowRight') at = Math.min(Math.max(0, ls.length - H), at + H);
+            else if (k.key === 'PageUp') at = Math.max(0, at - H);
+            else if (k.key === 'Escape' || k.key === 'Enter' || k.key === 'ArrowLeft' || (k.ctrl && k.key === 'c')) return;
+          }
+        }
+        async function confirm(sub, text, ok) {
+          return (await menu(sub, [{ label: ok || 'はい', value: true }, { label: 'いいえ', value: false }], { info: text.split('\n') })) === true;
+        }
+
+        async function newProject() {
+          const type = await menu('新しいプロジェクト ▸ 種類', Object.keys(S.TYPES).map(k => ({ label: S.TYPES[k].label + '（' + k + '）', hint: S.TYPES[k].desc, value: k })));
+          if (!type) return null;
+          const name = await input('新しいプロジェクト ▸ ' + S.TYPES[type].label, '名前:', {
+            preview: v => v.trim() ? 'ID: ' + S.slug(v, type) + '   保存先: ~/Projects/' + v.trim() : 'ID と保存先は名前から決まります',
+            check: v => { if (!v.trim()) return '名前を入れてください'; if (fs.exists(path.join(S.projectsDir(self.user), v.trim()))) return 'その名前のプロジェクトはもうあります'; return null; } });
+          if (name == null) return null;
+          try { const dir = S.create(fs, self.user, type, name); say('✓ ' + S.TYPES[type].label + 'のプロジェクトを作りました: ' + dir, 'ok'); return dir; }
+          catch (e) { say('✗ ' + e.message, 'err'); return null; }
+        }
+        async function pickProject() {
+          const l = S.list(fs, self.user);
+          if (!l.length) { say('! ~/Projects にプロジェクトがありません', 'accent'); return null; }
+          return menu('プロジェクトを開く', l.map(p => ({ label: p.meta.name, hint: (S.TYPES[p.meta.type] || {}).label + ' ・ ' + p.meta.id + ' ・ ' + p.meta.version + ' ・ ' + p.dir, value: p.dir })));
+        }
+        async function settings(p) {
+          const m = p.meta;
+          for (;;) {
+            const f = await menu(m.name + ' ▸ 設定', [
+              { label: '名前: ' + m.name, value: 'name' }, { label: 'ID: ' + m.id, value: 'id', hint: 'main.js の中の ID も合わせて書き換えてください' }, { label: '版: ' + m.version, value: 'version' },
+              { label: '説明: ' + (m.desc || ''), value: 'desc' }, { label: 'アイコン: ' + m.icon, value: 'icon' }, { label: '色: ' + m.color, value: 'color' }, { label: '戻る', value: null }]);
+            if (!f) return;
+            let v;
+            if (f === 'icon') v = await menu(m.name + ' ▸ アイコン', (OS.iconNames || []).map(n => ({ label: n, value: n })), { info: ['いまは ' + m.icon] });
+            else if (f === 'color') v = await menu(m.name + ' ▸ 色', ['#3584e4', '#2190a4', '#3a944a', '#c88800', '#ed5b00', '#e62d42', '#d56199', '#9141ac', '#4a3aa8', '#5e5c64'].map(c => ({ label: c, value: c })));
+            else v = await input(m.name + ' ▸ 設定', f + ':', { value: String(m[f] || ''), check: x => f === 'id' && !/^[a-z][a-z0-9-]*$/.test(x) ? 'ID は英小文字で始まり、英小文字・数字・- だけにしてください' : null });
+            if (v == null) continue;
+            m[f] = v; try { S.saveMeta(fs, p); say('✓ project.json を保存しました（' + f + '）', 'ok'); } catch (e) { say('✗ ' + e.message, 'err'); }
+          }
+        }
+        async function files(p) {
+          let last;
+          const walk = (d, out) => { fs.list(d).sort().forEach(n => { const q = path.join(d, n); if (fs.isDir(q)) walk(q, out); else out.push(q); }); return out; };
+          for (;;) {
+            const l = walk(p.dir, []);
+            const f = await menu(p.meta.name + ' ▸ ファイル', l.map(q => ({ label: q.slice(p.dir.length + 1), hint: OS.htui.running && OS.htui.user ? 'Enter で hedit で開く' : 'Enter で中身を見る（HTUi を起動すると hedit で編集できます）', value: q })).concat([{ label: '戻る', value: null }]), { keys: '↑↓ 選ぶ   Enter 開く   Esc 戻る', at: last });
+            if (!f) return;
+            last = f;
+            if (OS.htui.running && OS.htui.user) { try { OS.launch('hedit', f); say('hedit で開きました: ' + f, 'dim'); } catch (e) { await pager(f, fs.read(f)); } }
+            else await pager(f, fs.read(f));
+          }
+        }
+        async function project(dir) {
+          let p, last;
+          try { p = S.load(fs, dir); } catch (e) { say('✗ ' + e.message, 'err'); return; }
+          for (;;) {
+            const m = p.meta, T = S.TYPES[m.type] || { label: m.type };
+            const gui = OS.htui.running && OS.htui.user;
+            const act = await menu(m.name + '（' + T.label + '）', [
+              { label: '▷ 実行（インストールせずに試す）', value: 'run', hint: m.type === 'app' ? (gui ? 'アプリを起動します' : 'HTUi が起動していないので、登録だけします') : m.type === 'cmd' ? '引数を入れて、このシェルで実行します' : 'デスクトップ環境を切り替えます' },
+              { label: 'ビルド', value: 'build', hint: 'build/' + m.id + '.js を作ります' },
+              { label: 'インストール', value: 'install', hint: '/apps に入れます（root のパスワードが要ります）' },
+              { label: 'ファイル', value: 'files', hint: 'main.js などを開く・読む' },
+              { label: 'プロジェクトの設定', value: 'settings', hint: '名前・ID・版・説明・アイコン・色' },
+              { label: 'GUI 版で開く', value: 'gui', disabled: !gui, hint: 'HTUi Studio のウインドウで開きます' },
+              { label: '戻る', value: null }], { at: last, info: [['ID ' + m.id + ' ・ 版 ' + m.version + ' ・ ' + p.dir, 'dim'], [m.desc || '', 'dim']] });
+            if (!act) return;
+            last = act;
+            if (act === 'build') sayLog(S.build(fs, p));
+            else if (act === 'run') {
+              if (m.type === 'cmd') {
+                const a = await input(m.name + ' ▸ 実行', m.id, { info: ['引数を入れて Enter（なしでもかまいません）'] });
+                if (a == null) continue;
+                const r = S.run(fs, p, {}); sayLog(r);
+                if (r.ok) { const out = await self.capture(m.id + (a.trim() ? ' ' + a : '')); say('$ ' + m.id + (a.trim() ? ' ' + a : ''), 'prompt'); out.replace(/\n$/, '').split('\n').slice(-8).forEach(l => say(l)); }
+              } else if (m.type === 'de') {
+                if (!gui) { const r = S.run(fs, p, { launch: false }); sayLog(r); if (r.ok) say('HTUi を起動するときに  htui start ' + m.id + '  で選べます', 'dim'); continue; }
+                if (!(await confirm(m.name + ' ▸ 実行', m.name + ' に切り替えます。開いているウインドウ（この Terminal も）は閉じます。\n戻すときは  htui session htui  です。', '切り替える'))) continue;
+                const r = S.run(fs, p, { launch: false }); sayLog(r);
+                if (r.ok) { scr.close(); setTimeout(() => OS.htui.switchSession(m.id), 200); return 'quit'; }
+              } else sayLog(S.run(fs, p, {}));
+            } else if (act === 'install') {
+              if (!(await confirm(m.name + ' ▸ インストール', m.id + '.js を /apps にインストールします。再起動しても使えるようになります。', 'インストール'))) continue;
+              let who = self.user;
+              if (!self.root) {
+                const pw = await input(m.name + ' ▸ インストール', 'root のパスワード:', { mask: true });
+                if (pw == null) continue;
+                if (!(await users.verify('root', pw))) { say('✗ 認証に失敗しました', 'err'); continue; }
+                who = 'root';
+              }
+              try { sayLog(S.install(fs, p, who)); } catch (e) { say('✗ ' + e.message, 'err'); }
+            } else if (act === 'files') await files(p);
+            else if (act === 'settings') await settings(p);
+            else if (act === 'gui') { try { OS.launch('hstudio', p.dir); say('GUI 版で開きました', 'dim'); } catch (e) { say('✗ ' + e.message, 'err'); } }
+          }
+        }
+
+        try {
+          if (startDir && (await project(startDir)) === 'quit') return;
+          let last;
+          for (;;) {
+            const n = S.list(fs, self.user).length;
+            const act = await menu('', [
+              { label: '新しいプロジェクト', value: 'new', hint: 'アプリケーション・コマンド・デスクトップ環境をテンプレートから作ります' },
+              { label: 'プロジェクトを開く', value: 'open', hint: '~/Projects にあるプロジェクト（' + n + ' 個）', disabled: !n },
+              { label: 'GUI 版を開く', value: 'gui', hint: 'HTUi Studio のウインドウを開きます', disabled: !(OS.htui.running && OS.htui.user) },
+              { label: '終了', value: 'quit', hint: 'Esc でも終了します' }], { at: last });
+            last = act;
+            if (!act || act === 'quit') break;
+            if (act === 'new') { const d = await newProject(); if (d && (await project(d)) === 'quit') return; }
+            else if (act === 'open') { const d = await pickProject(); if (d && (await project(d)) === 'quit') return; }
+            else if (act === 'gui') { try { OS.launch('hstudio'); say('GUI 版を開きました', 'dim'); } catch (e) { say('✗ ' + e.message, 'err'); } }
+          }
+        } finally { if (tty._screen === scr) scr.close(); }
+        return 'HTUi Studio を終了しました';
+      }
+      // HTUi Studio の CLI 版（GUI 版と同じ OS.studio を使う）。引数なしで TUI、サブコマンドはスクリプトからも使える
+      def('hstudio', 'hstudio [tui [プロジェクト]] / new app|cmd|de 名前 / list / build / run / install / open [プロジェクト]', 'HTUi Studio（アプリ・コマンド・デスクトップ環境を作る）。引数なしで矢印キーで操作する TUI', async (sub, ...a) => {
         if (!OS.studio) { try { OS.loadFile('/sys/apps/24-hstudio.js'); } catch (e) { /* 下で知らせる */ } }
         const S = OS.studio;
         if (!S) throw new Error('HTUi Studio が見つかりません');
-        const usage = ['使い方: hstudio <サブコマンド>',
+        const usage = ['使い方: hstudio            矢印キー・Enter・Esc で操作する TUI を開く',
+          '       hstudio tui [プロジェクト]  TUI でプロジェクトを開く',
+          '       hstudio <サブコマンド>（スクリプト向け）',
           '  new app|cmd|de 名前   新しいプロジェクトを ~/Projects/名前 に作る（app=アプリケーション, cmd=コマンド, de=デスクトップ環境）',
           '  list                  ~/Projects のプロジェクトの一覧',
           '  build [プロジェクト]   ビルドして build/ID.js を作る',
@@ -623,13 +794,17 @@
           '  open [プロジェクト]    GUI 版で開く',
           '  templates             作れるものの一覧',
           'プロジェクトは名前（~/Projects の中）かフォルダのパス。省略すると今のディレクトリ'].join('\n');
-        if (!sub || sub === 'help' || sub === '-h' || sub === '--help') return usage;
+        if (sub === 'help' || sub === '-h' || sub === '--help') return usage;
         const projOf = p => {
           const cands = p ? [A(p), path.join(S.projectsDir(self.user), p)] : [self.cwd];
           for (const d of cands) if (S.isProject(fs, d)) return S.load(fs, d);
           throw new Error((p || self.cwd) + ': HTUi Studio のプロジェクトが見つかりません（hstudio list で一覧）');
         };
         const show = r => { r.log.forEach(l => tty.println(S.fmt(l), l.lv === 'err' ? 'err' : l.lv === 'ok' ? 'ok' : l.lv === 'warn' ? 'accent' : 'dim')); if (!r.ok) throw Object.assign(new Error('失敗しました'), { quietExit: true }); };
+        if (!sub || sub === 'tui') {
+          if (tty.capture) return usage; // パイプやリダイレクトの中では画面を出せない
+          return studioTui(S, a[0] ? projOf(a[0]).dir : null);
+        }
         if (sub === 'templates') return Object.keys(S.TYPES).map(k => k.padEnd(4) + S.TYPES[k].label + ' — ' + S.TYPES[k].desc).join('\n');
         if (sub === 'new') {
           const type = a[0], name = a.slice(1).join(' ');

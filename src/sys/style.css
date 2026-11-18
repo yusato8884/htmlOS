@@ -1560,3 +1560,11 @@
 .hx-type.on{border-color:var(--accent);box-shadow:var(--v-ring);background:color-mix(in srgb,var(--accent) 7%,var(--surface))}
 .phone .hx-nav,.phone .hx-insp{display:none!important}
 .phone .hx-types{grid-template-columns:1fr}
+/* ---- 端末の TUI（tty.screen） */
+.tty-tuibox{flex:1;min-height:0;position:relative;overflow:auto;padding:8px 12px;background:var(--tty-bg);color:var(--tty-ink);cursor:default}
+.tty-tui{margin:0;font:inherit;white-space:pre-wrap;word-break:break-all}
+.tty-tui-key{position:absolute;left:12px;top:8px;width:1px;height:1px;opacity:0;border:0;padding:0;margin:0;background:none;color:transparent;caret-color:transparent}
+.t-sel{background:var(--accent);color:#fff;border-radius:3px}
+.t-head{color:#fff;font-weight:700}
+.tty-tuikeys{display:none}
+.touch .tty-tuikeys{display:flex}

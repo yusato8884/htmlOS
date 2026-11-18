@@ -14,7 +14,7 @@
 - **シェルスクリプト（.jsh）**: 1 行ずつ jsh の行として実行。`$1` `$@` `$#` `$?` `$(コマンド)`、`NAME=値`、`exit N`、行末の `\` でつなぐ、`{ }` でまたがる JavaScript のブロック。`./hello.jsh` や `run hello.jsh`、`~/bin`・`/bin` に置けば名前だけで実行。JS からは `await cmd("ls | wc -l")` で出力を受け取れます
 - **HTUi Studio**: アプリの開発環境（IDE）。**アプリケーション・コマンド・デスクトップ環境**の 3 種類をテンプレートから作り、編集・ビルド・その場で実行・インストールまでできます
   - GUI 版: プロジェクトのファイル一覧・コードエディター・プロジェクトの設定・リファレンス（WebView）・コンソール。タイトルバーに 実行 / ビルド / インストール のキャプションボタン
-  - CLI 版: `hstudio new app|cmd|de 名前` / `list` / `build` / `run` / `install` / `open`
+  - CLI 版（4.0.1 から TUI）: Terminal で `hstudio` と打つと、矢印キー・Enter・Esc で操作する画面が開きます（新規作成・プロジェクトを開く・実行・ビルド・インストール・ファイル・設定）。スクリプトからは `hstudio new app|cmd|de 名前` / `list` / `build` / `run` / `install` / `open` も使えます
   - パッケージは `OS.registerCommand(...)`（jsh のコマンド）と `OS.registerSession(...)`（デスクトップ環境）も登録できるようになりました
 
 ### 3.1・3.2 で入ったもの
@@ -113,4 +113,4 @@ python3 build.py
 
 [MIT License](LICENSE)
 
-4.0.0 の公開時に [SCANOSS](https://www.scanoss.com/)（scanoss-py 1.54.3、`--all-extensions`）で全ファイル（29 個）をスキャンし、既存のオープンソースコードとの一致がないことを確認しています。
+4.0.1 の公開時に [SCANOSS](https://www.scanoss.com/)（scanoss-py 1.54.3、`--all-extensions`）で全ファイル（29 個）をスキャンし、既存のオープンソースコードとの一致がないことを確認しています。

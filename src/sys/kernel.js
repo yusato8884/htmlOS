@@ -532,7 +532,47 @@
       const w = this.el.closest('.win');
       return w ? w.classList.contains('active') : !(OS.htui && OS.htui.running);
     }
-    focus() { this.input.focus(); }
+    focus() { if (this._screen) this._screen.focus(); else this.input.focus(); }
+    // ---- 全画面の TUI（4.0）。const s = tty.screen(); s.render(行); const k = await s.key(); s.close()
+    //   行は文字列か、[文字, 色]（色: accent dim ok err sel head prompt）の配列。
+    //   key() は { key: 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight' | 'Enter' | 'Escape' | 'Tab' | 'Backspace' | 'Home' | 'End' | 'PageUp' | 'PageDown' | 'text', text, ctrl, shift }
+    //   日本語入力（IME）で確定した文字も key: 'text' で届く
+    screen() {
+      if (this._screen) return this._screen;
+      const self = this, q = [], waiters = [];
+      const view = h('pre', { class: 'tty-tui', 'aria-live': 'polite' });
+      const inp = h('input', { class: 'tty-tui-key', 'aria-label': 'キー入力（矢印キー・Enter・Esc）', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' });
+      const push = ev => { const w = waiters.shift(); if (w) w(ev); else q.push(ev); };
+      const NAV = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'Escape', 'Tab', 'Backspace', 'Delete', 'Home', 'End', 'PageUp', 'PageDown'];
+      inp.addEventListener('keydown', e => {
+        if (e.isComposing || e.keyCode === 229) return;
+        if (e.ctrlKey && /^[a-z]$/i.test(e.key)) { e.preventDefault(); push({ key: e.key.toLowerCase(), ctrl: true }); return; }
+        if (NAV.includes(e.key)) { e.preventDefault(); e.stopPropagation(); push({ key: e.key, shift: e.shiftKey }); }
+      });
+      const flush = () => { if (inp.value) { push({ key: 'text', text: inp.value }); inp.value = ''; } };
+      inp.addEventListener('input', e => { if (!e.isComposing) flush(); });
+      inp.addEventListener('compositionend', () => setTimeout(flush, 0));
+      // タッチ用のキー
+      const tk = (label, key) => { const b = h('button', { class: 'tty-key', type: 'button', tabindex: '-1' }, label); b.addEventListener('pointerdown', e => { e.preventDefault(); inp.focus(); push({ key: key }); }); return b; };
+      const keys = h('div', { class: 'tty-keys tty-tuikeys' }, tk('↑', 'ArrowUp'), tk('↓', 'ArrowDown'), tk('←', 'ArrowLeft'), tk('→', 'ArrowRight'), tk('Enter', 'Enter'), tk('Esc', 'Escape'), tk('⌫', 'Backspace'));
+      const box = h('div', { class: 'tty-tuibox' }, view, inp);
+      box.addEventListener('click', () => inp.focus());
+      this.scr.style.display = 'none'; this.keys.style.display = 'none';
+      this.el.insertBefore(box, this.keys); this.el.insertBefore(keys, this.keys);
+      const seg = s => Array.isArray(s) ? h('span', { class: 't-' + s[1] }, s[0]) : document.createTextNode(String(s));
+      const sc = this._screen = {
+        render(rows) {
+          view.textContent = '';
+          rows.forEach(r => { (Array.isArray(r) && Array.isArray(r[0]) ? r : [r]).forEach(x => view.append(seg(x))); view.append('\n'); });
+          const sel = view.querySelector('.t-sel'); if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: 'nearest' });
+        },
+        key() { return q.length ? Promise.resolve(q.shift()) : new Promise(r => waiters.push(r)); },
+        focus() { inp.focus(); },
+        close() { box.remove(); keys.remove(); self.scr.style.display = ''; self.keys.style.display = ''; self._screen = null; while (waiters.length) waiters.shift()({ key: 'Escape' }); if (self.wantsFocus()) self.input.focus(); }
+      };
+      if (this.wantsFocus()) inp.focus();
+      return sc;
+    }
     _echo(p, text) { const cap = this.capture; this.capture = null; this.print(p.prompt, 'prompt'); this.println(text); this.capture = cap; }
     _enter() {
       const p = this.pending; if (!p) return;
@@ -573,7 +613,7 @@
       else if (e.ctrlKey && e.key.toLowerCase() === 'l') { e.preventDefault(); this.clear(); }
       else if (e.ctrlKey && e.key.toLowerCase() === 'c' && this.input.selectionStart === this.input.selectionEnd) { e.preventDefault(); this._cancel(); }
     }
-    dispose() { this.pending = null; if (this._ro) this._ro.disconnect(); this.el.remove(); }
+    dispose() { if (this._screen) this._screen.close(); this.pending = null; if (this._ro) this._ro.disconnect(); this.el.remove(); }
   }
   OS.Tty = Tty;
 
