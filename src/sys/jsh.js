@@ -87,7 +87,8 @@
       this.opt = opt || {};
       this.cwd = fs0.isDir(users.home(user)) ? users.home(user) : '/';
       this.hist = []; this.exited = false;
-      this.fs = OS.fsFor(() => this.user);
+      this.umask = 0o022; // 新しいファイルから外すパーミッション
+      this.fs = OS.fsFor(() => this.user, () => this.umask);
       this.help = {}; this.cmds = new Set();
       this.vars = { SHELL: '/bin/jsh', LANG: 'ja_JP.UTF-8', TERM: 'htmlos-tty', PATH: '/bin' };
       this.aliases = { ll: 'ls -l', la: 'ls -a' };
@@ -180,6 +181,7 @@
           // ~/bin・/bin にある同じ名前（または 名前.jsh）のスクリプト
           const sc = this.findScript(m[1]);
           if (!sc) return null;
+          if (!this.fs.canExec(sc)) throw new Error(m[1] + ': 実行する許可がありません（' + sc + '。chmod +x で実行できるようになります）');
           segs.push({ name: 'run', rest: JSON.stringify(sc) + (m[2] ? ' ' + m[2] : '') });
           continue;
         }
@@ -233,6 +235,7 @@
         if (segs) result = await this.runSegs(segs);
         else if (/^(\.\.?\/|\/|~\/)\S+/.test(line) && this.fs.isFile(this.abs(splitArgs(line)[0]))) {
           const a = splitArgs(line);
+          if (!this.fs.canExec(this.abs(a[0]))) throw new Error(a[0] + ': 実行する許可がありません（chmod +x ' + a[0] + ' で実行できるようになります。run ' + a[0] + ' なら許可なしで読んで実行します）');
           result = await this.env.run(...a);
         } else {
           // JavaScript。let/const/var は次の行でも使えるようグローバル代入に読み替える
@@ -398,7 +401,14 @@
       const m = v.match(/^([\s\S]*?)([^\s'"(]*)$/);
       const head = m[1], tok = m[2];
       let cands, prefix;
-      if (!head && !tok.includes('/')) { cands = [...this.cmds].filter(n => n.startsWith(tok)).sort(); prefix = ''; }
+      // コマンドの位置: 行の先頭・| ; && || のあと・sudo（と -u ユーザー などのオプション）のあと・help / which のあと
+      const cmdPos = /(^|[|;&]\s*|\b(?:help|which|type|man)\s+)(sudo\s+(?:(?:-u\s+\S+|-\S+)\s+)*)?$/.test(head);
+      if (cmdPos && !tok.includes('/')) {
+        this.syncCommands(); // パッケージや hinit が足したコマンド（systemctl・ps など）も候補に入れる
+        const names = new Set(this.cmds);
+        for (const d of [this.home + '/bin', '/bin']) { try { this.fs.list(d).forEach(n => { if (fs0.isFile(path.join(d, n))) names.add(n.replace(/\.jsh$/i, '')); }); } catch (e) { /* なければ飛ばす */ } }
+        cands = [...names].filter(n => n.startsWith(tok)).sort(); prefix = '';
+      }
       else {
         const i = tok.lastIndexOf('/');
         prefix = i >= 0 ? tok.slice(0, i + 1) : '';
@@ -417,7 +427,7 @@
       const self = this, tty = this.tty, fs = this.fs, env = {};
       const def = (name, usage, desc, fn) => { env[name] = fn; self.help[name] = { usage: usage, desc: desc }; self.cmds.add(name); };
       const alias = (name, target) => { env[name] = env[target]; self.cmds.add(name); };
-      const needAdmin = () => { if (!self.admin) throw new Error('管理者権限が必要です'); };
+      const needAdmin = () => { if (!self.root) throw new Error('root 権限が必要です（sudo を付けて実行してください）'); };
       const A = p => self.abs(p);
       const flags = args => ({ f: args.filter(a => typeof a === 'string' && /^-[A-Za-z]+$/.test(a)).join(''), rest: args.filter(a => !(typeof a === 'string' && /^-[A-Za-z]+$/.test(a))) });
       const askNewPw = async () => {
@@ -427,6 +437,8 @@
       };
 
       env.OS = OS; env.fs = fs; env.tty = tty; env.args = [];
+      // メッセージバスにこのシェル（のユーザー・PID）としてつなぐ: const b = bus(); await b.call('htmlos.Bus', 'Ping')
+      env.bus = () => OS.ipc.connect({ pid: self.proc ? self.proc.pid : 0, user: () => self.user });
 
       def('help', 'help [コマンド]', 'コマンド一覧・使い方を表示', name => {
         if (name) { const x = self.help[name]; if (!x) throw new Error(name + ': そのようなコマンドはありません'); return x.usage + '\n  ' + x.desc; }
@@ -462,19 +474,30 @@
         const names = st.t === 'd' ? fs.list(p) : [path.base(p)], base = st.t === 'd' ? p : path.dir(p);
         const shown = o.f.includes('a') ? names : names.filter(n => !n.startsWith('.'));
         if (o.f.includes('l')) {
+          const PM = OS.perm, who = x => String(x.o || 'root').padEnd(8) + ' ' + String(PM.group(x)).padEnd(8);
           return shown.map(n => {
             const q = path.join(base, n), ls = fs0.lstat(q);
-            if (ls && ls.t === 'l') return 'l  ' + String(ls.o || 'root').padEnd(10) + '-'.padStart(10) + '  ' + fmtDate(ls.m) + '  ' + n + ' -> ' + ls.c;
+            if (ls && ls.t === 'l') return PM.str(ls, q) + '  ' + who(ls) + '-'.padStart(9) + '  ' + fmtDate(ls.m) + '  ' + n + ' -> ' + ls.c;
+            let rq = q; try { rq = fs0.real(q); } catch (e) { /* 壊れたリンク */ }
             const s = fs0.stat(q) || { t: 'f', c: '', m: 0 };
-            return (s.t === 'd' ? 'd' : '-') + '  ' + String(s.o || 'root').padEnd(10) + (s.t === 'd' ? '-' : fmtSize(s.c.length)).padStart(10) + '  ' + fmtDate(s.m) + '  ' + n + (s.t === 'd' ? '/' : '');
+            return PM.str(s, rq) + '  ' + who(s) + (s.t === 'd' ? '-' : s.t === 'p' ? '0' : fmtSize(s.c.length)).padStart(9) + '  ' + fmtDate(s.m) + '  ' + n + (s.t === 'd' ? '/' : s.t === 'p' ? '|' : '');
           }).join('\n');
         }
         const l = Listing.from(shown); l.base = base; return l;
       });
-      def('cat', 'cat [ファイル...]', 'ファイルの中身（JSでは文字列を返す。ファイルを省くとパイプの入力をそのまま出す）', (...a) => {
+      def('cat', 'cat [ファイル...]', 'ファイルの中身（JSでは文字列を返す。ファイルを省くとパイプの入力をそのまま出す。名前付きパイプは書かれるまで待つ）', (...a) => {
         if (!a.length) return input([]).replace(/\n$/, '');
-        return a.map(p => { const q = A(p), s = fs.stat(q); if (s && s.b) return '[バイナリ ' + fmtSize(s.c.length) + ']'; return fs.read(q); }).join('');
+        const one = p => { const q = A(p), s = fs.stat(q); if (s && s.t === 'p') { if (!fs.access(q, 'r')) fs.read(q); return fifoCat(q); } if (s && s.b) return '[バイナリ ' + fmtSize(s.c.length) + ']'; return fs.read(q); };
+        const parts = a.map(one);
+        // 名前付きパイプがあるときだけ、待ってから返す（ふつうのファイルは今までどおりすぐ文字列を返す）
+        return parts.some(x => x && typeof x.then === 'function') ? Promise.all(parts).then(l => l.join('')) : parts.join('');
       });
+      // 名前付きパイプを、だれかが書くまで待って読む（Enter か Ctrl+C でやめる）
+      const fifoCat = async q => {
+        const stop = tty.capture ? null : tty.read('');
+        try { const d = await OS.ipc.fifoRead(fs0.real(q), stop); if (d == null) throw new Error('取りやめました'); return d; }
+        finally { if (stop) tty.abort(); }
+      };
       def('write', 'write ファイル テキスト', 'ファイルに書き込む（上書き）', (p, ...t) => { fs.write(A(p), t.join(' ')); });
       def('append', 'append ファイル テキスト', 'ファイルの末尾に1行追加', (p, ...t) => { const q = A(p); fs.write(q, (fs.exists(q) ? fs.read(q) : '') + t.join(' ') + '\n'); });
       def('touch', 'touch ファイル', '空のファイルを作る', p => { const q = A(p); if (!fs.exists(q)) fs.write(q, ''); });
@@ -482,7 +505,7 @@
       def('rm', 'rm [-r] パス...', '削除', (...args) => { const o = flags(args); if (!o.rest.length) throw new Error('削除するパスを指定してください'); o.rest.forEach(p => fs.rm(A(p), { recursive: o.f.includes('r') })); });
       def('cp', 'cp コピー元 コピー先', 'コピー（ディレクトリも可）', (a, b) => { if (a == null || b == null) throw new Error('cp コピー元 コピー先'); fs.cp(A(a), A(b)); });
       def('mv', 'mv 移動元 移動先', '移動・名前変更', (a, b) => { if (a == null || b == null) throw new Error('mv 移動元 移動先'); fs.mv(A(a), A(b)); });
-      def('stat', 'stat パス', 'ファイル情報', p => { const q = A(p), s = fs.stat(q); if (!s) throw new Error(q + ': そのようなファイルはありません'); return { path: q, type: s.t === 'd' ? 'directory' : 'file', owner: s.o, size: s.t === 'f' ? s.c.length : undefined, binary: !!s.b, modified: fmtDate(s.m) }; });
+      def('stat', 'stat パス', 'ファイル情報（モード・所有者・グループも）', p => { const q = A(p), s = fs.stat(q); if (!s) throw new Error(q + ': そのようなファイルはありません'); const rq = fs0.real(q), PM = OS.perm; return { path: q, type: s.t === 'd' ? 'directory' : s.t === 'p' ? 'fifo' : 'file', mode: PM.oct(PM.def(rq, s)) + ' (' + PM.str(s, rq) + ')', owner: s.o || 'root', group: PM.group(s), size: s.t === 'f' ? s.c.length : undefined, binary: !!s.b, modified: fmtDate(s.m) }; });
       // grep: ファイルを省くとパイプ（|）の入力から探す。-i 大文字小文字を区別しない / -v 一致しない行 / -n 行番号 / -c 数だけ
       def('grep', 'grep [-i] [-v] [-n] [-c] パターン [ファイル...]', '一致する行を表示（ファイルを省くとパイプの入力から探す）', (...a) => {
         const g = getopts(a), pat = g.rest.shift();
@@ -518,7 +541,7 @@
         const t = users.get(name);
         if (!t) throw new Error(name + ': そのようなユーザーはいません');
         if (!self.root) {
-          if (!t.pw) throw new Error(name + ' のパスワードが未設定です。' + (name === 'root' ? '管理者が「passwd root」で設定してください' : ''));
+          if (!t.pw) throw new Error(name + ' のパスワードが未設定です。' + (name === 'root' ? '管理者が「sudo passwd root」で設定するか、sudo -i で root になれます' : ''));
           if (!(await users.verify(name, await tty.read('Password: ', { mask: true })))) throw new Error('認証に失敗しました');
         }
         self.stack.push({ user: self.user, cwd: self.cwd });
@@ -537,13 +560,13 @@
         await users.setPassword(t, await askNewPw());
         return t + ' のパスワードを変更しました';
       });
-      def('useradd', 'useradd ユーザー名 [admin]', 'ユーザーを追加（管理者のみ）', async (name, role) => {
+      def('useradd', 'useradd ユーザー名 [admin]', 'ユーザーを追加（root だけ。sudo useradd …）', async (name, role) => {
         needAdmin(); if (!name) throw new Error('ユーザー名を指定してください');
         if (users.get(name)) throw new Error(name + ': すでに存在するユーザーです');
         await users.add(name, await askNewPw(), role === 'admin' || role === true);
         return name + ' を追加しました';
       });
-      def('userdel', 'userdel ユーザー名', 'ユーザーとホームを削除（管理者のみ）', async name => {
+      def('userdel', 'userdel ユーザー名', 'ユーザーとホームを削除（root だけ。sudo userdel …）', async name => {
         needAdmin(); if (!name) throw new Error('ユーザー名を指定してください');
         if (name === self.user) throw new Error('ログイン中の自分は削除できません');
         if ((await tty.read(name + ' とそのホームを削除しますか? [y/N] ')).trim().toLowerCase() !== 'y') return '中止しました';
@@ -1125,11 +1148,122 @@
         OS.config.set('hostname', n); self.vars.HOSTNAME = n; return 'ホスト名: ' + n;
       });
       const idOf = name => { const l = users.list(), u = users.get(name); if (!u) throw new Error(name + ': そのようなユーザーはいません'); return u.root ? 0 : 1000 + l.filter(x => !x.root).findIndex(x => x.name === u.name); };
+      // グループの番号: root 0・sudo 27・ユーザーと同じ名前のグループはその uid・ほかは 3000 番台
+      const gidOf = g => { if (g === 'root') return 0; if (g === 'sudo') return 27; if (users.get(g)) return idOf(g); let h = 0; for (const c of g) h = (h * 31 + c.charCodeAt(0)) % 997; return 3000 + h; };
       def('id', 'id [ユーザー名]', 'ユーザーの ID と所属グループ', name => {
-        name = name || self.user; const u = users.get(name), uid = idOf(name);
-        const groups = [uid + '(' + name + ')'].concat(u.root ? ['0(root)'] : u.admin ? ['27(sudo)'] : []);
-        return 'uid=' + uid + '(' + name + ') gid=' + uid + '(' + name + ') groups=' + [...new Set(groups)].join(',');
+        name = name || self.user; const uid = idOf(name);
+        const groups = OS.perm.groupsOf(name).map(g => gidOf(g) + '(' + g + ')');
+        return 'uid=' + uid + '(' + name + ') gid=' + uid + '(' + name + ') groups=' + groups.join(',');
       });
+      // ---- パーミッション・sudo・IPC（5.1 から）
+      const P = OS.perm;
+      const walkR = (q, fn) => { fn(q); try { if (fs0.isDir(q) && !fs0.isLink(q)) fs.list(q).forEach(n => walkR(path.join(q, n), fn)); } catch (e) { /* 読めない所は飛ばす */ } };
+      def('chmod', 'chmod [-R] モード パス...', 'パーミッションを変える。モードは 755 のような 8 進か、u+x・go-w・a=r のような記号（所有者か root）', (...args) => {
+        const o = flags(args.map(String).map(x => /^-[rwxXst]+$/.test(x) ? '\u0000' + x : x));
+        const rest = o.rest.map(x => x.replace(/^\u0000/, ''));
+        if (rest.length < 2) throw new Error('使い方: chmod [-R] モード パス...（例: chmod +x hello.jsh / chmod 600 秘密.txt）');
+        const mode = rest[0];
+        rest.slice(1).forEach(p => { const q = A(p); (o.f.includes('R') ? f => walkR(q, f) : f => f(q))(x => fs.chmod(x, mode)); });
+      });
+      def('chown', 'chown [-R] ユーザー[:グループ] パス...', '所有者（とグループ）を変える（root だけ。sudo chown …）', (...args) => {
+        const o = flags(args); if (o.rest.length < 2) throw new Error('使い方: chown [-R] ユーザー[:グループ] パス...');
+        const [ow, gr] = String(o.rest[0]).split(':');
+        o.rest.slice(1).forEach(p => { const q = A(p); (o.f.includes('R') ? f => walkR(q, f) : f => f(q))(x => fs.chown(x, ow || null, gr || null)); });
+      });
+      def('chgrp', 'chgrp [-R] グループ パス...', 'グループを変える（そのグループに入っている所有者か root）', (...args) => {
+        const o = flags(args); if (o.rest.length < 2) throw new Error('使い方: chgrp [-R] グループ パス...');
+        o.rest.slice(1).forEach(p => { const q = A(p); (o.f.includes('R') ? f => walkR(q, f) : f => f(q))(x => fs.chown(x, null, String(o.rest[0]))); });
+      });
+      def('umask', 'umask [8 進数]', '新しく作るファイルから外すパーミッション（既定 022）', m => {
+        if (m == null) return P.oct(self.umask).slice(1);
+        if (!/^[0-7]{1,4}$/.test(String(m))) throw new Error('umask は 022 のような 8 進数で');
+        self.umask = parseInt(m, 8) & 0o777;
+      });
+      def('groups', 'groups [ユーザー名]', '所属しているグループ', name => P.groupsOf(name || self.user).join(' '));
+      def('usermod', 'usermod -aG グループ ユーザー / usermod -rG グループ ユーザー', 'ユーザーをグループに入れる・外す（root だけ）', (op, grp, name) => {
+        if (!self.root) throw new Error('usermod には root 権限が必要です（sudo usermod …）');
+        if (!/^-(a|r)G$/.test(op || '') || !grp || !name) throw new Error('使い方: usermod -aG グループ ユーザー（外すときは -rG）');
+        const u = users.get(name); if (!u) throw new Error(name + ': そのようなユーザーはいません');
+        if (!/^[a-z_][a-z0-9_-]{0,15}$/.test(grp)) throw new Error('グループ名は英小文字で始め、英小文字・数字・_ - で');
+        const g = new Set(u.groups || []); if (op === '-aG') g.add(grp); else g.delete(grp);
+        users.update(name, { groups: Array.from(g) });
+        return name + ': ' + P.groupsOf(name).join(' ');
+      });
+      def('mkfifo', 'mkfifo パス...', '名前付きパイプを作る（書き込んだ文字が、読んでいる相手に届く）', (...a) => {
+        if (!a.length) throw new Error('使い方: mkfifo パス');
+        a.forEach(p => fs.mkfifo(A(p)));
+      });
+      def('sudo', 'sudo [-u ユーザー] コマンド... / sudo -i / sudo -s / sudo -k / sudo -l', 'root（や -u のユーザー）としてコマンドを実行。自分のパスワードで認証し、5 分間は聞かない', async (...a) => {
+        let target = 'root', mode = null, i = 0;
+        for (; i < a.length; i++) {
+          const x = String(a[i]);
+          if (x === '-u') target = String(a[++i]);
+          else if (x === '-i' || x === '-s' || x === '-k' || x === '-K' || x === '-l' || x === '-v') mode = x;
+          else if (x === '--') { i++; break; }
+          else break;
+        }
+        const words = a.slice(i).map(String);
+        if (mode === '-k' || mode === '-K') { OS.sudo.forget(self.user); return; }
+        const r = OS.sudo.rule(self.user);
+        if (mode === '-l') {
+          if (self.root) return 'root は何でも実行できます';
+          if (!r.ok) return self.user + ' は sudo を使えません';
+          return self.user + ' は次のコマンドを root として実行できます:\n    ' + r.line + (OS.sudo.fresh(self.user) ? '\n（いまはパスワードなしで実行できます。残り ' + Math.ceil((OS.sudo.TIMEOUT - (Date.now() - OS.sudo.stamps[self.user])) / 60000) + ' 分）' : '');
+        }
+        if (!users.get(target)) throw new Error('sudo: ' + target + ': そのようなユーザーはいません');
+        const what = mode === '-i' || mode === '-s' ? '（シェル）' : words.join(' ');
+        if (!self.root && words.length && !OS.sudo.allows(r, words[0]) && r.ok) { OS.sudo.log(self.user + ' : ' + words[0] + ' は許可されていません', 3); throw new Error('sudo: ' + self.user + ' は ' + words[0] + ' を ' + target + ' として実行することを許可されていません'); }
+        const ok = await OS.sudo.auth(self.user, n => tty.read((n > 1 ? 'すみません、もう一度試してください。\n' : '') + '[sudo] ' + self.user + ' のパスワード: ', { mask: true }).then(v => v ? v : null), what);
+        if (!ok) throw new Error('sudo: 取りやめました');
+        if (mode === '-v') return;
+        OS.sudo.log(self.user + ' : USER=' + target + ' ; PWD=' + self.cwd + ' ; COMMAND=' + what, 6);
+        if (mode === '-i' || mode === '-s' || !words.length) {
+          self.stack.push({ user: self.user, cwd: self.cwd });
+          self.user = target; if (mode === '-i') self.cwd = users.home(target);
+          return;
+        }
+        // コマンドはそのまま呼ぶ（入力のパイプ・戻り値もそのまま）。リダイレクト（>）は sudo の外の、自分の権限で行われる
+        const prev = self.user, name = words[0];
+        self.user = target;
+        try {
+          if (self.cmds.has(name) && self.env[name]) return await self.env[name](...words.slice(1));
+          const sc = /[\/]/.test(name) ? self.abs(name) : self.findScript(name);
+          if (!sc || !fs.isFile(sc)) throw new Error('sudo: ' + name + ': コマンドが見つかりません');
+          if (!fs.canExec(sc)) throw new Error('sudo: ' + sc + ': 実行する許可がありません（chmod +x ' + sc + '）');
+          return await self.env.run(sc, ...words.slice(1));
+        } finally { self.user = prev; }
+      });
+      def('ipc', 'ipc list / call 名前 メソッド [引数...] / pub トピック [データ] / monitor [トピック] / listen トピック / introspect 名前', 'プロセス間通信（メッセージバス）を使う', async (sub, ...a) => {
+        const I = OS.ipc; if (!I) throw new Error('IPC が読み込まれていません');
+        const val = x => { try { return JSON.parse(x); } catch (e) { return x; } };
+        const ep = () => I.connect({ pid: self.proc ? self.proc.pid : 0, user: self.user });
+        const show = v => v === undefined ? '' : typeof v === 'string' ? v : JSON.stringify(v, null, 1);
+        if (!sub || sub === 'list') {
+          const l = I.list(); if (!l.length) return '（バスに名前はありません）';
+          return ['名前                       PID  ユーザー  説明'].concat(l.map(x => x.name.padEnd(26) + String(x.pid).padStart(4) + '  ' + String(x.user).padEnd(8) + '  ' + (x.desc || ''))).join('\n');
+        }
+        if (sub === 'introspect') { const x = I.list().find(n => n.name === a[0]); if (!x) throw new Error((a[0] || '') + ': その名前はバスにありません'); return x.name + '（PID ' + x.pid + '）' + (x.desc ? ' — ' + x.desc : '') + '\n' + x.methods.map(m => '  ' + m.name + (m.doc ? '  ' + m.doc : '')).join('\n'); }
+        if (sub === 'call') { if (a.length < 2) throw new Error('使い方: ipc call 名前 メソッド [引数...]'); const e = ep(); try { return show(await e.call(a[0], a[1], ...a.slice(2).map(val))); } finally { e.close(); } }
+        if (sub === 'pub') { if (!a[0]) throw new Error('使い方: ipc pub トピック [データ]'); const e = ep(); e.publish(a[0], a.length > 1 ? val(a.slice(1).join(' ')) : null); e.close(); return; }
+        if (sub === 'listen') {
+          if (!a[0]) throw new Error('使い方: ipc listen トピック（1 つ届くまで待つ）');
+          const e = ep();
+          try { return await new Promise((res, rej) => { e.subscribe(a[0], (d, m) => res(m.topic + ' ' + show(d))); if (!tty.capture) tty.read('').then(v => { if (v != null) rej(new Error('取りやめました')); }); }); } finally { e.close(); tty.abort(); }
+        }
+        if (sub === 'monitor') {
+          if (tty.capture) throw new Error('ipc monitor はパイプの中では使えません');
+          tty.println('バスを見ています' + (a[0] ? '（' + a[0] + '）' : '') + '。Enter か Ctrl+C で終了', 'dim');
+          const off = I.monitor(m => {
+            if (a[0] && !I.match(a[0], m.topic || (m.to + '.' + m.method))) return;
+            const t = new Date(m.t), hh = String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0') + ':' + String(t.getSeconds()).padStart(2, '0');
+            tty.println(hh + ' ' + (m.type === 'signal' ? 'signal  ' + m.topic + '  from=' + m.from + '  ' + show(m.data) : m.type === 'call' ? 'call    ' + m.to + '.' + m.method + '(' + m.args.map(x => JSON.stringify(x)).join(', ') + ')  from=' + m.from + ' user=' + m.user : m.type === 'return' ? 'return  #' + m.serial + '  ' + show(m.value) : 'error   #' + m.serial + '  ' + m.error), m.type === 'error' ? 'err' : m.type === 'signal' ? 'accent' : null);
+          });
+          try { await tty.read(''); } finally { off(); }
+          return;
+        }
+        throw new Error('使い方: ipc list / call / pub / monitor / listen / introspect');
+      });
+
       def('env', 'env', '環境変数の一覧', () => { const v = self.allVars(); return Object.keys(v).sort().map(k => k + '=' + v[k]).join('\n'); });
       alias('printenv', 'env');
       def('export', 'export 名前=値', '環境変数を設定（$名前 で使える）', (...a) => {

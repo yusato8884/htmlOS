@@ -607,7 +607,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         catch (e) {
           // 書けない場所（/sys など）は、root のパスワードを確認できたら root として保存する
           if (/許可がありません/.test(e.message) && (await ui.asRoot(p + ' を保存します。'))) {
-            try { OS.fs.write(p, ta.value, { owner: 'root' }); file = p; setDirty(false); ui.toast('root として保存しました'); return true; }
+            try { OS.fs.write(p, ta.value, OS.fs.exists(p) ? {} : { owner: 'root' }); file = p; setDirty(false); ui.toast('root として保存しました'); return true; }
             catch (e2) { ui.alert('保存できませんでした。\n' + e2.message); return false; }
           }
           if (!/許可がありません/.test(e.message)) ui.alert('保存できませんでした。\n' + e.message);
@@ -1011,7 +1011,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         try { fsx.write(p, ta.value); file = p; setDirty(false); return true; }
         catch (e) {
           if (/許可がありません/.test(e.message) && (await ui.asRoot(p + ' を保存します。'))) {
-            try { OS.fs.write(p, ta.value, { owner: 'root' }); file = p; setDirty(false); ui.toast('root として保存しました'); return true; }
+            try { OS.fs.write(p, ta.value, OS.fs.exists(p) ? {} : { owner: 'root' }); file = p; setDirty(false); ui.toast('root として保存しました'); return true; }
             catch (e2) { ui.alert('保存できませんでした。\n' + e2.message); return false; }
           }
           if (!/許可がありません/.test(e.message)) ui.alert('保存できませんでした。\n' + e.message);
@@ -3900,6 +3900,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   };
   // ログイン画面（hdm）へ
   function toLogin() {
+    if (htui.user && OS.ipc) { try { OS.ipc.publish('session.logout', { user: htui.user }, 'htui'); } catch (e) { /* 無視 */ } }
     clearShell();
     htui.user = null; htui.fs = null; htui.prefs = {};
     OS.setMode('auto');
@@ -3948,6 +3949,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   function session(user, sid) {
     clearShell();
     htui.user = user;
+    if (OS.ipc) { try { OS.ipc.publish('session.login', { user: user }, 'htui'); } catch (e) { /* 無視 */ } }
     htui.fs = OS.fsFor(() => htui.user);
     const sh = OS.sessions[sid] || OS.sessions[OS.hdm.sessionFor(user)] || OS.sessions.htui;
     htui.shell = sh; htui.sessionId = sh.id;
@@ -4043,6 +4045,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     n = typeof n === 'string' ? { title: n } : Object.assign({}, n);
     n.id = ++noticeSeq; n.time = Date.now(); n.unread = !n.silent;
     if (OS.journal) OS.journal.log('notifyd', (n.app ? n.app + ': ' : '') + n.title + (n.body ? ' — ' + n.body : ''), { prio: 6 });
+    if (OS.ipc) { try { OS.ipc.publish('notify', { app: n.app || null, title: String(n.title == null ? '' : n.title), body: n.body == null ? '' : String(n.body) }, 'notifyd'); } catch (e) { /* 無視 */ } }
     if (!htui.running || !htui.user) return n;
     htui.notices.unshift(n); htui.notices.length = Math.min(htui.notices.length, 50);
     if (OS.init && OS.init.has('notifyd.service') && !OS.init.isActive('notifyd.service')) return n; // 通知のサービスが止まっている: ため込むだけで出さない
@@ -5006,11 +5009,24 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     const inp = h('input', { class: 'inp', type: o && o.password ? 'password' : 'text', id: 'dlg-input', value: def || '', 'aria-label': msg });
     return ui.modal({ title: (o && o.title) || '入力', body: [h('p', { class: 'modal-msg' }, msg), inp], buttons: [{ label: 'キャンセル', cancel: true, value: null }, { label: 'OK', primary: true, value: () => inp.value }] });
   };
-  // root 権限が必要な操作の前に呼ぶ。root のパスワードを確認できたら true
+  // root 権限が必要な操作の前に呼ぶ。sudo できるユーザーは自分のパスワード（5 分間は聞かない）、ほかは root のパスワードを確認できたら true
   ui.asRoot = async function (reason) {
     if (users.isRoot(htui.user)) return true;
+    if (OS.sudo && OS.sudo.rule(htui.user).ok) {
+      const me = users.get(htui.user);
+      if (me && me.pw) {
+        try {
+          const ok = await OS.sudo.auth(htui.user, async n => {
+            const v = await ui.prompt((n > 1 ? 'パスワードが違います。もう一度入力してください。\n' : '') + (reason ? reason + '\n' : '') + 'この操作には root 権限が必要です。' + htui.user + ' のパスワードを入力してください（sudo）。', '', { password: true, title: 'root 権限が必要です' });
+            return v == null ? null : v;
+          }, reason || '（HTUi）');
+          if (ok) OS.sudo.log(htui.user + ' : HTUi から root 権限 ; ' + (reason || ''), 6);
+          return !!ok;
+        } catch (e) { await ui.alert(e.message, 'root 権限が必要です'); return false; }
+      }
+    }
     const r = users.get('root');
-    if (!r || !r.pw) { await ui.alert('root のパスワードがまだ設定されていません。\n管理者が Terminal で「passwd root」を実行して設定してください。', 'root 権限が必要です'); return false; }
+    if (!r || !r.pw) { await ui.alert('root のパスワードがまだ設定されていません。\n管理者が Terminal で「sudo passwd root」を実行して設定してください。', 'root 権限が必要です'); return false; }
     const pw = await ui.prompt((reason ? reason + '\n' : '') + 'この操作には root 権限が必要です。root のパスワードを入力してください。', '', { password: true, title: 'root 権限が必要です' });
     if (pw == null) return false;
     if (await users.verify('root', pw)) return true;
@@ -5094,7 +5110,6 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   const OS = window.OS, fs = OS.fs, users = OS.users;
   const now = () => Date.now();
   const z = (n, w) => String(n).padStart(w || 2, '0');
-  const isAdmin = u => { const x = users.get(u); return !!(x && (x.admin || x.root)); };
 
   // =====================================================================
   // ジャーナル（ログ）
@@ -5174,13 +5189,13 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       if (!SIG[s]) throw new Error(s + ': 使えないシグナルです（kill -l で一覧）');
       return s;
     },
-    // シグナルを送る。by: 送るユーザー（root・管理者は誰のプロセスにも送れる）
+    // シグナルを送る。by: 送るユーザー（root は誰のプロセスにも送れる）
     async kill(pid, sig, by) {
       sig = proc.sigName(sig);
       const p = proc.get(pid);
       if (!p) throw new Error('(' + pid + '): そのようなプロセスはありません');
       if (p.kind === 'init' || p.kind === 'kernel') throw new Error('(' + pid + '): 操作は許可されていません（' + p.name + ' は止められません）');
-      if (by && by !== p.user && !isAdmin(by)) throw new Error('(' + pid + '): 操作は許可されていません（ほかのユーザーのプロセス）');
+      if (by && by !== p.user && !users.isRoot(by)) throw new Error('(' + pid + '): 操作は許可されていません（ほかのユーザーのプロセス。sudo kill …）');
       journal.log('kernel', 'PID ' + pid + '（' + p.name + '）に SIG' + sig + ' を送りました' + (by ? '（' + by + '）' : ''), { prio: 5 });
       if (p.onsignal) return p.onsignal(sig);
       proc.exit(pid, 128 + SIG[sig]);
@@ -5208,7 +5223,17 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   const units = new Map(), state = new Map();
   const list = v => v == null ? [] : (Array.isArray(v) ? v : String(v).split(/[\s,]+/)).filter(Boolean).map(norm);
   function norm(n) { n = String(n).trim(); return /\.(service|target)$/.test(n) ? n : n + '.service'; }
-  const S = n => { let s = state.get(n); if (!s) { s = { active: 'inactive', sub: 'dead', since: 0, pid: null, result: null, timers: [], stops: [], restarts: [], gen: 0, manual: false }; state.set(n, s); } return s; };
+  const S = n => {
+    let s = state.get(n);
+    if (!s) {
+      s = { sub: 'dead', since: 0, pid: null, result: null, timers: [], stops: [], restarts: [], gen: 0, manual: false };
+      // active が変わったら IPC に unit.changed を流す
+      let act = 'inactive';
+      Object.defineProperty(s, 'active', { enumerable: true, get: () => act, set: v => { if (v === act) return; const old = act; act = v; if (OS.ipc) { try { OS.ipc.publish('unit.changed', { unit: n, active: v, old: old }, 'hinit'); } catch (e) { /* 無視 */ } } } });
+      state.set(n, s);
+    }
+    return s;
+  };
   const short = n => n.replace(/\.(service|target)$/, '');
   const ilog = (msg, prio) => journal.log('hinit', msg, { pid: 1, prio: prio });
   let enabledMap = {};
@@ -5544,7 +5569,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   const ago = t => { const s = Math.max(0, Math.floor((now() - t) / 1000)); return s < 60 ? s + ' 秒前' : s < 3600 ? Math.floor(s / 60) + ' 分前' : Math.floor(s / 3600) + ' 時間 ' + Math.floor(s % 3600 / 60) + ' 分前'; };
   const clock = t => { const d = new Date(t); return z(d.getHours()) + ':' + z(d.getMinutes()) + ':' + z(d.getSeconds()); };
   const cmd = d => OS.registerCommand(d);
-  const needAdmin = (sh, what) => { if (!sh.admin && !sh.root) throw new Error(what + 'には管理者の権限が必要です'); };
+  const needAdmin = (sh, what) => { if (!sh.root) throw new Error(what + 'には root 権限が必要です（sudo systemctl …）'); };
   const DOT = { active: '●', reloading: '●', activating: '◐', deactivating: '◑', failed: '×', inactive: '○' };
 
   function psLines(filter) {
@@ -5772,6 +5797,172 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   journal.log('kernel', 'hinit（PID 1）を起動しました', { prio: 6 });
 })();
 </script>
+<script type="text/x-htmlos" data-path="/sys/ipc.js">
+/* /sys/ipc.js — htmlOS のプロセス間通信（5.1 から。D-Bus にあたる）
+   ・メッセージバス: 名前（htmlos.Notify など）を持ったプロセスのメソッドを呼ぶ（call）・トピックに信号を流す（publish / subscribe）
+       const b = OS.ipc.connect({ pid, user });            // つなぐ（jsh の JavaScript からは bus() で、そのシェルとしてつながる）
+       b.own('my.Hello', { Hi(ctx, name) { return 'こんにちは ' + name + '（' + ctx.user + ' から）'; } }, '説明');
+       await b.call('my.Hello', 'Hi', '悠');                // → 'こんにちは 悠（yu から）'
+       const off = b.subscribe('unit.*', (data, m) => …);  // * は . を含まない 1 語、** は何でも
+       b.publish('my.event', { x: 1 });  b.close();
+     メソッドは ctx（{ user, pid, sender }）と引数を受け取る。引数と戻り値は JSON にできる値だけ（コピーして渡す）
+     組み込みの名前: htmlos.Notify / htmlos.Sound / htmlos.Init / htmlos.Journal / htmlos.Session / htmlos.Bus
+     流れる信号: unit.changed（サービスの状態）・session.login / session.logout・notify・power.shutdown / power.reboot・bus.name
+   ・名前付きパイプ（FIFO）: mkfifo で作ったファイルに書くと、読んで待っている相手に届く（cat で読む） */
+(function () {
+  'use strict';
+  const OS = window.OS, users = OS.users;
+  const names = new Map(), subs = new Set(), mons = new Set(), eps = new Set();
+  let serial = 0, nextId = 1;
+  const clone = v => v === undefined ? undefined : JSON.parse(JSON.stringify(v));
+  const reOf = new Map();
+  // トピックのパターン: * は . を含まない 1 語、** は何でも（unit.* / session.** / **）
+  function match(pat, topic) {
+    if (pat === topic || pat === '**') return true;
+    let re = reOf.get(pat);
+    if (!re) { re = new RegExp('^' + String(pat).split(/(\*\*|\*)/).map(x => x === '**' ? '.*' : x === '*' ? '[^.]*' : x.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('') + '$'); reOf.set(pat, re); }
+    return re.test(String(topic));
+  }
+  function emit(m) { m.t = Date.now(); mons.forEach(f => { try { f(m); } catch (e) { /* 見ている側の失敗は無視 */ } }); }
+  function publish(topic, data, from) {
+    topic = String(topic);
+    if (!/^[\w-]+(\.[\w-]+)*$/.test(topic)) throw new Error(topic + ': トピックは a.b.c のように英数字と . で');
+    const d = clone(data === undefined ? null : data), m = { topic: topic, from: from || 'kernel' };
+    emit({ type: 'signal', topic: topic, from: m.from, data: d });
+    subs.forEach(s => { if (match(s.pat, topic)) Promise.resolve().then(() => s.fn(clone(d), m)).catch(e => console.warn('[ipc]', topic, e)); });
+  }
+  const methodsOf = n => Object.keys(n.methods).map(k => ({ name: k, doc: (n.docs && n.docs[k]) || '' }));
+  function connect(o) {
+    o = o || {};
+    const ep = { id: ':1.' + (nextId++), closed: false, owned: new Set(), mySubs: new Set() };
+    Object.defineProperty(ep, 'user', { get: () => typeof o.user === 'function' ? o.user() : (o.user || 'root'), enumerable: true });
+    Object.defineProperty(ep, 'pid', { get: () => o.pid || 0, enumerable: true });
+    const live = () => { if (ep.closed) throw new Error('この接続はもう閉じています'); };
+    // 名前を持つ。methods は { 名前(ctx, ...引数) } か { 名前: { doc, fn } }
+    ep.own = function (name, methods, desc) {
+      live(); name = String(name);
+      if (!/^[A-Za-z][\w-]*(\.[A-Za-z][\w-]*)+$/.test(name)) throw new Error(name + ': 名前は my.Hello のように . で区切ってください');
+      if (names.has(name)) throw new Error(name + ': その名前はほかのプロセス（PID ' + names.get(name).ep.pid + '）が使っています');
+      if (/^htmlos\./.test(name) && ep.user !== 'root') throw new Error(name + ': htmlos. で始まる名前は root だけが使えます');
+      const fns = {}, docs = {};
+      Object.keys(methods || {}).forEach(k => { const v = methods[k]; if (typeof v === 'function') fns[k] = v; else if (v && typeof v.fn === 'function') { fns[k] = v.fn; docs[k] = v.doc || ''; } });
+      names.set(name, { name: name, ep: ep, methods: fns, docs: docs, desc: desc || '' });
+      ep.owned.add(name);
+      publish('bus.name', { name: name, owner: ep.id, pid: ep.pid, op: 'own' }, ep.id);
+      return name;
+    };
+    ep.release = function (name) {
+      if (!ep.owned.has(name)) return false;
+      ep.owned.delete(name); names.delete(name);
+      publish('bus.name', { name: name, owner: ep.id, pid: ep.pid, op: 'release' }, ep.id);
+      return true;
+    };
+    ep.call = async function (name, method, ...args) {
+      live();
+      const n = names.get(String(name));
+      if (!n) throw new Error(name + ': その名前はバスにありません（ipc list で一覧）');
+      const fn = n.methods[method];
+      if (!fn) throw new Error(name + ': ' + method + ' というメソッドはありません（ipc introspect ' + name + '）');
+      const s = ++serial, a = clone(args);
+      emit({ type: 'call', serial: s, from: ep.id, user: ep.user, to: n.name, method: method, args: a });
+      let timer = 0;
+      try {
+        const v = await Promise.race([
+          Promise.resolve().then(() => fn({ user: ep.user, pid: ep.pid, sender: ep.id }, ...a)),
+          new Promise((r, j) => { timer = setTimeout(() => j(new Error(name + '.' + method + ': 30 秒たっても返事がありません')), 30000); })
+        ]);
+        const c = clone(v);
+        emit({ type: 'return', serial: s, to: ep.id, value: c });
+        return c;
+      } catch (e) {
+        emit({ type: 'error', serial: s, to: ep.id, error: (e && e.message) || String(e) });
+        throw e instanceof Error ? e : new Error(String(e));
+      } finally { clearTimeout(timer); }
+    };
+    ep.subscribe = function (pat, fn) {
+      live();
+      const s = { pat: String(pat), fn: fn, ep: ep };
+      subs.add(s); ep.mySubs.add(s);
+      return () => { subs.delete(s); ep.mySubs.delete(s); };
+    };
+    ep.publish = (topic, data) => { live(); publish(topic, data, ep.id); };
+    ep.close = function () {
+      if (ep.closed) return;
+      Array.from(ep.owned).forEach(n => ep.release(n));
+      ep.mySubs.forEach(s => subs.delete(s)); ep.mySubs.clear();
+      ep.closed = true; eps.delete(ep);
+    };
+    eps.add(ep);
+    return ep;
+  }
+  // プロセスが終わったら、その接続を閉じる（名前も手放す）
+  if (OS.proc) {
+    const ex = OS.proc.exit;
+    OS.proc.exit = function (pid, code) { const r = ex.apply(this, arguments); eps.forEach(ep => { if (ep.pid && ep.pid === Number(pid)) ep.close(); }); return r; };
+  }
+
+  // ---- 名前付きパイプ（FIFO）。書いたものは、いま読んで待っている全員に届く。だれも読んでいなければためておく
+  const pipes = new Map();
+  const P = q => { let p = pipes.get(q); if (!p) { p = { buf: '', waiters: [] }; pipes.set(q, p); } return p; };
+  function fifoWrite(q, c) {
+    const p = P(q); p.buf += String(c);
+    if (p.waiters.length) { const d = p.buf; p.buf = ''; p.waiters.splice(0).forEach(w => w(d)); }
+  }
+  function fifoRead(q, signal) {
+    const p = P(q);
+    if (p.buf) { const d = p.buf; p.buf = ''; return Promise.resolve(d); }
+    return new Promise(res => {
+      const w = d => res(d); p.waiters.push(w);
+      if (signal) signal.then(() => { const i = p.waiters.indexOf(w); if (i >= 0) p.waiters.splice(i, 1); res(null); });
+    });
+  }
+
+  const ipc = OS.ipc = {
+    connect: connect,
+    publish: (topic, data, from) => publish(topic, data, from),
+    match: match,
+    list: () => Array.from(names.values()).sort((a, b) => a.name.localeCompare(b.name)).map(n => ({ name: n.name, pid: n.ep.pid, user: n.ep.user, desc: n.desc, methods: methodsOf(n) })),
+    has: name => names.has(name),
+    monitor(fn) { mons.add(fn); return () => mons.delete(fn); },
+    fifoWrite: fifoWrite, fifoRead: fifoRead,
+    stats: () => ({ names: names.size, subscriptions: subs.size, connections: eps.size, messages: serial })
+  };
+
+  // ---- 組み込みの名前（PID 1 の hinit が持つ）
+  const sys = connect({ pid: 1, user: 'root' });
+  const needRoot = (ctx, what) => { if (!users.isRoot(ctx.user)) throw new Error(what + 'には root 権限が必要です（sudo ipc call …）'); };
+  const D = (doc, fn) => ({ doc: doc, fn: fn });
+  sys.own('htmlos.Bus', {
+    Ping: D('→ "pong"', () => 'pong'),
+    ListNames: D('バスにある名前の一覧', () => ipc.list().map(n => n.name)),
+    Stats: D('名前・購読・接続・メッセージの数', () => ipc.stats())
+  }, 'メッセージバスそのもの');
+  sys.own('htmlos.Notify', {
+    Notify: D('(タイトル, 本文) 通知を出す', (ctx, title, body) => { const n = OS.notify ? OS.notify({ app: ctx.user, icon: 'bell', title: String(title == null ? '' : title), body: body == null ? '' : String(body) }) : null; return n ? n.id : null; })
+  }, 'デスクトップの通知');
+  sys.own('htmlos.Sound', {
+    Play: D('(名前) 効果音を鳴らす', (ctx, name) => { if (!OS.sound.list().includes(name)) throw new Error(name + ': その音はありません（List で一覧）'); return OS.sound.play(name, true); }),
+    List: D('効果音の名前の一覧', () => OS.sound.list())
+  }, '効果音');
+  sys.own('htmlos.Init', {
+    ListUnits: D('unit と状態の一覧', () => OS.init.units().map(u => ({ name: u.name, type: u.type, active: OS.init.state(u.name).active }))),
+    Status: D('(unit) 状態', (ctx, n) => { const s = OS.init.state(n); return { active: s.active, sub: s.sub, pid: s.pid, since: s.since, result: s.result }; }),
+    Start: D('(unit) 起動する（root）', (ctx, n) => { needRoot(ctx, 'Start '); return OS.init.start(n); }),
+    Stop: D('(unit) 止める（root）', (ctx, n) => { needRoot(ctx, 'Stop '); return OS.init.stop(n); }),
+    Restart: D('(unit) 再起動する（root）', (ctx, n) => { needRoot(ctx, 'Restart '); return OS.init.restart(n); })
+  }, 'サービス管理（hinit）');
+  sys.own('htmlos.Journal', {
+    Log: D('(メッセージ, 重要度 0〜7) ログに書く', (ctx, msg, prio) => { OS.journal.log(ctx.user, String(msg), { pid: ctx.pid, prio: prio == null ? 6 : Number(prio) }); return true; }),
+    Tail: D('(件数) 新しいログ', (ctx, n) => OS.journal.entries({ n: Math.min(200, Number(n) || 10) }).map(e => OS.journal.format(e)))
+  }, 'ログ（hjournald）');
+  sys.own('htmlos.Session', {
+    Who: D('ログイン中のユーザー', () => OS.htui && OS.htui.running && OS.htui.user ? [OS.htui.user] : []),
+    Info: D('デスクトップの状態', () => ({ running: !!(OS.htui && OS.htui.running), user: (OS.htui && OS.htui.user) || null, hostname: OS.hostname ? OS.hostname() : null }))
+  }, 'ログインセッション（HTUi）');
+
+  if (OS.journal) OS.journal.log('kernel', 'メッセージバスを用意しました（名前 ' + names.size + ' 個）', { prio: 6 });
+})();
+</script>
 <script type="text/x-htmlos" data-path="/sys/jsh.js">
 /* jsh — JS + SHell。入力はJavaScriptとして実行されます。
    先頭がコマンド名で「ls -l /sys」のような形なら、シェル風に ls("-l","/sys") と解釈します。
@@ -5862,7 +6053,8 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       this.opt = opt || {};
       this.cwd = fs0.isDir(users.home(user)) ? users.home(user) : '/';
       this.hist = []; this.exited = false;
-      this.fs = OS.fsFor(() => this.user);
+      this.umask = 0o022; // 新しいファイルから外すパーミッション
+      this.fs = OS.fsFor(() => this.user, () => this.umask);
       this.help = {}; this.cmds = new Set();
       this.vars = { SHELL: '/bin/jsh', LANG: 'ja_JP.UTF-8', TERM: 'htmlos-tty', PATH: '/bin' };
       this.aliases = { ll: 'ls -l', la: 'ls -a' };
@@ -5955,6 +6147,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
           // ~/bin・/bin にある同じ名前（または 名前.jsh）のスクリプト
           const sc = this.findScript(m[1]);
           if (!sc) return null;
+          if (!this.fs.canExec(sc)) throw new Error(m[1] + ': 実行する許可がありません（' + sc + '。chmod +x で実行できるようになります）');
           segs.push({ name: 'run', rest: JSON.stringify(sc) + (m[2] ? ' ' + m[2] : '') });
           continue;
         }
@@ -6008,6 +6201,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         if (segs) result = await this.runSegs(segs);
         else if (/^(\.\.?\/|\/|~\/)\S+/.test(line) && this.fs.isFile(this.abs(splitArgs(line)[0]))) {
           const a = splitArgs(line);
+          if (!this.fs.canExec(this.abs(a[0]))) throw new Error(a[0] + ': 実行する許可がありません（chmod +x ' + a[0] + ' で実行できるようになります。run ' + a[0] + ' なら許可なしで読んで実行します）');
           result = await this.env.run(...a);
         } else {
           // JavaScript。let/const/var は次の行でも使えるようグローバル代入に読み替える
@@ -6173,7 +6367,14 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       const m = v.match(/^([\s\S]*?)([^\s'"(]*)$/);
       const head = m[1], tok = m[2];
       let cands, prefix;
-      if (!head && !tok.includes('/')) { cands = [...this.cmds].filter(n => n.startsWith(tok)).sort(); prefix = ''; }
+      // コマンドの位置: 行の先頭・| ; && || のあと・sudo（と -u ユーザー などのオプション）のあと・help / which のあと
+      const cmdPos = /(^|[|;&]\s*|\b(?:help|which|type|man)\s+)(sudo\s+(?:(?:-u\s+\S+|-\S+)\s+)*)?$/.test(head);
+      if (cmdPos && !tok.includes('/')) {
+        this.syncCommands(); // パッケージや hinit が足したコマンド（systemctl・ps など）も候補に入れる
+        const names = new Set(this.cmds);
+        for (const d of [this.home + '/bin', '/bin']) { try { this.fs.list(d).forEach(n => { if (fs0.isFile(path.join(d, n))) names.add(n.replace(/\.jsh$/i, '')); }); } catch (e) { /* なければ飛ばす */ } }
+        cands = [...names].filter(n => n.startsWith(tok)).sort(); prefix = '';
+      }
       else {
         const i = tok.lastIndexOf('/');
         prefix = i >= 0 ? tok.slice(0, i + 1) : '';
@@ -6192,7 +6393,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       const self = this, tty = this.tty, fs = this.fs, env = {};
       const def = (name, usage, desc, fn) => { env[name] = fn; self.help[name] = { usage: usage, desc: desc }; self.cmds.add(name); };
       const alias = (name, target) => { env[name] = env[target]; self.cmds.add(name); };
-      const needAdmin = () => { if (!self.admin) throw new Error('管理者権限が必要です'); };
+      const needAdmin = () => { if (!self.root) throw new Error('root 権限が必要です（sudo を付けて実行してください）'); };
       const A = p => self.abs(p);
       const flags = args => ({ f: args.filter(a => typeof a === 'string' && /^-[A-Za-z]+$/.test(a)).join(''), rest: args.filter(a => !(typeof a === 'string' && /^-[A-Za-z]+$/.test(a))) });
       const askNewPw = async () => {
@@ -6202,6 +6403,8 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       };
 
       env.OS = OS; env.fs = fs; env.tty = tty; env.args = [];
+      // メッセージバスにこのシェル（のユーザー・PID）としてつなぐ: const b = bus(); await b.call('htmlos.Bus', 'Ping')
+      env.bus = () => OS.ipc.connect({ pid: self.proc ? self.proc.pid : 0, user: () => self.user });
 
       def('help', 'help [コマンド]', 'コマンド一覧・使い方を表示', name => {
         if (name) { const x = self.help[name]; if (!x) throw new Error(name + ': そのようなコマンドはありません'); return x.usage + '\n  ' + x.desc; }
@@ -6237,19 +6440,30 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         const names = st.t === 'd' ? fs.list(p) : [path.base(p)], base = st.t === 'd' ? p : path.dir(p);
         const shown = o.f.includes('a') ? names : names.filter(n => !n.startsWith('.'));
         if (o.f.includes('l')) {
+          const PM = OS.perm, who = x => String(x.o || 'root').padEnd(8) + ' ' + String(PM.group(x)).padEnd(8);
           return shown.map(n => {
             const q = path.join(base, n), ls = fs0.lstat(q);
-            if (ls && ls.t === 'l') return 'l  ' + String(ls.o || 'root').padEnd(10) + '-'.padStart(10) + '  ' + fmtDate(ls.m) + '  ' + n + ' -> ' + ls.c;
+            if (ls && ls.t === 'l') return PM.str(ls, q) + '  ' + who(ls) + '-'.padStart(9) + '  ' + fmtDate(ls.m) + '  ' + n + ' -> ' + ls.c;
+            let rq = q; try { rq = fs0.real(q); } catch (e) { /* 壊れたリンク */ }
             const s = fs0.stat(q) || { t: 'f', c: '', m: 0 };
-            return (s.t === 'd' ? 'd' : '-') + '  ' + String(s.o || 'root').padEnd(10) + (s.t === 'd' ? '-' : fmtSize(s.c.length)).padStart(10) + '  ' + fmtDate(s.m) + '  ' + n + (s.t === 'd' ? '/' : '');
+            return PM.str(s, rq) + '  ' + who(s) + (s.t === 'd' ? '-' : s.t === 'p' ? '0' : fmtSize(s.c.length)).padStart(9) + '  ' + fmtDate(s.m) + '  ' + n + (s.t === 'd' ? '/' : s.t === 'p' ? '|' : '');
           }).join('\n');
         }
         const l = Listing.from(shown); l.base = base; return l;
       });
-      def('cat', 'cat [ファイル...]', 'ファイルの中身（JSでは文字列を返す。ファイルを省くとパイプの入力をそのまま出す）', (...a) => {
+      def('cat', 'cat [ファイル...]', 'ファイルの中身（JSでは文字列を返す。ファイルを省くとパイプの入力をそのまま出す。名前付きパイプは書かれるまで待つ）', (...a) => {
         if (!a.length) return input([]).replace(/\n$/, '');
-        return a.map(p => { const q = A(p), s = fs.stat(q); if (s && s.b) return '[バイナリ ' + fmtSize(s.c.length) + ']'; return fs.read(q); }).join('');
+        const one = p => { const q = A(p), s = fs.stat(q); if (s && s.t === 'p') { if (!fs.access(q, 'r')) fs.read(q); return fifoCat(q); } if (s && s.b) return '[バイナリ ' + fmtSize(s.c.length) + ']'; return fs.read(q); };
+        const parts = a.map(one);
+        // 名前付きパイプがあるときだけ、待ってから返す（ふつうのファイルは今までどおりすぐ文字列を返す）
+        return parts.some(x => x && typeof x.then === 'function') ? Promise.all(parts).then(l => l.join('')) : parts.join('');
       });
+      // 名前付きパイプを、だれかが書くまで待って読む（Enter か Ctrl+C でやめる）
+      const fifoCat = async q => {
+        const stop = tty.capture ? null : tty.read('');
+        try { const d = await OS.ipc.fifoRead(fs0.real(q), stop); if (d == null) throw new Error('取りやめました'); return d; }
+        finally { if (stop) tty.abort(); }
+      };
       def('write', 'write ファイル テキスト', 'ファイルに書き込む（上書き）', (p, ...t) => { fs.write(A(p), t.join(' ')); });
       def('append', 'append ファイル テキスト', 'ファイルの末尾に1行追加', (p, ...t) => { const q = A(p); fs.write(q, (fs.exists(q) ? fs.read(q) : '') + t.join(' ') + '\n'); });
       def('touch', 'touch ファイル', '空のファイルを作る', p => { const q = A(p); if (!fs.exists(q)) fs.write(q, ''); });
@@ -6257,7 +6471,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       def('rm', 'rm [-r] パス...', '削除', (...args) => { const o = flags(args); if (!o.rest.length) throw new Error('削除するパスを指定してください'); o.rest.forEach(p => fs.rm(A(p), { recursive: o.f.includes('r') })); });
       def('cp', 'cp コピー元 コピー先', 'コピー（ディレクトリも可）', (a, b) => { if (a == null || b == null) throw new Error('cp コピー元 コピー先'); fs.cp(A(a), A(b)); });
       def('mv', 'mv 移動元 移動先', '移動・名前変更', (a, b) => { if (a == null || b == null) throw new Error('mv 移動元 移動先'); fs.mv(A(a), A(b)); });
-      def('stat', 'stat パス', 'ファイル情報', p => { const q = A(p), s = fs.stat(q); if (!s) throw new Error(q + ': そのようなファイルはありません'); return { path: q, type: s.t === 'd' ? 'directory' : 'file', owner: s.o, size: s.t === 'f' ? s.c.length : undefined, binary: !!s.b, modified: fmtDate(s.m) }; });
+      def('stat', 'stat パス', 'ファイル情報（モード・所有者・グループも）', p => { const q = A(p), s = fs.stat(q); if (!s) throw new Error(q + ': そのようなファイルはありません'); const rq = fs0.real(q), PM = OS.perm; return { path: q, type: s.t === 'd' ? 'directory' : s.t === 'p' ? 'fifo' : 'file', mode: PM.oct(PM.def(rq, s)) + ' (' + PM.str(s, rq) + ')', owner: s.o || 'root', group: PM.group(s), size: s.t === 'f' ? s.c.length : undefined, binary: !!s.b, modified: fmtDate(s.m) }; });
       // grep: ファイルを省くとパイプ（|）の入力から探す。-i 大文字小文字を区別しない / -v 一致しない行 / -n 行番号 / -c 数だけ
       def('grep', 'grep [-i] [-v] [-n] [-c] パターン [ファイル...]', '一致する行を表示（ファイルを省くとパイプの入力から探す）', (...a) => {
         const g = getopts(a), pat = g.rest.shift();
@@ -6293,7 +6507,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         const t = users.get(name);
         if (!t) throw new Error(name + ': そのようなユーザーはいません');
         if (!self.root) {
-          if (!t.pw) throw new Error(name + ' のパスワードが未設定です。' + (name === 'root' ? '管理者が「passwd root」で設定してください' : ''));
+          if (!t.pw) throw new Error(name + ' のパスワードが未設定です。' + (name === 'root' ? '管理者が「sudo passwd root」で設定するか、sudo -i で root になれます' : ''));
           if (!(await users.verify(name, await tty.read('Password: ', { mask: true })))) throw new Error('認証に失敗しました');
         }
         self.stack.push({ user: self.user, cwd: self.cwd });
@@ -6312,13 +6526,13 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         await users.setPassword(t, await askNewPw());
         return t + ' のパスワードを変更しました';
       });
-      def('useradd', 'useradd ユーザー名 [admin]', 'ユーザーを追加（管理者のみ）', async (name, role) => {
+      def('useradd', 'useradd ユーザー名 [admin]', 'ユーザーを追加（root だけ。sudo useradd …）', async (name, role) => {
         needAdmin(); if (!name) throw new Error('ユーザー名を指定してください');
         if (users.get(name)) throw new Error(name + ': すでに存在するユーザーです');
         await users.add(name, await askNewPw(), role === 'admin' || role === true);
         return name + ' を追加しました';
       });
-      def('userdel', 'userdel ユーザー名', 'ユーザーとホームを削除（管理者のみ）', async name => {
+      def('userdel', 'userdel ユーザー名', 'ユーザーとホームを削除（root だけ。sudo userdel …）', async name => {
         needAdmin(); if (!name) throw new Error('ユーザー名を指定してください');
         if (name === self.user) throw new Error('ログイン中の自分は削除できません');
         if ((await tty.read(name + ' とそのホームを削除しますか? [y/N] ')).trim().toLowerCase() !== 'y') return '中止しました';
@@ -6900,11 +7114,122 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         OS.config.set('hostname', n); self.vars.HOSTNAME = n; return 'ホスト名: ' + n;
       });
       const idOf = name => { const l = users.list(), u = users.get(name); if (!u) throw new Error(name + ': そのようなユーザーはいません'); return u.root ? 0 : 1000 + l.filter(x => !x.root).findIndex(x => x.name === u.name); };
+      // グループの番号: root 0・sudo 27・ユーザーと同じ名前のグループはその uid・ほかは 3000 番台
+      const gidOf = g => { if (g === 'root') return 0; if (g === 'sudo') return 27; if (users.get(g)) return idOf(g); let h = 0; for (const c of g) h = (h * 31 + c.charCodeAt(0)) % 997; return 3000 + h; };
       def('id', 'id [ユーザー名]', 'ユーザーの ID と所属グループ', name => {
-        name = name || self.user; const u = users.get(name), uid = idOf(name);
-        const groups = [uid + '(' + name + ')'].concat(u.root ? ['0(root)'] : u.admin ? ['27(sudo)'] : []);
-        return 'uid=' + uid + '(' + name + ') gid=' + uid + '(' + name + ') groups=' + [...new Set(groups)].join(',');
+        name = name || self.user; const uid = idOf(name);
+        const groups = OS.perm.groupsOf(name).map(g => gidOf(g) + '(' + g + ')');
+        return 'uid=' + uid + '(' + name + ') gid=' + uid + '(' + name + ') groups=' + groups.join(',');
       });
+      // ---- パーミッション・sudo・IPC（5.1 から）
+      const P = OS.perm;
+      const walkR = (q, fn) => { fn(q); try { if (fs0.isDir(q) && !fs0.isLink(q)) fs.list(q).forEach(n => walkR(path.join(q, n), fn)); } catch (e) { /* 読めない所は飛ばす */ } };
+      def('chmod', 'chmod [-R] モード パス...', 'パーミッションを変える。モードは 755 のような 8 進か、u+x・go-w・a=r のような記号（所有者か root）', (...args) => {
+        const o = flags(args.map(String).map(x => /^-[rwxXst]+$/.test(x) ? '\u0000' + x : x));
+        const rest = o.rest.map(x => x.replace(/^\u0000/, ''));
+        if (rest.length < 2) throw new Error('使い方: chmod [-R] モード パス...（例: chmod +x hello.jsh / chmod 600 秘密.txt）');
+        const mode = rest[0];
+        rest.slice(1).forEach(p => { const q = A(p); (o.f.includes('R') ? f => walkR(q, f) : f => f(q))(x => fs.chmod(x, mode)); });
+      });
+      def('chown', 'chown [-R] ユーザー[:グループ] パス...', '所有者（とグループ）を変える（root だけ。sudo chown …）', (...args) => {
+        const o = flags(args); if (o.rest.length < 2) throw new Error('使い方: chown [-R] ユーザー[:グループ] パス...');
+        const [ow, gr] = String(o.rest[0]).split(':');
+        o.rest.slice(1).forEach(p => { const q = A(p); (o.f.includes('R') ? f => walkR(q, f) : f => f(q))(x => fs.chown(x, ow || null, gr || null)); });
+      });
+      def('chgrp', 'chgrp [-R] グループ パス...', 'グループを変える（そのグループに入っている所有者か root）', (...args) => {
+        const o = flags(args); if (o.rest.length < 2) throw new Error('使い方: chgrp [-R] グループ パス...');
+        o.rest.slice(1).forEach(p => { const q = A(p); (o.f.includes('R') ? f => walkR(q, f) : f => f(q))(x => fs.chown(x, null, String(o.rest[0]))); });
+      });
+      def('umask', 'umask [8 進数]', '新しく作るファイルから外すパーミッション（既定 022）', m => {
+        if (m == null) return P.oct(self.umask).slice(1);
+        if (!/^[0-7]{1,4}$/.test(String(m))) throw new Error('umask は 022 のような 8 進数で');
+        self.umask = parseInt(m, 8) & 0o777;
+      });
+      def('groups', 'groups [ユーザー名]', '所属しているグループ', name => P.groupsOf(name || self.user).join(' '));
+      def('usermod', 'usermod -aG グループ ユーザー / usermod -rG グループ ユーザー', 'ユーザーをグループに入れる・外す（root だけ）', (op, grp, name) => {
+        if (!self.root) throw new Error('usermod には root 権限が必要です（sudo usermod …）');
+        if (!/^-(a|r)G$/.test(op || '') || !grp || !name) throw new Error('使い方: usermod -aG グループ ユーザー（外すときは -rG）');
+        const u = users.get(name); if (!u) throw new Error(name + ': そのようなユーザーはいません');
+        if (!/^[a-z_][a-z0-9_-]{0,15}$/.test(grp)) throw new Error('グループ名は英小文字で始め、英小文字・数字・_ - で');
+        const g = new Set(u.groups || []); if (op === '-aG') g.add(grp); else g.delete(grp);
+        users.update(name, { groups: Array.from(g) });
+        return name + ': ' + P.groupsOf(name).join(' ');
+      });
+      def('mkfifo', 'mkfifo パス...', '名前付きパイプを作る（書き込んだ文字が、読んでいる相手に届く）', (...a) => {
+        if (!a.length) throw new Error('使い方: mkfifo パス');
+        a.forEach(p => fs.mkfifo(A(p)));
+      });
+      def('sudo', 'sudo [-u ユーザー] コマンド... / sudo -i / sudo -s / sudo -k / sudo -l', 'root（や -u のユーザー）としてコマンドを実行。自分のパスワードで認証し、5 分間は聞かない', async (...a) => {
+        let target = 'root', mode = null, i = 0;
+        for (; i < a.length; i++) {
+          const x = String(a[i]);
+          if (x === '-u') target = String(a[++i]);
+          else if (x === '-i' || x === '-s' || x === '-k' || x === '-K' || x === '-l' || x === '-v') mode = x;
+          else if (x === '--') { i++; break; }
+          else break;
+        }
+        const words = a.slice(i).map(String);
+        if (mode === '-k' || mode === '-K') { OS.sudo.forget(self.user); return; }
+        const r = OS.sudo.rule(self.user);
+        if (mode === '-l') {
+          if (self.root) return 'root は何でも実行できます';
+          if (!r.ok) return self.user + ' は sudo を使えません';
+          return self.user + ' は次のコマンドを root として実行できます:\n    ' + r.line + (OS.sudo.fresh(self.user) ? '\n（いまはパスワードなしで実行できます。残り ' + Math.ceil((OS.sudo.TIMEOUT - (Date.now() - OS.sudo.stamps[self.user])) / 60000) + ' 分）' : '');
+        }
+        if (!users.get(target)) throw new Error('sudo: ' + target + ': そのようなユーザーはいません');
+        const what = mode === '-i' || mode === '-s' ? '（シェル）' : words.join(' ');
+        if (!self.root && words.length && !OS.sudo.allows(r, words[0]) && r.ok) { OS.sudo.log(self.user + ' : ' + words[0] + ' は許可されていません', 3); throw new Error('sudo: ' + self.user + ' は ' + words[0] + ' を ' + target + ' として実行することを許可されていません'); }
+        const ok = await OS.sudo.auth(self.user, n => tty.read((n > 1 ? 'すみません、もう一度試してください。\n' : '') + '[sudo] ' + self.user + ' のパスワード: ', { mask: true }).then(v => v ? v : null), what);
+        if (!ok) throw new Error('sudo: 取りやめました');
+        if (mode === '-v') return;
+        OS.sudo.log(self.user + ' : USER=' + target + ' ; PWD=' + self.cwd + ' ; COMMAND=' + what, 6);
+        if (mode === '-i' || mode === '-s' || !words.length) {
+          self.stack.push({ user: self.user, cwd: self.cwd });
+          self.user = target; if (mode === '-i') self.cwd = users.home(target);
+          return;
+        }
+        // コマンドはそのまま呼ぶ（入力のパイプ・戻り値もそのまま）。リダイレクト（>）は sudo の外の、自分の権限で行われる
+        const prev = self.user, name = words[0];
+        self.user = target;
+        try {
+          if (self.cmds.has(name) && self.env[name]) return await self.env[name](...words.slice(1));
+          const sc = /[\/]/.test(name) ? self.abs(name) : self.findScript(name);
+          if (!sc || !fs.isFile(sc)) throw new Error('sudo: ' + name + ': コマンドが見つかりません');
+          if (!fs.canExec(sc)) throw new Error('sudo: ' + sc + ': 実行する許可がありません（chmod +x ' + sc + '）');
+          return await self.env.run(sc, ...words.slice(1));
+        } finally { self.user = prev; }
+      });
+      def('ipc', 'ipc list / call 名前 メソッド [引数...] / pub トピック [データ] / monitor [トピック] / listen トピック / introspect 名前', 'プロセス間通信（メッセージバス）を使う', async (sub, ...a) => {
+        const I = OS.ipc; if (!I) throw new Error('IPC が読み込まれていません');
+        const val = x => { try { return JSON.parse(x); } catch (e) { return x; } };
+        const ep = () => I.connect({ pid: self.proc ? self.proc.pid : 0, user: self.user });
+        const show = v => v === undefined ? '' : typeof v === 'string' ? v : JSON.stringify(v, null, 1);
+        if (!sub || sub === 'list') {
+          const l = I.list(); if (!l.length) return '（バスに名前はありません）';
+          return ['名前                       PID  ユーザー  説明'].concat(l.map(x => x.name.padEnd(26) + String(x.pid).padStart(4) + '  ' + String(x.user).padEnd(8) + '  ' + (x.desc || ''))).join('\n');
+        }
+        if (sub === 'introspect') { const x = I.list().find(n => n.name === a[0]); if (!x) throw new Error((a[0] || '') + ': その名前はバスにありません'); return x.name + '（PID ' + x.pid + '）' + (x.desc ? ' — ' + x.desc : '') + '\n' + x.methods.map(m => '  ' + m.name + (m.doc ? '  ' + m.doc : '')).join('\n'); }
+        if (sub === 'call') { if (a.length < 2) throw new Error('使い方: ipc call 名前 メソッド [引数...]'); const e = ep(); try { return show(await e.call(a[0], a[1], ...a.slice(2).map(val))); } finally { e.close(); } }
+        if (sub === 'pub') { if (!a[0]) throw new Error('使い方: ipc pub トピック [データ]'); const e = ep(); e.publish(a[0], a.length > 1 ? val(a.slice(1).join(' ')) : null); e.close(); return; }
+        if (sub === 'listen') {
+          if (!a[0]) throw new Error('使い方: ipc listen トピック（1 つ届くまで待つ）');
+          const e = ep();
+          try { return await new Promise((res, rej) => { e.subscribe(a[0], (d, m) => res(m.topic + ' ' + show(d))); if (!tty.capture) tty.read('').then(v => { if (v != null) rej(new Error('取りやめました')); }); }); } finally { e.close(); tty.abort(); }
+        }
+        if (sub === 'monitor') {
+          if (tty.capture) throw new Error('ipc monitor はパイプの中では使えません');
+          tty.println('バスを見ています' + (a[0] ? '（' + a[0] + '）' : '') + '。Enter か Ctrl+C で終了', 'dim');
+          const off = I.monitor(m => {
+            if (a[0] && !I.match(a[0], m.topic || (m.to + '.' + m.method))) return;
+            const t = new Date(m.t), hh = String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0') + ':' + String(t.getSeconds()).padStart(2, '0');
+            tty.println(hh + ' ' + (m.type === 'signal' ? 'signal  ' + m.topic + '  from=' + m.from + '  ' + show(m.data) : m.type === 'call' ? 'call    ' + m.to + '.' + m.method + '(' + m.args.map(x => JSON.stringify(x)).join(', ') + ')  from=' + m.from + ' user=' + m.user : m.type === 'return' ? 'return  #' + m.serial + '  ' + show(m.value) : 'error   #' + m.serial + '  ' + m.error), m.type === 'error' ? 'err' : m.type === 'signal' ? 'accent' : null);
+          });
+          try { await tty.read(''); } finally { off(); }
+          return;
+        }
+        throw new Error('使い方: ipc list / call / pub / monitor / listen / introspect');
+      });
+
       def('env', 'env', '環境変数の一覧', () => { const v = self.allVars(); return Object.keys(v).sort().map(k => k + '=' + v[k]).join('\n'); });
       alias('printenv', 'env');
       def('export', 'export 名前=値', '環境変数を設定（$名前 で使える）', (...a) => {
@@ -7142,6 +7467,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       const s = fs.stat(p);
       if (!s) throw new Error(p + ': そのようなファイルはありません');
       if (s.t === 'd') throw new Error(p + ': ディレクトリです');
+      if (s.t === 'p') return ''; // 名前付きパイプ（中身は OS.ipc.fifoRead で待って読む）
       return s.c;
     },
     write(p, c, opt) {
@@ -7151,7 +7477,11 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       if (!fs.isDir(d)) throw new Error(path.dir(p) + ': ディレクトリがありません');
       const old = fs._raw(q);
       if (old && old.t === 'd') throw new Error(p + ': ディレクトリです');
+      if (old && old.t === 'p') { if (OS.ipc) OS.ipc.fifoWrite(q, String(c)); return; } // 名前付きパイプ: 読んでいる相手に渡す
       const node = { t: 'f', c: String(c), m: Date.now(), o: opt.owner || (old && old.o) || 'root' };
+      // 上書きではモードとグループをそのまま残す。新しいファイルは opt.mode（なければ場所ごとの既定）
+      if (old && old.p != null) node.p = old.p; else if (!old && opt.mode != null) node.p = opt.mode & 0o7777;
+      if (old && old.g) node.g = old.g;
       if (opt.bin) node.b = 1;
       put(q, node);
     },
@@ -7160,7 +7490,16 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       if (fs.exists(p) || fs.isLink(p)) { if (fs.isDir(p) && opt.parents) return; throw new Error(p + ': すでに存在します'); }
       const d = path.dir(p);
       if (!fs.isDir(d)) { if (opt.parents) fs.mkdir(d, opt); else throw new Error(d + ': ディレクトリがありません'); }
-      put(fs._here(p), { t: 'd', m: Date.now(), o: opt.owner || 'root' });
+      const n = { t: 'd', m: Date.now(), o: opt.owner || 'root' }; if (opt.mode != null) n.p = opt.mode & 0o7777;
+      put(fs._here(p), n);
+    },
+    // 名前付きパイプ（FIFO）を作る
+    mkfifo(p, opt) {
+      opt = opt || {};
+      if (fs.lstat(p)) throw new Error(p + ': すでに存在します');
+      if (!fs.isDir(path.dir(p))) throw new Error(path.dir(p) + ': ディレクトリがありません');
+      const n = { t: 'p', m: Date.now(), o: opt.owner || 'root' }; if (opt.mode != null) n.p = opt.mode & 0o7777;
+      put(fs._here(p), n);
     },
     symlink(target, p, opt) {
       opt = opt || {};
@@ -7184,10 +7523,12 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     },
     // 変更を見る。fn(変わったパスの一覧)。戻り値の関数を呼ぶと見るのをやめる
     watch(fn) { watchers.add(fn); return () => watchers.delete(fn); },
-    _cp(a, b, owner) {
-      const s = fs._raw(a);
-      if (s.t === 'd') { put(b, { t: 'd', m: Date.now(), o: owner || s.o }); for (const n of fs.list(a)) fs._cp(a + '/' + n, b + '/' + n, owner); }
-      else put(b, Object.assign({}, s, { m: Date.now(), o: owner || s.o }));
+    // コピー。owner を指定すると（ほかの人のコピー）グループは外し、モードは umask で削る
+    _cp(a, b, owner, umask) {
+      const s = fs._raw(a), n = Object.assign({}, s, { m: Date.now(), o: owner || s.o });
+      if (owner && owner !== s.o) { delete n.g; if (n.p != null && umask != null) n.p &= ~umask & 0o7777; }
+      put(b, n);
+      if (s.t === 'd') for (const c of fs.list(a)) fs._cp(a + '/' + c, b + '/' + c, owner, umask);
     },
     dest(a, b) { return fs.isDir(b) ? path.join(b, path.base(a)) : b; },
     cp(a, b, opt) {
@@ -7195,7 +7536,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       const src = fs.real(a); b = fs._here(fs.dest(a, b));
       if (b === src || b.startsWith(src + '/')) throw new Error('自分自身の中にはコピーできません');
       if (!fs.isDir(path.dir(b))) throw new Error(path.dir(b) + ': ディレクトリがありません');
-      fs._cp(src, b, opt && opt.owner);
+      fs._cp(src, b, opt && opt.owner, opt && opt.umask);
       return b;
     },
     // 移動はリンクそのものを動かす
@@ -7488,33 +7829,214 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   // 書き出しが終わっていないうちにページを閉じようとしたら止める
   window.addEventListener('beforeunload', e => { if ([base].concat(mounts.map(m => m.s)).some(s => s.pending && s.pending())) { e.preventDefault(); e.returnValue = ''; } });
 
-  // ---------- 権限つきファイルシステム
-  //   root      : どこでも読み書きできる
-  //   管理者    : 書けるのは自分のホームと /tmp だけ。読むのは /root 以外すべて
-  //   一般ユーザー: 書けるのは自分のホームと /tmp だけ。他人のホームと /root は読めない
-  OS.fsFor = function (getUser) {
-    const me = () => users.get(getUser()) || { name: getUser() };
-    const canW = p => { const u = me(); return !!u.root || p.startsWith('/tmp/') || p.startsWith('/home/' + u.name + '/') || p.startsWith(HDD_AT + '/'); };
-    const canR = p => { const u = me(); if (u.root) return true; if (p === '/root' || p.startsWith('/root/')) return false; if (u.admin) return true; if (p === '/root' || p.startsWith('/root/')) return false; const m = p.match(/^\/home\/([^/]+)/); return !m || m[1] === u.name; };
-    // リンクを通した書き込み・読み込みも許可を確かめるため、リンクをたどった先のパスでも調べる
+  // ---------- sudo（5.1 から）。/etc/sudoers の書き方（1 行に 1 つ）:
+  //     ユーザー名 ALL=(ALL) ALL          そのユーザーは何でも root で実行できる（自分のパスワードで）
+  //     %グループ ALL=(ALL) NOPASSWD: ALL  そのグループはパスワードなしで
+  //     ユーザー名 ALL=(ALL) systemctl,ps  決めたコマンドだけ
+  //   /etc/sudoers がなければ「%sudo ALL=(ALL) ALL」（管理者は sudo グループ）。一度通ると 5 分間はパスワードを聞かない
+  const sudo = OS.sudo = {
+    TIMEOUT: 5 * 60 * 1000, stamps: {},
+    file: '/etc/sudoers',
+    lines() {
+      let t = null; try { t = fs.read(sudo.file); } catch (e) { t = null; }
+      if (t == null) t = 'root ALL=(ALL) ALL\n%sudo ALL=(ALL) ALL\n';
+      return t.split('\n').map(l => l.replace(/#.*$/, '').trim()).filter(Boolean);
+    },
+    // name が sudo できるか: { ok, nopass, cmds: ['ALL'] か コマンド名の一覧, line }
+    rule(name) {
+      const groups = OS.perm ? OS.perm.groupsOf(name) : [name];
+      for (const l of sudo.lines()) {
+        const m = /^(%?[\w.-]+)\s+\S+=\s*(?:\([^)]*\)\s*)?(NOPASSWD:\s*)?(.+)$/.exec(l); if (!m) continue;
+        const who = m[1], hit = who[0] === '%' ? groups.includes(who.slice(1)) : who === name;
+        if (!hit) continue;
+        const cmds = m[3].split(',').map(s => s.trim().split(/\s+/)[0].replace(/^.*\//, '')).filter(Boolean);
+        return { ok: true, nopass: !!m[2], cmds: cmds, line: l };
+      }
+      return { ok: false, nopass: false, cmds: [], line: null };
+    },
+    allows(r, cmd) { return r.ok && (r.cmds.includes('ALL') || r.cmds.includes(cmd)); },
+    fresh(name) { const t = sudo.stamps[name]; return !!t && Date.now() - t < sudo.TIMEOUT; },
+    forget(name) { delete sudo.stamps[name]; },
+    log(msg, prio) { if (OS.journal) OS.journal.log('sudo', msg, { prio: prio == null ? 5 : prio }); },
+    // 認証。ask(回数) は自分のパスワードを返す（キャンセルは null）。3 回まで
+    async auth(name, ask, what) {
+      const u = users.get(name);
+      if (u && u.root) return true;
+      const r = sudo.rule(name);
+      if (!r.ok) { sudo.log(name + ' : sudoers に入っていません ; COMMAND=' + (what || ''), 3); throw new Error(name + ' は sudoers ファイルに入っていません。この出来事は記録されます'); }
+      if (r.nopass || sudo.fresh(name)) { sudo.stamps[name] = Date.now(); return true; }
+      if (!u || !u.pw) throw new Error(name + ' にパスワードがないので sudo を使えません（passwd で設定してください）');
+      for (let i = 1; i <= 3; i++) {
+        const pw = await ask(i);
+        if (pw == null) return false;
+        if (await users.verify(name, pw)) { sudo.stamps[name] = Date.now(); return true; }
+        sudo.log(name + ' : パスワードが違います（' + i + ' 回目）', 4);
+      }
+      sudo.log(name + ' : 3 回パスワードを間違えました ; COMMAND=' + (what || ''), 3);
+      throw new Error('sudo: 3 回パスワードを間違えました');
+    }
+  };
+
+  // ---------- パーミッション（5.1 から。UNIX と同じ rwx）
+  //   ノードの p = モード（数。例 0o644）、o = 所有者、g = グループ。p や g がない古いノードは、場所から既定を決める:
+  //     /root と /home/ユーザー は 700、/tmp は 1777（だれでも作れるが、消せるのは自分のものだけ）、/mnt/hdd1 は 777、
+  //     /etc/passwd は 600、/etc/sudoers は 440、
+  //     ほかのディレクトリは 755、ファイルは 644、シンボリックリンクは 777
+  //   グループ: ユーザー名と同じグループ・管理者は sudo・root は root、それに /etc/passwd の groups
+  //   root はモードに関係なく読み書きできる（実行は x がどれかに付いているとき）
+  const perm = OS.perm = {
+    def(q, n) {
+      if (n && n.p != null) return n.p;
+      if (n && n.t === 'l') return 0o777;
+      if (q === '/tmp') return 0o1777;
+      if (q === '/etc/passwd') return 0o600;   // パスワードのハッシュが入っているので root だけ
+      if (q === '/etc/sudoers') return 0o440;
+      if (q === '/root' || /^\/home\/[^/]+$/.test(q)) return 0o700;
+      if (q === HDD_AT || q.startsWith(HDD_AT + '/')) return n && n.t === 'd' ? 0o777 : 0o666;
+      return n && n.t === 'd' ? 0o755 : 0o644;
+    },
+    group(n) { return (n && (n.g || n.o)) || 'root'; },
+    groupsOf(name) {
+      const u = users.get(name); if (!u) return [name];
+      const g = [name].concat(u.root ? ['root'] : [], u.admin ? ['sudo'] : [], Array.isArray(u.groups) ? u.groups : []);
+      return Array.from(new Set(g));
+    },
+    // 実際のパス q のノード n に、ユーザー name が bit（4 読む・2 書く・1 実行/中に入る）を持つか
+    has(name, q, n, bit) {
+      if (!n) return false;
+      const u = users.get(name), mode = perm.def(q, n);
+      if (u && u.root) return bit !== 1 || n.t === 'd' || (mode & 0o111) !== 0;
+      const sh = n.o === name ? 6 : perm.groupsOf(name).includes(perm.group(n)) ? 3 : 0;
+      return ((mode >> sh) & bit) === bit;
+    },
+    // 実際のパス q の親ディレクトリを、上から順に「中に入れる（x）」か
+    traverse(name, q) {
+      const parts = q.split('/').filter(Boolean); let cur = '';
+      for (let i = 0; i < parts.length - 1; i++) { cur += '/' + parts[i]; const n = fs._raw(cur); if (n && n.t === 'd' && !perm.has(name, cur, n, 1)) return cur; }
+      if (parts.length && !perm.has(name, '/', fs._raw('/') || { t: 'd', o: 'root' }, 1)) return '/';
+      return null;
+    },
+    // ls -l の "drwxr-xr-x"
+    str(n, q) {
+      const m = perm.def(q, n), t = n.t === 'd' ? 'd' : n.t === 'l' ? 'l' : n.t === 'p' ? 'p' : '-';
+      const r = (v, s, x) => (v & 4 ? 'r' : '-') + (v & 2 ? 'w' : '-') + (s ? (v & 1 ? x : x.toUpperCase()) : (v & 1 ? 'x' : '-'));
+      return t + r(m >> 6, m & 0o4000, 's') + r(m >> 3, m & 0o2000, 's') + r(m, m & 0o1000, 't');
+    },
+    oct: m => (m & 0o7777).toString(8).padStart(4, '0'),
+    // chmod のモード: 8 進（755）か記号（u+x、go-w、a=r、+x、u+rwx,g+rx）
+    parse(spec, cur, isDir) {
+      if (/^[0-7]{1,4}$/.test(spec)) return parseInt(spec, 8);
+      let m = cur;
+      String(spec).split(',').forEach(part => {
+        const x = /^([ugoa]*)([+\-=])([rwxXst]*)$/.exec(part);
+        if (!x) throw new Error(spec + ': モードの書き方が正しくありません（例: 755、u+x、go-w、a=r）');
+        const who = x[1] || 'a', all = who.includes('a');
+        let bits = 0;
+        for (const c of x[3]) {
+          const v = c === 'r' ? 4 : c === 'w' ? 2 : c === 'x' ? 1 : c === 'X' ? (isDir || (cur & 0o111) ? 1 : 0) : 0;
+          if (all || who.includes('u')) bits |= v << 6;
+          if (all || who.includes('g')) bits |= v << 3;
+          if (all || who.includes('o')) bits |= v;
+          if (c === 's') { if (all || who.includes('u')) bits |= 0o4000; if (all || who.includes('g')) bits |= 0o2000; }
+          if (c === 't') bits |= 0o1000;
+        }
+        if (x[2] === '+') m |= bits;
+        else if (x[2] === '-') m &= ~bits;
+        else { let mask = 0; if (all || who.includes('u')) mask |= 0o4700; if (all || who.includes('g')) mask |= 0o2070; if (all || who.includes('o')) mask |= 0o1007; m = (m & ~mask) | bits; }
+      });
+      return m & 0o7777;
+    }
+  };
+  // root の FS でのモード・所有者の変更（権限の確認は fsFor で）
+  fs.chmod = function (p, mode) {
+    const q = fs.real(p), n = fs._raw(q); if (!n) throw new Error(p + ': そのようなファイルはありません');
+    put(q, Object.assign({}, n, { p: mode & 0o7777 })); changed(q);
+  };
+  fs.chown = function (p, owner, group) {
+    const q = fs.real(p), n = fs._raw(q); if (!n) throw new Error(p + ': そのようなファイルはありません');
+    const o = Object.assign({}, n); if (owner) o.o = owner; if (group) o.g = group;
+    put(q, o); changed(q);
+  };
+
+  // ---------- 権限つきファイルシステム（ユーザー getUser() として操作する）
+  //   読む: 親をたどる x と、そのものの r。書く: そのものの w（新しく作るときは親の w と x）。
+  //   消す・移す: 親の w と x（親に t（スティッキー）があれば、自分のものか親の所有者のときだけ）
+  //   umask: 新しく作るときに外すビット（既定 022）。getUmask で渡す
+  OS.fsFor = function (getUser, getUmask) {
+    const who = () => getUser();
+    const um = () => { const v = getUmask ? getUmask() : 0o022; return typeof v === 'number' ? v : 0o022; };
     const realOf = p => { try { return fs.real(p); } catch (e) { return p; } };
     const hereOf = p => { try { return fs._here(p); } catch (e) { return p; } };
-    const deny = (p, w) => { throw new Error(p + (w ? ': 許可がありません（root 権限が必要です）' : ': 許可がありません')); };
-    const W = p => { if (!canW(p) || !canW(realOf(p))) deny(p, true); return p; };
-    const WL = p => { if (!canW(p) || !canW(hereOf(p))) deny(p, true); return p; };
-    const R = p => { if (!canR(p) || !canR(realOf(p))) deny(p); return p; };
-    const ok = p => canR(p) && canR(realOf(p));
+    const deny = (p, what) => { const e = new Error(p + ': 許可がありません' + (what ? '（' + what + '）' : '')); e.code = 'EACCES'; throw e; };
+    const trav = (p, q) => { const bad = perm.traverse(who(), q); if (bad) deny(p, bad + ' の中に入る許可（x）がありません'); };
+    const R = p => { const q = realOf(p); trav(p, q); const n = fs._raw(q); if (n && !perm.has(who(), q, n, 4)) deny(p, '読む許可（r）がありません'); return p; };
+    const T = p => { trav(p, realOf(p)); return p; };
+    // 親ディレクトリに作る・消す許可
+    const parentW = (p, q) => {
+      const d = path.dir(q), dn = fs._raw(d);
+      trav(p, q);
+      if (dn && !perm.has(who(), d, dn, 3)) deny(p, d + ' に書き込む許可（w）がありません');
+    };
+    const W = p => {
+      const q = realOf(p), n = fs._raw(q);
+      if (n) { trav(p, q); if (!perm.has(who(), q, n, 2)) deny(p, '書き込む許可（w）がありません'); }
+      else parentW(p, q);
+      return p;
+    };
+    const C = p => { parentW(p, hereOf(p)); return p; }; // 作る
+    const sticky = (p, q) => {
+      const d = path.dir(q), dn = fs._raw(d), n = fs._raw(q), u = users.get(who());
+      if (u && u.root) return;
+      if (dn && (perm.def(d, dn) & 0o1000) && n && n.o !== who() && dn.o !== who()) deny(p, d + ' はスティッキーなので、ほかのユーザーのものは消せません');
+    };
+    const D = (p, recursive) => { // 消す
+      const q = hereOf(p); parentW(p, q); sticky(p, q);
+      const n = fs._raw(q);
+      if (recursive && n && n.t === 'd') {
+        const walk = d => { const dn = fs._raw(d); if (!perm.has(who(), d, dn, 7)) deny(p, d + ' の中を消す許可がありません'); fs.list(d).forEach(c => { const cq = d + '/' + c, cn = fs._raw(cq); if (cn && cn.t === 'd') walk(cq); }); };
+        walk(q);
+      }
+      return p;
+    };
+    const ok = p => { try { T(p); return true; } catch (e) { return false; } };
+    const canR = p => { try { R(p); return true; } catch (e) { return false; } };
+    const canW = p => { try { W(p); return true; } catch (e) { return false; } };
+    const newMode = (isDir) => (isDir ? 0o777 : 0o666) & ~um();
+    const isRoot = () => { const u = users.get(who()); return !!(u && u.root); };
     return {
-      stat: p => fs.stat(R(p)), lstat: p => fs.lstat(R(p)), exists: p => ok(p) && fs.exists(p), isDir: p => ok(p) && fs.isDir(p), isFile: p => ok(p) && fs.isFile(p),
-      isLink: p => canR(p) && fs.isLink(p), readlink: p => fs.readlink(R(p)), real: fs.real,
+      stat: p => fs.stat(T(p)), lstat: p => fs.lstat(T(p)), exists: p => ok(p) && fs.exists(p), isDir: p => ok(p) && fs.isDir(p), isFile: p => ok(p) && fs.isFile(p),
+      isLink: p => ok(p) && fs.isLink(p), readlink: p => fs.readlink(T(p)), real: fs.real,
       list: p => fs.list(R(p)), read: p => fs.read(R(p)),
-      write: (p, c, o) => fs.write(W(p), c, Object.assign({}, o, { owner: getUser() })),
-      mkdir: (p, o) => fs.mkdir(WL(p), Object.assign({}, o, { owner: getUser() })),
-      symlink: (t, p) => fs.symlink(t, WL(p), { owner: getUser() }),
-      rm: (p, o) => fs.rm(WL(p), o),
-      cp: (a, b) => { R(a); WL(fs.dest(a, b)); return fs.cp(a, b, { owner: getUser() }); },
-      mv: (a, b) => { WL(a); WL(fs.dest(a, b)); return fs.mv(a, b); },
-      usage: fs.usage, kind: fs.kind, mime: fs.mime, dataURL: p => fs.dataURL(R(p)), unique: fs.unique, canWrite: canW, watch: fs.watch
+      write: (p, c, o) => { W(p); const q = realOf(p), old = fs._raw(q); return fs.write(p, c, Object.assign({}, o, old ? {} : { owner: who(), mode: newMode(false) })); },
+      mkdir: (p, o) => {
+        o = Object.assign({}, o);
+        if (o.parents) { const parts = path.norm(p).split('/').filter(Boolean); let cur = ''; for (const x of parts) { cur += '/' + x; if (!fs.exists(cur)) { C(cur); fs.mkdir(cur, { owner: who(), mode: newMode(true) }); } } return; }
+        C(p); return fs.mkdir(p, Object.assign(o, { owner: who(), mode: newMode(true) }));
+      },
+      symlink: (t, p) => { C(p); return fs.symlink(t, p, { owner: who() }); },
+      mkfifo: p => { C(p); return fs.mkfifo(p, { owner: who(), mode: newMode(false) }); },
+      rm: (p, o) => { D(p, o && o.recursive); return fs.rm(p, o); },
+      cp: (a, b) => { R(a); C(fs.dest(a, b)); return fs.cp(a, b, { owner: who(), umask: um() }); },
+      mv: (a, b) => { D(a, false); C(fs.dest(a, b)); return fs.mv(a, b); },
+      chmod: (p, mode) => {
+        const q = realOf(p), n = fs._raw(q); T(p);
+        if (!n) throw new Error(p + ': そのようなファイルはありません');
+        if (!isRoot() && n.o !== who()) deny(p, 'モードを変えられるのは所有者か root だけです');
+        fs.chmod(p, typeof mode === 'number' ? mode : perm.parse(mode, perm.def(q, n), n.t === 'd'));
+      },
+      chown: (p, owner, group) => {
+        const q = realOf(p), n = fs._raw(q); T(p);
+        if (!n) throw new Error(p + ': そのようなファイルはありません');
+        if (owner && owner !== n.o && !isRoot()) deny(p, '所有者を変えられるのは root だけです（sudo chown）');
+        if (group && !isRoot() && (n.o !== who() || !perm.groupsOf(who()).includes(group))) deny(p, 'グループを変えられるのは、そのグループに入っている所有者か root だけです');
+        if (owner && !users.get(owner)) throw new Error(owner + ': そのようなユーザーはいません');
+        fs.chown(p, owner, group);
+      },
+      // 実行してよいか（スクリプト）。モードを付けていない古いファイルは読めれば実行できる
+      canExec: p => { const q = realOf(p), n = fs._raw(q); if (!n || !canR(p)) return false; if (n.p == null) return true; return perm.has(who(), q, n, 1); },
+      access: (p, m) => { try { if (/r/.test(m)) R(p); if (/w/.test(m)) W(p); return true; } catch (e) { return false; } },
+      usage: fs.usage, kind: fs.kind, mime: fs.mime, dataURL: p => fs.dataURL(R(p)), unique: fs.unique, canWrite: canW, canRead: canR, watch: fs.watch,
+      user: who
     };
   };
 
@@ -7650,6 +8172,8 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       else if (e.ctrlKey && e.key.toLowerCase() === 'l') { e.preventDefault(); this.clear(); }
       else if (e.ctrlKey && e.key.toLowerCase() === 'c' && this.input.selectionStart === this.input.selectionEnd) { e.preventDefault(); this._cancel(); }
     }
+    // 待っている read を、何も表示せずに取りやめる（null を返す）
+    abort() { const p = this.pending; if (!p) return; this.pending = null; this.line.style.display = 'none'; p.res(null); }
     dispose() { if (this._screen) this._screen.close(); this.pending = null; if (this._ro) this._ro.disconnect(); this.el.remove(); }
   }
   OS.Tty = Tty;
@@ -7767,6 +8291,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       try { for (const w of OS.htui.wins.slice()) { if ((await w.close()) === false) return; } } finally { OS.shuttingDown = false; }
     }
     OS._down = true;
+    if (OS.ipc) { try { OS.ipc.publish(reboot ? 'power.reboot' : 'power.shutdown', null, 'hinit'); } catch (e) { /* 無視 */ } }
     OS.sound.play(reboot ? 'reboot' : 'shutdown');
     if (flag) store.set('bootflag', flag);
     const t0 = Date.now(), tty = OS.tty1, label = reboot ? '再起動しています…' : 'シャットダウンしています…';
@@ -7891,7 +8416,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     if (OS.imode) apps = apps.filter(n => I_APPS.includes(n));
     const pkgs = OS.safe || OS.imode ? [] : OS.pkg.list();
     try { OS.build = (JSON.parse(store.get('meta')) || {}).build || BOOT.build || '?'; } catch (e) { OS.build = BOOT.build || '?'; }
-    const core = ['/sys/init.js', '/sys/cursor.js', '/sys/jsh.js', '/sys/htui.js', '/sys/hdm.js', '/sys/shells.js'];
+    const core = ['/sys/init.js', '/sys/ipc.js', '/sys/cursor.js', '/sys/jsh.js', '/sys/htui.js', '/sys/hdm.js', '/sys/shells.js'];
     const total = 2 + core.length + apps.length + pkgs.length; let done = 0;
     const step = async (s, failed) => {
       if (OS.klog) OS.klog(s, failed ? 3 : 6); else (OS._klog = OS._klog || []).push({ t: Date.now(), msg: s, prio: failed ? 3 : 6 });
@@ -10841,7 +11366,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 (function () {
   'use strict';
   // コードネーム: htmlOS は恒星の名前（3.2 = Sirius、4.0 = Vega）、描画エンジン HTUi SDK は惑星の名前（2 = Jupiter、3.0 = Venus）
-  var MEDIA_VERSION = '5.0.0', MEDIA_BUILD = '35', MEDIA_CODENAME = 'Altair';
+  var MEDIA_VERSION = '5.1.0', MEDIA_BUILD = '36', MEDIA_CODENAME = 'Altair';
   var BOOT = window.BOOT = {};
   var P = 'htmlos:';
 
@@ -10952,28 +11477,30 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   HDD.open = async function (root, prefix, progress) {
     prefix = prefix || '';
     // sizes: パスごとの大きさ（バイト）。used はその合計。meta.q が上限（バイト。0 なら上限なし）
-    var map = new Map(), dirty = new Set(), meta = { keys: {}, o: {}, l: {}, q: 0 }, lastMeta = '', busy = null, count = 0, sizes = new Map(), used = 0;
+    var map = new Map(), dirty = new Set(), meta = { keys: {}, o: {}, l: {}, p: {}, g: {}, f: {}, q: 0 }, lastMeta = '', busy = null, count = 0, sizes = new Map(), used = 0;
     var K = function (rel) { return 'f:' + ((prefix + rel) || '/'); };
     function relOf(k) {
       var p = k.slice(2);
       if (prefix) return p === prefix ? '' : p.indexOf(prefix + '/') === 0 ? p.slice(prefix.length) : null;
       return p === '/' ? '' : p;
     }
-    try { var mj = JSON.parse(await (await (await root.getFileHandle(HDD_META)).getFile()).text()); ['keys', 'o', 'l'].forEach(function (k) { if (mj[k] && typeof mj[k] === 'object') meta[k] = mj[k]; }); meta.q = Number(mj.q) > 0 ? Number(mj.q) : 0; lastMeta = JSON.stringify(meta); }
+    try { var mj = JSON.parse(await (await (await root.getFileHandle(HDD_META)).getFile()).text()); ['keys', 'o', 'l', 'p', 'g', 'f'].forEach(function (k) { if (mj[k] && typeof mj[k] === 'object') meta[k] = mj[k]; }); meta.q = Number(mj.q) > 0 ? Number(mj.q) : 0; lastMeta = JSON.stringify(meta); }
     catch (e) { /* まだない */ }
     var st = { ram: false, disk: true, handle: root, name: root.name, skipped: [], errors: [], onerror: null };
-    map.set(K(''), JSON.stringify({ t: 'd', m: Date.now(), o: meta.o[''] || 'root' }));
+    // パーミッション（5.1）: モードとグループは .htmlos.json に覚えておく
+    function ext(node, r) { if (meta.p[r] != null) node.p = meta.p[r]; if (meta.g[r]) node.g = meta.g[r]; return node; }
+    map.set(K(''), JSON.stringify(ext({ t: 'd', m: Date.now(), o: meta.o[''] || 'root' }, '')));
     async function walk(dh, rel) {
       for await (var e of dh.values()) {
         var r = rel + '/' + e.name;
         if (!rel && e.name === HDD_META) continue;
-        if (e.kind === 'directory') { map.set(K(r), JSON.stringify({ t: 'd', m: Date.now(), o: meta.o[r] || 'root' })); await walk(e, r); continue; }
+        if (e.kind === 'directory') { map.set(K(r), JSON.stringify(ext({ t: 'd', m: Date.now(), o: meta.o[r] || 'root' }, r))); await walk(e, r); continue; }
         var f = await e.getFile();
         if (f.size > HDD_MAX) { st.skipped.push(r); continue; }
         var u = new Uint8Array(await f.arrayBuffer()), ext = e.name.lastIndexOf('.') > 0 ? e.name.slice(e.name.lastIndexOf('.') + 1).toLowerCase() : '', node = null;
         if (!HDD_BIN.test(ext)) { try { var t = new TextDecoder('utf-8', { fatal: true }).decode(u); if (t.indexOf('\u0000') < 0) node = { t: 'f', c: t }; } catch (e2) { /* バイナリ */ } }
         if (!node) node = { t: 'f', c: 'data:' + (HDD_MIME[ext] || 'application/octet-stream') + ';base64,' + b64(u), b: 1 };
-        node.m = f.lastModified || Date.now(); node.o = meta.o[r] || 'root';
+        node.m = f.lastModified || Date.now(); node.o = meta.o[r] || 'root'; ext(node, r);
         map.set(K(r), JSON.stringify(node)); sizes.set(r, u.length); used += u.length;
         if (++count % 40 === 0 && progress) progress(count, r);
       }
@@ -10982,8 +11509,14 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     // シンボリックリンクは PC のフォルダには作らず、.htmlos.json に覚えておく
     Object.keys(meta.l).forEach(function (r) {
       var parent = r.slice(0, r.lastIndexOf('/'));
-      if (!map.has(K(r)) && map.has(K(parent))) map.set(K(r), JSON.stringify({ t: 'l', c: meta.l[r], m: Date.now(), o: meta.o[r] || 'root' }));
+      if (!map.has(K(r)) && map.has(K(parent))) map.set(K(r), JSON.stringify(ext({ t: 'l', c: meta.l[r], m: Date.now(), o: meta.o[r] || 'root' }, r)));
       else delete meta.l[r];
+    });
+    // 名前付きパイプも PC のフォルダには作らない
+    Object.keys(meta.f).forEach(function (r) {
+      var parent = r.slice(0, r.lastIndexOf('/'));
+      if (!map.has(K(r)) && map.has(K(parent))) map.set(K(r), JSON.stringify(ext({ t: 'p', m: Date.now(), o: meta.o[r] || 'root' }, r)));
+      else delete meta.f[r];
     });
     if (progress) progress(count, '');
     function report(what, e) {
@@ -11004,7 +11537,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       if (n.t === 'd') {
         try { await dh.getDirectoryHandle(name, { create: true }); }
         catch (e) { if (e.name !== 'TypeMismatchError') throw e; await dh.removeEntry(name); await dh.getDirectoryHandle(name, { create: true }); }
-      } else if (n.t === 'l') {
+      } else if (n.t === 'l' || n.t === 'p') {
         try { await dh.removeEntry(name, { recursive: true }); } catch (e) { /* もともと無い */ }
       } else await hddWrite(dh, name, n.b ? unData(n.c) : n.c);
     }
@@ -11033,6 +11566,9 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     function track(rel, node) {
       if (node && node.o && node.o !== 'root') meta.o[rel] = node.o; else delete meta.o[rel];
       if (node && node.t === 'l') meta.l[rel] = node.c; else delete meta.l[rel];
+      if (node && node.t === 'p') meta.f[rel] = 1; else delete meta.f[rel];
+      if (node && node.p != null) meta.p[rel] = node.p; else delete meta.p[rel];
+      if (node && node.g) meta.g[rel] = node.g; else delete meta.g[rel];
     }
     st.get = function (k) {
       if (k.indexOf('f:') !== 0) return Object.prototype.hasOwnProperty.call(meta.keys, k) ? meta.keys[k] : null;

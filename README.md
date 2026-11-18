@@ -4,6 +4,27 @@
 
 **▶ 使ってみる: GitHub Pages で公開中**（このリポジトリの Pages の URL を開くと htmlOS i が起動し、「htmlOSを試す」か「インストール」を選べます）
 
+## htmlOS 5.1 Altair の新しいところ
+
+- **ファイルのパーミッション**（UNIX と同じ rwx）: ファイルとディレクトリに所有者・グループ・モードがあり、読む（r）・書く（w）・実行/中に入る（x）を確かめます
+  - `ls -l` に `-rw-r--r--  yu  yu` のように表示。`stat` にもモード
+  - **chmod** `[-R] 755 / u+x / go-w / a=r / +t`、**chown** `[-R] ユーザー[:グループ]`（root だけ）、**chgrp**、**umask**（既定 022）、**groups**、**usermod -aG / -rG**
+  - 既定: `/home/ユーザー` と `/root` は 700、`/tmp` は 1777（スティッキー。ほかの人のファイルは消せない）、`/etc/passwd` は 600
+  - 新しく作ったスクリプトは `chmod +x` しないと `./hello.jsh` で実行できません（`run hello.jsh` は読めれば実行できます）。5.0 までに作ったファイルは今までどおり動きます
+  - HDD1（PC のフォルダ）でもモードとグループは `.htmlos.json` に覚えておきます
+- **root と sudo**: 管理者（sudo グループ）は `sudo コマンド` を**自分のパスワード**で root として実行でき、5 分間はパスワードを聞きません
+  - `sudo -i` / `sudo -s`（root のシェル）、`sudo -u ユーザー`、`sudo -l`、`sudo -k`。記録は `hjournal -u sudo`
+  - `/etc/sudoers`（なければ `%sudo ALL=(ALL) ALL`）で `NOPASSWD:` や、使えるコマンドの限定ができます
+  - サービスの操作（`sudo systemctl stop …`）・ユーザーの追加（`sudo useradd`）・ほかのユーザーのプロセスの kill は root だけになりました
+  - HTUi で root 権限が要るとき（hedit で /sys に保存など）も、管理者は自分のパスワードで通れます
+- **IPC（プロセス間通信）**（`/sys/ipc.js`、D-Bus にあたる）
+  - **メッセージバス**: 名前（`htmlos.Notify` `htmlos.Sound` `htmlos.Init` `htmlos.Journal` `htmlos.Session` `htmlos.Bus`）のメソッドを呼ぶ・トピックに信号を流す
+  - **ipc** `list` / `introspect 名前` / `call 名前 メソッド 引数…` / `pub トピック データ` / `listen トピック` / `monitor [トピック]`
+  - 流れる信号: `unit.changed`（サービスの状態）・`session.login` `session.logout`・`notify`・`power.shutdown` `power.reboot`・`bus.name`
+  - jsh の JavaScript から: `const b = bus(); b.own('my.Hello', { Hi(ctx, n) { return 'やあ ' + n; } }); await b.call('my.Hello', 'Hi', '悠'); b.subscribe('unit.*', d => echo(d.unit))`
+  - **名前付きパイプ**: `mkfifo /tmp/p` → `cat /tmp/p` で待ち、ほかのシェルから `echo hi > /tmp/p`
+- **Tab 補完**: systemctl・ps・hjournal など、あとから登録されたコマンドと `~/bin` `/bin` のスクリプトも、ターミナルを開いた直後から補完できるようにしました。`sudo` や `|` のあとでもコマンド名を補完します
+
 ## htmlOS 5.0 Altair の新しいところ
 
 ブラウザーはキーボード・画面・マウスとストレージを渡すだけの「脊髄」と考え、OS の仕組みを htmlOS の中に持つための土台です。

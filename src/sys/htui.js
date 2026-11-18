@@ -192,6 +192,7 @@
   };
   // ログイン画面（hdm）へ
   function toLogin() {
+    if (htui.user && OS.ipc) { try { OS.ipc.publish('session.logout', { user: htui.user }, 'htui'); } catch (e) { /* 無視 */ } }
     clearShell();
     htui.user = null; htui.fs = null; htui.prefs = {};
     OS.setMode('auto');
@@ -240,6 +241,7 @@
   function session(user, sid) {
     clearShell();
     htui.user = user;
+    if (OS.ipc) { try { OS.ipc.publish('session.login', { user: user }, 'htui'); } catch (e) { /* 無視 */ } }
     htui.fs = OS.fsFor(() => htui.user);
     const sh = OS.sessions[sid] || OS.sessions[OS.hdm.sessionFor(user)] || OS.sessions.htui;
     htui.shell = sh; htui.sessionId = sh.id;
@@ -335,6 +337,7 @@
     n = typeof n === 'string' ? { title: n } : Object.assign({}, n);
     n.id = ++noticeSeq; n.time = Date.now(); n.unread = !n.silent;
     if (OS.journal) OS.journal.log('notifyd', (n.app ? n.app + ': ' : '') + n.title + (n.body ? ' — ' + n.body : ''), { prio: 6 });
+    if (OS.ipc) { try { OS.ipc.publish('notify', { app: n.app || null, title: String(n.title == null ? '' : n.title), body: n.body == null ? '' : String(n.body) }, 'notifyd'); } catch (e) { /* 無視 */ } }
     if (!htui.running || !htui.user) return n;
     htui.notices.unshift(n); htui.notices.length = Math.min(htui.notices.length, 50);
     if (OS.init && OS.init.has('notifyd.service') && !OS.init.isActive('notifyd.service')) return n; // 通知のサービスが止まっている: ため込むだけで出さない
@@ -1298,11 +1301,24 @@
     const inp = h('input', { class: 'inp', type: o && o.password ? 'password' : 'text', id: 'dlg-input', value: def || '', 'aria-label': msg });
     return ui.modal({ title: (o && o.title) || '入力', body: [h('p', { class: 'modal-msg' }, msg), inp], buttons: [{ label: 'キャンセル', cancel: true, value: null }, { label: 'OK', primary: true, value: () => inp.value }] });
   };
-  // root 権限が必要な操作の前に呼ぶ。root のパスワードを確認できたら true
+  // root 権限が必要な操作の前に呼ぶ。sudo できるユーザーは自分のパスワード（5 分間は聞かない）、ほかは root のパスワードを確認できたら true
   ui.asRoot = async function (reason) {
     if (users.isRoot(htui.user)) return true;
+    if (OS.sudo && OS.sudo.rule(htui.user).ok) {
+      const me = users.get(htui.user);
+      if (me && me.pw) {
+        try {
+          const ok = await OS.sudo.auth(htui.user, async n => {
+            const v = await ui.prompt((n > 1 ? 'パスワードが違います。もう一度入力してください。\n' : '') + (reason ? reason + '\n' : '') + 'この操作には root 権限が必要です。' + htui.user + ' のパスワードを入力してください（sudo）。', '', { password: true, title: 'root 権限が必要です' });
+            return v == null ? null : v;
+          }, reason || '（HTUi）');
+          if (ok) OS.sudo.log(htui.user + ' : HTUi から root 権限 ; ' + (reason || ''), 6);
+          return !!ok;
+        } catch (e) { await ui.alert(e.message, 'root 権限が必要です'); return false; }
+      }
+    }
     const r = users.get('root');
-    if (!r || !r.pw) { await ui.alert('root のパスワードがまだ設定されていません。\n管理者が Terminal で「passwd root」を実行して設定してください。', 'root 権限が必要です'); return false; }
+    if (!r || !r.pw) { await ui.alert('root のパスワードがまだ設定されていません。\n管理者が Terminal で「sudo passwd root」を実行して設定してください。', 'root 権限が必要です'); return false; }
     const pw = await ui.prompt((reason ? reason + '\n' : '') + 'この操作には root 権限が必要です。root のパスワードを入力してください。', '', { password: true, title: 'root 権限が必要です' });
     if (pw == null) return false;
     if (await users.verify('root', pw)) return true;

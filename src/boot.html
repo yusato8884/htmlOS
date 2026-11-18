@@ -198,28 +198,30 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   HDD.open = async function (root, prefix, progress) {
     prefix = prefix || '';
     // sizes: パスごとの大きさ（バイト）。used はその合計。meta.q が上限（バイト。0 なら上限なし）
-    var map = new Map(), dirty = new Set(), meta = { keys: {}, o: {}, l: {}, q: 0 }, lastMeta = '', busy = null, count = 0, sizes = new Map(), used = 0;
+    var map = new Map(), dirty = new Set(), meta = { keys: {}, o: {}, l: {}, p: {}, g: {}, f: {}, q: 0 }, lastMeta = '', busy = null, count = 0, sizes = new Map(), used = 0;
     var K = function (rel) { return 'f:' + ((prefix + rel) || '/'); };
     function relOf(k) {
       var p = k.slice(2);
       if (prefix) return p === prefix ? '' : p.indexOf(prefix + '/') === 0 ? p.slice(prefix.length) : null;
       return p === '/' ? '' : p;
     }
-    try { var mj = JSON.parse(await (await (await root.getFileHandle(HDD_META)).getFile()).text()); ['keys', 'o', 'l'].forEach(function (k) { if (mj[k] && typeof mj[k] === 'object') meta[k] = mj[k]; }); meta.q = Number(mj.q) > 0 ? Number(mj.q) : 0; lastMeta = JSON.stringify(meta); }
+    try { var mj = JSON.parse(await (await (await root.getFileHandle(HDD_META)).getFile()).text()); ['keys', 'o', 'l', 'p', 'g', 'f'].forEach(function (k) { if (mj[k] && typeof mj[k] === 'object') meta[k] = mj[k]; }); meta.q = Number(mj.q) > 0 ? Number(mj.q) : 0; lastMeta = JSON.stringify(meta); }
     catch (e) { /* まだない */ }
     var st = { ram: false, disk: true, handle: root, name: root.name, skipped: [], errors: [], onerror: null };
-    map.set(K(''), JSON.stringify({ t: 'd', m: Date.now(), o: meta.o[''] || 'root' }));
+    // パーミッション（5.1）: モードとグループは .htmlos.json に覚えておく
+    function ext(node, r) { if (meta.p[r] != null) node.p = meta.p[r]; if (meta.g[r]) node.g = meta.g[r]; return node; }
+    map.set(K(''), JSON.stringify(ext({ t: 'd', m: Date.now(), o: meta.o[''] || 'root' }, '')));
     async function walk(dh, rel) {
       for await (var e of dh.values()) {
         var r = rel + '/' + e.name;
         if (!rel && e.name === HDD_META) continue;
-        if (e.kind === 'directory') { map.set(K(r), JSON.stringify({ t: 'd', m: Date.now(), o: meta.o[r] || 'root' })); await walk(e, r); continue; }
+        if (e.kind === 'directory') { map.set(K(r), JSON.stringify(ext({ t: 'd', m: Date.now(), o: meta.o[r] || 'root' }, r))); await walk(e, r); continue; }
         var f = await e.getFile();
         if (f.size > HDD_MAX) { st.skipped.push(r); continue; }
         var u = new Uint8Array(await f.arrayBuffer()), ext = e.name.lastIndexOf('.') > 0 ? e.name.slice(e.name.lastIndexOf('.') + 1).toLowerCase() : '', node = null;
         if (!HDD_BIN.test(ext)) { try { var t = new TextDecoder('utf-8', { fatal: true }).decode(u); if (t.indexOf('\u0000') < 0) node = { t: 'f', c: t }; } catch (e2) { /* バイナリ */ } }
         if (!node) node = { t: 'f', c: 'data:' + (HDD_MIME[ext] || 'application/octet-stream') + ';base64,' + b64(u), b: 1 };
-        node.m = f.lastModified || Date.now(); node.o = meta.o[r] || 'root';
+        node.m = f.lastModified || Date.now(); node.o = meta.o[r] || 'root'; ext(node, r);
         map.set(K(r), JSON.stringify(node)); sizes.set(r, u.length); used += u.length;
         if (++count % 40 === 0 && progress) progress(count, r);
       }
@@ -228,8 +230,14 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     // シンボリックリンクは PC のフォルダには作らず、.htmlos.json に覚えておく
     Object.keys(meta.l).forEach(function (r) {
       var parent = r.slice(0, r.lastIndexOf('/'));
-      if (!map.has(K(r)) && map.has(K(parent))) map.set(K(r), JSON.stringify({ t: 'l', c: meta.l[r], m: Date.now(), o: meta.o[r] || 'root' }));
+      if (!map.has(K(r)) && map.has(K(parent))) map.set(K(r), JSON.stringify(ext({ t: 'l', c: meta.l[r], m: Date.now(), o: meta.o[r] || 'root' }, r)));
       else delete meta.l[r];
+    });
+    // 名前付きパイプも PC のフォルダには作らない
+    Object.keys(meta.f).forEach(function (r) {
+      var parent = r.slice(0, r.lastIndexOf('/'));
+      if (!map.has(K(r)) && map.has(K(parent))) map.set(K(r), JSON.stringify(ext({ t: 'p', m: Date.now(), o: meta.o[r] || 'root' }, r)));
+      else delete meta.f[r];
     });
     if (progress) progress(count, '');
     function report(what, e) {
@@ -250,7 +258,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       if (n.t === 'd') {
         try { await dh.getDirectoryHandle(name, { create: true }); }
         catch (e) { if (e.name !== 'TypeMismatchError') throw e; await dh.removeEntry(name); await dh.getDirectoryHandle(name, { create: true }); }
-      } else if (n.t === 'l') {
+      } else if (n.t === 'l' || n.t === 'p') {
         try { await dh.removeEntry(name, { recursive: true }); } catch (e) { /* もともと無い */ }
       } else await hddWrite(dh, name, n.b ? unData(n.c) : n.c);
     }
@@ -279,6 +287,9 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     function track(rel, node) {
       if (node && node.o && node.o !== 'root') meta.o[rel] = node.o; else delete meta.o[rel];
       if (node && node.t === 'l') meta.l[rel] = node.c; else delete meta.l[rel];
+      if (node && node.t === 'p') meta.f[rel] = 1; else delete meta.f[rel];
+      if (node && node.p != null) meta.p[rel] = node.p; else delete meta.p[rel];
+      if (node && node.g) meta.g[rel] = node.g; else delete meta.g[rel];
     }
     st.get = function (k) {
       if (k.indexOf('f:') !== 0) return Object.prototype.hasOwnProperty.call(meta.keys, k) ? meta.keys[k] : null;

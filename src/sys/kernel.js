@@ -195,6 +195,7 @@
       const s = fs.stat(p);
       if (!s) throw new Error(p + ': そのようなファイルはありません');
       if (s.t === 'd') throw new Error(p + ': ディレクトリです');
+      if (s.t === 'p') return ''; // 名前付きパイプ（中身は OS.ipc.fifoRead で待って読む）
       return s.c;
     },
     write(p, c, opt) {
@@ -204,7 +205,11 @@
       if (!fs.isDir(d)) throw new Error(path.dir(p) + ': ディレクトリがありません');
       const old = fs._raw(q);
       if (old && old.t === 'd') throw new Error(p + ': ディレクトリです');
+      if (old && old.t === 'p') { if (OS.ipc) OS.ipc.fifoWrite(q, String(c)); return; } // 名前付きパイプ: 読んでいる相手に渡す
       const node = { t: 'f', c: String(c), m: Date.now(), o: opt.owner || (old && old.o) || 'root' };
+      // 上書きではモードとグループをそのまま残す。新しいファイルは opt.mode（なければ場所ごとの既定）
+      if (old && old.p != null) node.p = old.p; else if (!old && opt.mode != null) node.p = opt.mode & 0o7777;
+      if (old && old.g) node.g = old.g;
       if (opt.bin) node.b = 1;
       put(q, node);
     },
@@ -213,7 +218,16 @@
       if (fs.exists(p) || fs.isLink(p)) { if (fs.isDir(p) && opt.parents) return; throw new Error(p + ': すでに存在します'); }
       const d = path.dir(p);
       if (!fs.isDir(d)) { if (opt.parents) fs.mkdir(d, opt); else throw new Error(d + ': ディレクトリがありません'); }
-      put(fs._here(p), { t: 'd', m: Date.now(), o: opt.owner || 'root' });
+      const n = { t: 'd', m: Date.now(), o: opt.owner || 'root' }; if (opt.mode != null) n.p = opt.mode & 0o7777;
+      put(fs._here(p), n);
+    },
+    // 名前付きパイプ（FIFO）を作る
+    mkfifo(p, opt) {
+      opt = opt || {};
+      if (fs.lstat(p)) throw new Error(p + ': すでに存在します');
+      if (!fs.isDir(path.dir(p))) throw new Error(path.dir(p) + ': ディレクトリがありません');
+      const n = { t: 'p', m: Date.now(), o: opt.owner || 'root' }; if (opt.mode != null) n.p = opt.mode & 0o7777;
+      put(fs._here(p), n);
     },
     symlink(target, p, opt) {
       opt = opt || {};
@@ -237,10 +251,12 @@
     },
     // 変更を見る。fn(変わったパスの一覧)。戻り値の関数を呼ぶと見るのをやめる
     watch(fn) { watchers.add(fn); return () => watchers.delete(fn); },
-    _cp(a, b, owner) {
-      const s = fs._raw(a);
-      if (s.t === 'd') { put(b, { t: 'd', m: Date.now(), o: owner || s.o }); for (const n of fs.list(a)) fs._cp(a + '/' + n, b + '/' + n, owner); }
-      else put(b, Object.assign({}, s, { m: Date.now(), o: owner || s.o }));
+    // コピー。owner を指定すると（ほかの人のコピー）グループは外し、モードは umask で削る
+    _cp(a, b, owner, umask) {
+      const s = fs._raw(a), n = Object.assign({}, s, { m: Date.now(), o: owner || s.o });
+      if (owner && owner !== s.o) { delete n.g; if (n.p != null && umask != null) n.p &= ~umask & 0o7777; }
+      put(b, n);
+      if (s.t === 'd') for (const c of fs.list(a)) fs._cp(a + '/' + c, b + '/' + c, owner, umask);
     },
     dest(a, b) { return fs.isDir(b) ? path.join(b, path.base(a)) : b; },
     cp(a, b, opt) {
@@ -248,7 +264,7 @@
       const src = fs.real(a); b = fs._here(fs.dest(a, b));
       if (b === src || b.startsWith(src + '/')) throw new Error('自分自身の中にはコピーできません');
       if (!fs.isDir(path.dir(b))) throw new Error(path.dir(b) + ': ディレクトリがありません');
-      fs._cp(src, b, opt && opt.owner);
+      fs._cp(src, b, opt && opt.owner, opt && opt.umask);
       return b;
     },
     // 移動はリンクそのものを動かす
@@ -541,33 +557,214 @@
   // 書き出しが終わっていないうちにページを閉じようとしたら止める
   window.addEventListener('beforeunload', e => { if ([base].concat(mounts.map(m => m.s)).some(s => s.pending && s.pending())) { e.preventDefault(); e.returnValue = ''; } });
 
-  // ---------- 権限つきファイルシステム
-  //   root      : どこでも読み書きできる
-  //   管理者    : 書けるのは自分のホームと /tmp だけ。読むのは /root 以外すべて
-  //   一般ユーザー: 書けるのは自分のホームと /tmp だけ。他人のホームと /root は読めない
-  OS.fsFor = function (getUser) {
-    const me = () => users.get(getUser()) || { name: getUser() };
-    const canW = p => { const u = me(); return !!u.root || p.startsWith('/tmp/') || p.startsWith('/home/' + u.name + '/') || p.startsWith(HDD_AT + '/'); };
-    const canR = p => { const u = me(); if (u.root) return true; if (p === '/root' || p.startsWith('/root/')) return false; if (u.admin) return true; if (p === '/root' || p.startsWith('/root/')) return false; const m = p.match(/^\/home\/([^/]+)/); return !m || m[1] === u.name; };
-    // リンクを通した書き込み・読み込みも許可を確かめるため、リンクをたどった先のパスでも調べる
+  // ---------- sudo（5.1 から）。/etc/sudoers の書き方（1 行に 1 つ）:
+  //     ユーザー名 ALL=(ALL) ALL          そのユーザーは何でも root で実行できる（自分のパスワードで）
+  //     %グループ ALL=(ALL) NOPASSWD: ALL  そのグループはパスワードなしで
+  //     ユーザー名 ALL=(ALL) systemctl,ps  決めたコマンドだけ
+  //   /etc/sudoers がなければ「%sudo ALL=(ALL) ALL」（管理者は sudo グループ）。一度通ると 5 分間はパスワードを聞かない
+  const sudo = OS.sudo = {
+    TIMEOUT: 5 * 60 * 1000, stamps: {},
+    file: '/etc/sudoers',
+    lines() {
+      let t = null; try { t = fs.read(sudo.file); } catch (e) { t = null; }
+      if (t == null) t = 'root ALL=(ALL) ALL\n%sudo ALL=(ALL) ALL\n';
+      return t.split('\n').map(l => l.replace(/#.*$/, '').trim()).filter(Boolean);
+    },
+    // name が sudo できるか: { ok, nopass, cmds: ['ALL'] か コマンド名の一覧, line }
+    rule(name) {
+      const groups = OS.perm ? OS.perm.groupsOf(name) : [name];
+      for (const l of sudo.lines()) {
+        const m = /^(%?[\w.-]+)\s+\S+=\s*(?:\([^)]*\)\s*)?(NOPASSWD:\s*)?(.+)$/.exec(l); if (!m) continue;
+        const who = m[1], hit = who[0] === '%' ? groups.includes(who.slice(1)) : who === name;
+        if (!hit) continue;
+        const cmds = m[3].split(',').map(s => s.trim().split(/\s+/)[0].replace(/^.*\//, '')).filter(Boolean);
+        return { ok: true, nopass: !!m[2], cmds: cmds, line: l };
+      }
+      return { ok: false, nopass: false, cmds: [], line: null };
+    },
+    allows(r, cmd) { return r.ok && (r.cmds.includes('ALL') || r.cmds.includes(cmd)); },
+    fresh(name) { const t = sudo.stamps[name]; return !!t && Date.now() - t < sudo.TIMEOUT; },
+    forget(name) { delete sudo.stamps[name]; },
+    log(msg, prio) { if (OS.journal) OS.journal.log('sudo', msg, { prio: prio == null ? 5 : prio }); },
+    // 認証。ask(回数) は自分のパスワードを返す（キャンセルは null）。3 回まで
+    async auth(name, ask, what) {
+      const u = users.get(name);
+      if (u && u.root) return true;
+      const r = sudo.rule(name);
+      if (!r.ok) { sudo.log(name + ' : sudoers に入っていません ; COMMAND=' + (what || ''), 3); throw new Error(name + ' は sudoers ファイルに入っていません。この出来事は記録されます'); }
+      if (r.nopass || sudo.fresh(name)) { sudo.stamps[name] = Date.now(); return true; }
+      if (!u || !u.pw) throw new Error(name + ' にパスワードがないので sudo を使えません（passwd で設定してください）');
+      for (let i = 1; i <= 3; i++) {
+        const pw = await ask(i);
+        if (pw == null) return false;
+        if (await users.verify(name, pw)) { sudo.stamps[name] = Date.now(); return true; }
+        sudo.log(name + ' : パスワードが違います（' + i + ' 回目）', 4);
+      }
+      sudo.log(name + ' : 3 回パスワードを間違えました ; COMMAND=' + (what || ''), 3);
+      throw new Error('sudo: 3 回パスワードを間違えました');
+    }
+  };
+
+  // ---------- パーミッション（5.1 から。UNIX と同じ rwx）
+  //   ノードの p = モード（数。例 0o644）、o = 所有者、g = グループ。p や g がない古いノードは、場所から既定を決める:
+  //     /root と /home/ユーザー は 700、/tmp は 1777（だれでも作れるが、消せるのは自分のものだけ）、/mnt/hdd1 は 777、
+  //     /etc/passwd は 600、/etc/sudoers は 440、
+  //     ほかのディレクトリは 755、ファイルは 644、シンボリックリンクは 777
+  //   グループ: ユーザー名と同じグループ・管理者は sudo・root は root、それに /etc/passwd の groups
+  //   root はモードに関係なく読み書きできる（実行は x がどれかに付いているとき）
+  const perm = OS.perm = {
+    def(q, n) {
+      if (n && n.p != null) return n.p;
+      if (n && n.t === 'l') return 0o777;
+      if (q === '/tmp') return 0o1777;
+      if (q === '/etc/passwd') return 0o600;   // パスワードのハッシュが入っているので root だけ
+      if (q === '/etc/sudoers') return 0o440;
+      if (q === '/root' || /^\/home\/[^/]+$/.test(q)) return 0o700;
+      if (q === HDD_AT || q.startsWith(HDD_AT + '/')) return n && n.t === 'd' ? 0o777 : 0o666;
+      return n && n.t === 'd' ? 0o755 : 0o644;
+    },
+    group(n) { return (n && (n.g || n.o)) || 'root'; },
+    groupsOf(name) {
+      const u = users.get(name); if (!u) return [name];
+      const g = [name].concat(u.root ? ['root'] : [], u.admin ? ['sudo'] : [], Array.isArray(u.groups) ? u.groups : []);
+      return Array.from(new Set(g));
+    },
+    // 実際のパス q のノード n に、ユーザー name が bit（4 読む・2 書く・1 実行/中に入る）を持つか
+    has(name, q, n, bit) {
+      if (!n) return false;
+      const u = users.get(name), mode = perm.def(q, n);
+      if (u && u.root) return bit !== 1 || n.t === 'd' || (mode & 0o111) !== 0;
+      const sh = n.o === name ? 6 : perm.groupsOf(name).includes(perm.group(n)) ? 3 : 0;
+      return ((mode >> sh) & bit) === bit;
+    },
+    // 実際のパス q の親ディレクトリを、上から順に「中に入れる（x）」か
+    traverse(name, q) {
+      const parts = q.split('/').filter(Boolean); let cur = '';
+      for (let i = 0; i < parts.length - 1; i++) { cur += '/' + parts[i]; const n = fs._raw(cur); if (n && n.t === 'd' && !perm.has(name, cur, n, 1)) return cur; }
+      if (parts.length && !perm.has(name, '/', fs._raw('/') || { t: 'd', o: 'root' }, 1)) return '/';
+      return null;
+    },
+    // ls -l の "drwxr-xr-x"
+    str(n, q) {
+      const m = perm.def(q, n), t = n.t === 'd' ? 'd' : n.t === 'l' ? 'l' : n.t === 'p' ? 'p' : '-';
+      const r = (v, s, x) => (v & 4 ? 'r' : '-') + (v & 2 ? 'w' : '-') + (s ? (v & 1 ? x : x.toUpperCase()) : (v & 1 ? 'x' : '-'));
+      return t + r(m >> 6, m & 0o4000, 's') + r(m >> 3, m & 0o2000, 's') + r(m, m & 0o1000, 't');
+    },
+    oct: m => (m & 0o7777).toString(8).padStart(4, '0'),
+    // chmod のモード: 8 進（755）か記号（u+x、go-w、a=r、+x、u+rwx,g+rx）
+    parse(spec, cur, isDir) {
+      if (/^[0-7]{1,4}$/.test(spec)) return parseInt(spec, 8);
+      let m = cur;
+      String(spec).split(',').forEach(part => {
+        const x = /^([ugoa]*)([+\-=])([rwxXst]*)$/.exec(part);
+        if (!x) throw new Error(spec + ': モードの書き方が正しくありません（例: 755、u+x、go-w、a=r）');
+        const who = x[1] || 'a', all = who.includes('a');
+        let bits = 0;
+        for (const c of x[3]) {
+          const v = c === 'r' ? 4 : c === 'w' ? 2 : c === 'x' ? 1 : c === 'X' ? (isDir || (cur & 0o111) ? 1 : 0) : 0;
+          if (all || who.includes('u')) bits |= v << 6;
+          if (all || who.includes('g')) bits |= v << 3;
+          if (all || who.includes('o')) bits |= v;
+          if (c === 's') { if (all || who.includes('u')) bits |= 0o4000; if (all || who.includes('g')) bits |= 0o2000; }
+          if (c === 't') bits |= 0o1000;
+        }
+        if (x[2] === '+') m |= bits;
+        else if (x[2] === '-') m &= ~bits;
+        else { let mask = 0; if (all || who.includes('u')) mask |= 0o4700; if (all || who.includes('g')) mask |= 0o2070; if (all || who.includes('o')) mask |= 0o1007; m = (m & ~mask) | bits; }
+      });
+      return m & 0o7777;
+    }
+  };
+  // root の FS でのモード・所有者の変更（権限の確認は fsFor で）
+  fs.chmod = function (p, mode) {
+    const q = fs.real(p), n = fs._raw(q); if (!n) throw new Error(p + ': そのようなファイルはありません');
+    put(q, Object.assign({}, n, { p: mode & 0o7777 })); changed(q);
+  };
+  fs.chown = function (p, owner, group) {
+    const q = fs.real(p), n = fs._raw(q); if (!n) throw new Error(p + ': そのようなファイルはありません');
+    const o = Object.assign({}, n); if (owner) o.o = owner; if (group) o.g = group;
+    put(q, o); changed(q);
+  };
+
+  // ---------- 権限つきファイルシステム（ユーザー getUser() として操作する）
+  //   読む: 親をたどる x と、そのものの r。書く: そのものの w（新しく作るときは親の w と x）。
+  //   消す・移す: 親の w と x（親に t（スティッキー）があれば、自分のものか親の所有者のときだけ）
+  //   umask: 新しく作るときに外すビット（既定 022）。getUmask で渡す
+  OS.fsFor = function (getUser, getUmask) {
+    const who = () => getUser();
+    const um = () => { const v = getUmask ? getUmask() : 0o022; return typeof v === 'number' ? v : 0o022; };
     const realOf = p => { try { return fs.real(p); } catch (e) { return p; } };
     const hereOf = p => { try { return fs._here(p); } catch (e) { return p; } };
-    const deny = (p, w) => { throw new Error(p + (w ? ': 許可がありません（root 権限が必要です）' : ': 許可がありません')); };
-    const W = p => { if (!canW(p) || !canW(realOf(p))) deny(p, true); return p; };
-    const WL = p => { if (!canW(p) || !canW(hereOf(p))) deny(p, true); return p; };
-    const R = p => { if (!canR(p) || !canR(realOf(p))) deny(p); return p; };
-    const ok = p => canR(p) && canR(realOf(p));
+    const deny = (p, what) => { const e = new Error(p + ': 許可がありません' + (what ? '（' + what + '）' : '')); e.code = 'EACCES'; throw e; };
+    const trav = (p, q) => { const bad = perm.traverse(who(), q); if (bad) deny(p, bad + ' の中に入る許可（x）がありません'); };
+    const R = p => { const q = realOf(p); trav(p, q); const n = fs._raw(q); if (n && !perm.has(who(), q, n, 4)) deny(p, '読む許可（r）がありません'); return p; };
+    const T = p => { trav(p, realOf(p)); return p; };
+    // 親ディレクトリに作る・消す許可
+    const parentW = (p, q) => {
+      const d = path.dir(q), dn = fs._raw(d);
+      trav(p, q);
+      if (dn && !perm.has(who(), d, dn, 3)) deny(p, d + ' に書き込む許可（w）がありません');
+    };
+    const W = p => {
+      const q = realOf(p), n = fs._raw(q);
+      if (n) { trav(p, q); if (!perm.has(who(), q, n, 2)) deny(p, '書き込む許可（w）がありません'); }
+      else parentW(p, q);
+      return p;
+    };
+    const C = p => { parentW(p, hereOf(p)); return p; }; // 作る
+    const sticky = (p, q) => {
+      const d = path.dir(q), dn = fs._raw(d), n = fs._raw(q), u = users.get(who());
+      if (u && u.root) return;
+      if (dn && (perm.def(d, dn) & 0o1000) && n && n.o !== who() && dn.o !== who()) deny(p, d + ' はスティッキーなので、ほかのユーザーのものは消せません');
+    };
+    const D = (p, recursive) => { // 消す
+      const q = hereOf(p); parentW(p, q); sticky(p, q);
+      const n = fs._raw(q);
+      if (recursive && n && n.t === 'd') {
+        const walk = d => { const dn = fs._raw(d); if (!perm.has(who(), d, dn, 7)) deny(p, d + ' の中を消す許可がありません'); fs.list(d).forEach(c => { const cq = d + '/' + c, cn = fs._raw(cq); if (cn && cn.t === 'd') walk(cq); }); };
+        walk(q);
+      }
+      return p;
+    };
+    const ok = p => { try { T(p); return true; } catch (e) { return false; } };
+    const canR = p => { try { R(p); return true; } catch (e) { return false; } };
+    const canW = p => { try { W(p); return true; } catch (e) { return false; } };
+    const newMode = (isDir) => (isDir ? 0o777 : 0o666) & ~um();
+    const isRoot = () => { const u = users.get(who()); return !!(u && u.root); };
     return {
-      stat: p => fs.stat(R(p)), lstat: p => fs.lstat(R(p)), exists: p => ok(p) && fs.exists(p), isDir: p => ok(p) && fs.isDir(p), isFile: p => ok(p) && fs.isFile(p),
-      isLink: p => canR(p) && fs.isLink(p), readlink: p => fs.readlink(R(p)), real: fs.real,
+      stat: p => fs.stat(T(p)), lstat: p => fs.lstat(T(p)), exists: p => ok(p) && fs.exists(p), isDir: p => ok(p) && fs.isDir(p), isFile: p => ok(p) && fs.isFile(p),
+      isLink: p => ok(p) && fs.isLink(p), readlink: p => fs.readlink(T(p)), real: fs.real,
       list: p => fs.list(R(p)), read: p => fs.read(R(p)),
-      write: (p, c, o) => fs.write(W(p), c, Object.assign({}, o, { owner: getUser() })),
-      mkdir: (p, o) => fs.mkdir(WL(p), Object.assign({}, o, { owner: getUser() })),
-      symlink: (t, p) => fs.symlink(t, WL(p), { owner: getUser() }),
-      rm: (p, o) => fs.rm(WL(p), o),
-      cp: (a, b) => { R(a); WL(fs.dest(a, b)); return fs.cp(a, b, { owner: getUser() }); },
-      mv: (a, b) => { WL(a); WL(fs.dest(a, b)); return fs.mv(a, b); },
-      usage: fs.usage, kind: fs.kind, mime: fs.mime, dataURL: p => fs.dataURL(R(p)), unique: fs.unique, canWrite: canW, watch: fs.watch
+      write: (p, c, o) => { W(p); const q = realOf(p), old = fs._raw(q); return fs.write(p, c, Object.assign({}, o, old ? {} : { owner: who(), mode: newMode(false) })); },
+      mkdir: (p, o) => {
+        o = Object.assign({}, o);
+        if (o.parents) { const parts = path.norm(p).split('/').filter(Boolean); let cur = ''; for (const x of parts) { cur += '/' + x; if (!fs.exists(cur)) { C(cur); fs.mkdir(cur, { owner: who(), mode: newMode(true) }); } } return; }
+        C(p); return fs.mkdir(p, Object.assign(o, { owner: who(), mode: newMode(true) }));
+      },
+      symlink: (t, p) => { C(p); return fs.symlink(t, p, { owner: who() }); },
+      mkfifo: p => { C(p); return fs.mkfifo(p, { owner: who(), mode: newMode(false) }); },
+      rm: (p, o) => { D(p, o && o.recursive); return fs.rm(p, o); },
+      cp: (a, b) => { R(a); C(fs.dest(a, b)); return fs.cp(a, b, { owner: who(), umask: um() }); },
+      mv: (a, b) => { D(a, false); C(fs.dest(a, b)); return fs.mv(a, b); },
+      chmod: (p, mode) => {
+        const q = realOf(p), n = fs._raw(q); T(p);
+        if (!n) throw new Error(p + ': そのようなファイルはありません');
+        if (!isRoot() && n.o !== who()) deny(p, 'モードを変えられるのは所有者か root だけです');
+        fs.chmod(p, typeof mode === 'number' ? mode : perm.parse(mode, perm.def(q, n), n.t === 'd'));
+      },
+      chown: (p, owner, group) => {
+        const q = realOf(p), n = fs._raw(q); T(p);
+        if (!n) throw new Error(p + ': そのようなファイルはありません');
+        if (owner && owner !== n.o && !isRoot()) deny(p, '所有者を変えられるのは root だけです（sudo chown）');
+        if (group && !isRoot() && (n.o !== who() || !perm.groupsOf(who()).includes(group))) deny(p, 'グループを変えられるのは、そのグループに入っている所有者か root だけです');
+        if (owner && !users.get(owner)) throw new Error(owner + ': そのようなユーザーはいません');
+        fs.chown(p, owner, group);
+      },
+      // 実行してよいか（スクリプト）。モードを付けていない古いファイルは読めれば実行できる
+      canExec: p => { const q = realOf(p), n = fs._raw(q); if (!n || !canR(p)) return false; if (n.p == null) return true; return perm.has(who(), q, n, 1); },
+      access: (p, m) => { try { if (/r/.test(m)) R(p); if (/w/.test(m)) W(p); return true; } catch (e) { return false; } },
+      usage: fs.usage, kind: fs.kind, mime: fs.mime, dataURL: p => fs.dataURL(R(p)), unique: fs.unique, canWrite: canW, canRead: canR, watch: fs.watch,
+      user: who
     };
   };
 
@@ -703,6 +900,8 @@
       else if (e.ctrlKey && e.key.toLowerCase() === 'l') { e.preventDefault(); this.clear(); }
       else if (e.ctrlKey && e.key.toLowerCase() === 'c' && this.input.selectionStart === this.input.selectionEnd) { e.preventDefault(); this._cancel(); }
     }
+    // 待っている read を、何も表示せずに取りやめる（null を返す）
+    abort() { const p = this.pending; if (!p) return; this.pending = null; this.line.style.display = 'none'; p.res(null); }
     dispose() { if (this._screen) this._screen.close(); this.pending = null; if (this._ro) this._ro.disconnect(); this.el.remove(); }
   }
   OS.Tty = Tty;
@@ -820,6 +1019,7 @@
       try { for (const w of OS.htui.wins.slice()) { if ((await w.close()) === false) return; } } finally { OS.shuttingDown = false; }
     }
     OS._down = true;
+    if (OS.ipc) { try { OS.ipc.publish(reboot ? 'power.reboot' : 'power.shutdown', null, 'hinit'); } catch (e) { /* 無視 */ } }
     OS.sound.play(reboot ? 'reboot' : 'shutdown');
     if (flag) store.set('bootflag', flag);
     const t0 = Date.now(), tty = OS.tty1, label = reboot ? '再起動しています…' : 'シャットダウンしています…';
@@ -944,7 +1144,7 @@
     if (OS.imode) apps = apps.filter(n => I_APPS.includes(n));
     const pkgs = OS.safe || OS.imode ? [] : OS.pkg.list();
     try { OS.build = (JSON.parse(store.get('meta')) || {}).build || BOOT.build || '?'; } catch (e) { OS.build = BOOT.build || '?'; }
-    const core = ['/sys/init.js', '/sys/cursor.js', '/sys/jsh.js', '/sys/htui.js', '/sys/hdm.js', '/sys/shells.js'];
+    const core = ['/sys/init.js', '/sys/ipc.js', '/sys/cursor.js', '/sys/jsh.js', '/sys/htui.js', '/sys/hdm.js', '/sys/shells.js'];
     const total = 2 + core.length + apps.length + pkgs.length; let done = 0;
     const step = async (s, failed) => {
       if (OS.klog) OS.klog(s, failed ? 3 : 6); else (OS._klog = OS._klog || []).push({ t: Date.now(), msg: s, prio: failed ? 3 : 6 });

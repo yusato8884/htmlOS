@@ -12,7 +12,6 @@
   const OS = window.OS, fs = OS.fs, users = OS.users;
   const now = () => Date.now();
   const z = (n, w) => String(n).padStart(w || 2, '0');
-  const isAdmin = u => { const x = users.get(u); return !!(x && (x.admin || x.root)); };
 
   // =====================================================================
   // ジャーナル（ログ）
@@ -92,13 +91,13 @@
       if (!SIG[s]) throw new Error(s + ': 使えないシグナルです（kill -l で一覧）');
       return s;
     },
-    // シグナルを送る。by: 送るユーザー（root・管理者は誰のプロセスにも送れる）
+    // シグナルを送る。by: 送るユーザー（root は誰のプロセスにも送れる）
     async kill(pid, sig, by) {
       sig = proc.sigName(sig);
       const p = proc.get(pid);
       if (!p) throw new Error('(' + pid + '): そのようなプロセスはありません');
       if (p.kind === 'init' || p.kind === 'kernel') throw new Error('(' + pid + '): 操作は許可されていません（' + p.name + ' は止められません）');
-      if (by && by !== p.user && !isAdmin(by)) throw new Error('(' + pid + '): 操作は許可されていません（ほかのユーザーのプロセス）');
+      if (by && by !== p.user && !users.isRoot(by)) throw new Error('(' + pid + '): 操作は許可されていません（ほかのユーザーのプロセス。sudo kill …）');
       journal.log('kernel', 'PID ' + pid + '（' + p.name + '）に SIG' + sig + ' を送りました' + (by ? '（' + by + '）' : ''), { prio: 5 });
       if (p.onsignal) return p.onsignal(sig);
       proc.exit(pid, 128 + SIG[sig]);
@@ -126,7 +125,17 @@
   const units = new Map(), state = new Map();
   const list = v => v == null ? [] : (Array.isArray(v) ? v : String(v).split(/[\s,]+/)).filter(Boolean).map(norm);
   function norm(n) { n = String(n).trim(); return /\.(service|target)$/.test(n) ? n : n + '.service'; }
-  const S = n => { let s = state.get(n); if (!s) { s = { active: 'inactive', sub: 'dead', since: 0, pid: null, result: null, timers: [], stops: [], restarts: [], gen: 0, manual: false }; state.set(n, s); } return s; };
+  const S = n => {
+    let s = state.get(n);
+    if (!s) {
+      s = { sub: 'dead', since: 0, pid: null, result: null, timers: [], stops: [], restarts: [], gen: 0, manual: false };
+      // active が変わったら IPC に unit.changed を流す
+      let act = 'inactive';
+      Object.defineProperty(s, 'active', { enumerable: true, get: () => act, set: v => { if (v === act) return; const old = act; act = v; if (OS.ipc) { try { OS.ipc.publish('unit.changed', { unit: n, active: v, old: old }, 'hinit'); } catch (e) { /* 無視 */ } } } });
+      state.set(n, s);
+    }
+    return s;
+  };
   const short = n => n.replace(/\.(service|target)$/, '');
   const ilog = (msg, prio) => journal.log('hinit', msg, { pid: 1, prio: prio });
   let enabledMap = {};
@@ -462,7 +471,7 @@
   const ago = t => { const s = Math.max(0, Math.floor((now() - t) / 1000)); return s < 60 ? s + ' 秒前' : s < 3600 ? Math.floor(s / 60) + ' 分前' : Math.floor(s / 3600) + ' 時間 ' + Math.floor(s % 3600 / 60) + ' 分前'; };
   const clock = t => { const d = new Date(t); return z(d.getHours()) + ':' + z(d.getMinutes()) + ':' + z(d.getSeconds()); };
   const cmd = d => OS.registerCommand(d);
-  const needAdmin = (sh, what) => { if (!sh.admin && !sh.root) throw new Error(what + 'には管理者の権限が必要です'); };
+  const needAdmin = (sh, what) => { if (!sh.root) throw new Error(what + 'には root 権限が必要です（sudo systemctl …）'); };
   const DOT = { active: '●', reloading: '●', activating: '◐', deactivating: '◑', failed: '×', inactive: '○' };
 
   function psLines(filter) {

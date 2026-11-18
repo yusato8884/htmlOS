@@ -87,7 +87,7 @@
         catch (e) {
           // 書けない場所（/sys など）は、root のパスワードを確認できたら root として保存する
           if (/許可がありません/.test(e.message) && (await ui.asRoot(p + ' を保存します。'))) {
-            try { OS.fs.write(p, ta.value, { owner: 'root' }); file = p; setDirty(false); ui.toast('root として保存しました'); return true; }
+            try { OS.fs.write(p, ta.value, OS.fs.exists(p) ? {} : { owner: 'root' }); file = p; setDirty(false); ui.toast('root として保存しました'); return true; }
             catch (e2) { ui.alert('保存できませんでした。\n' + e2.message); return false; }
           }
           if (!/許可がありません/.test(e.message)) ui.alert('保存できませんでした。\n' + e.message);
