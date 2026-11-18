@@ -10010,7 +10010,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 (function () {
   'use strict';
   // コードネーム: htmlOS は恒星の名前（3.2 = Sirius、4.0 = Vega）、描画エンジン HTUi SDK は惑星の名前（2 = Jupiter、3.0 = Venus）
-  var MEDIA_VERSION = '4.1.4', MEDIA_BUILD = '31', MEDIA_CODENAME = 'Vega';
+  var MEDIA_VERSION = '4.1.5', MEDIA_BUILD = '32', MEDIA_CODENAME = 'Vega';
   var BOOT = window.BOOT = {};
   var P = 'htmlos:';
 
@@ -10499,8 +10499,9 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     document.title = BASE.title;
     try { window.getSelection().removeAllRanges(); } catch (e) { /* 無視 */ }
     try { delete window.OS; } catch (e) { window.OS = undefined; }
-    // ストレージと起動の状態を、ページを開いたときと同じに（HDD1 は読み込み済みならそのまま使う）
-    store = BOOT.hddReady ? realStore : lsStore; BOOT.store = store;
+    // ストレージと起動の状態を、ページを開いたときとまったく同じに戻す。HDD1 も POST のあとで読み込み直す
+    // （許可がもう出ていれば、ボタンを押さなくてもそのまま読み込まれる）
+    store = realStore = lsStore; BOOT.store = store; BOOT.hddReady = false;
     BOOT.live = false; BOOT.imode = false; BOOT.safe = false; BOOT.offerUpdate = false; BOOT.hddSkip = false; BOOT.hold = null; BOOT.wantMenu = false;
     keyHandler = null; scr.textContent = ''; scr.className = ''; scr.removeAttribute('style');
     BOOT.warm = (BOOT.warm || 0) + 1;
