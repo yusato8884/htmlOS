@@ -1,9 +1,25 @@
 /* jsh — JS + SHell。入力はJavaScriptとして実行されます。
-   先頭がコマンド名で「ls -l /sys」のような形なら、シェル風に ls("-l","/sys") と解釈します。 */
+   先頭がコマンド名で「ls -l /sys」のような形なら、シェル風に ls("-l","/sys") と解釈します。
+   4.0 から シェルスクリプト（.jsh）に対応: 1 行ずつ jsh の行として実行する（$1 $@ $# $? $(コマンド)、NAME=値、{ } でまたがる JS のブロック）。
+   パッケージは OS.registerCommand({ name, usage, desc, run(args, sh) }) でコマンドを足せる。 */
 (function () {
   const OS = window.OS, fs0 = OS.fs, path = OS.path, users = OS.users;
 
   class Listing extends Array {}
+
+  // { ( [ がいくつ開いたままか（文字列・テンプレート文字列・コメントの中は数えない）。スクリプトで行をつなぐのに使う
+  function openDepth(code) {
+    let d = 0, q = null;
+    for (let i = 0; i < code.length; i++) {
+      const c = code[i];
+      if (q) { if (c === '\\') { i++; continue; } if (c === q) q = null; continue; }
+      if (c === '"' || c === "'" || c === '`') { q = c; continue; }
+      if (c === '/' && code[i + 1] === '/') { const n = code.indexOf('\n', i); if (n < 0) break; i = n; continue; }
+      if (c === '/' && code[i + 1] === '*') { const n = code.indexOf('*/', i + 2); if (n < 0) return d + 1; i = n + 1; continue; }
+      if (c === '{' || c === '(' || c === '[') d++; else if (c === '}' || c === ')' || c === ']') d--;
+    }
+    return d;
+  }
 
   function inspect(v) {
     if (typeof v === 'string') return v;
@@ -26,13 +42,17 @@
     if (cur || has) out.push(cur);
     return out;
   }
-  const fmtSize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(2) + ' MB';
+  const fmtSize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : n < 1073741824 ? (n / 1048576).toFixed(2) + ' MB' : (n / 1073741824).toFixed(2) + ' GB';
   const fmtDate = ms => { const d = new Date(ms), z = n => String(n).padStart(2, '0'); return d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + ' ' + z(d.getHours()) + ':' + z(d.getMinutes()); };
 
   // man で出す詳しい説明と例（help にある書式・説明に足す）
   const MAN = {
     ls: { d: '-l で詳しく（種類・持ち主・大きさ・日時）、-a で . から始まる隠しファイルも表示します。\nシンボリックリンクは -l のとき「名前 -> リンク先」と表示します。', e: ['ls -l /sys', 'ls -a ~', 'ls("/sys").length'] },
-    grep: { d: 'パターンは JavaScript の正規表現です。ファイルを指定しないときは、パイプで渡された文字から探します。', e: ['grep error log.txt', 'cat /etc/passwd | grep root', 'ls -l | grep ".js"'] },
+    grep: { d: 'パターンは JavaScript の正規表現です。ファイルを指定しないときは、パイプで渡された文字から探します。\n-i 大文字と小文字を区別しない、-v 一致しない行、-n 行番号をつける、-c 一致した行の数だけ。', e: ['ls | grep foo', 'grep -n error log.txt', 'cat /etc/passwd | grep -i ROOT', 'ls -l /sys/apps | grep -v ".js" | wc -l'] },
+    sed: { d: 's/パターン/置き換え/フラグ の形だけ使えます。パターンは JavaScript の正規表現で、置き換えでは $1（1 つめの括弧）や $&（一致した部分）が使えます。g ですべて、i で大文字小文字を区別しません。', e: ['ls | sed s/.txt/.md/', "cat memo.txt | sed 's/foo/bar/g'"] },
+    cat: { d: 'ファイルを省くと、パイプで渡された文字をそのまま出します。', e: ['cat memo.txt', 'cat a.txt b.txt > ab.txt', 'ls | cat'] },
+    xargs: { d: '受け取った文字を空白と改行で区切り、コマンドの引数の後ろに付けて 1 回実行します。空白を含む名前は " " で囲んでおきます。', e: ['find ~ -name "*.tmp" | xargs rm', 'echo a.txt b.txt | xargs cat'] },
+    mount: { d: 'HDD1 は File System Access API で選んだ PC のフォルダです。中身をすべて読み込んで /mnt/hdd1 に見せ、書き込みは PC のフォルダにもそのまま反映します。\nブラウザの決まりで、ページを開き直したあとはフォルダを使う許可がもう一度必要です（mount hdd1 か、hFile の HDD1 から）。', e: ['mount', 'mount hdd1', 'mount hdd1 -p', 'ls /mnt/hdd1 | grep .md', 'umount hdd1'] },
     head: { e: ['head -n 3 memo.txt', 'ls -l /sys/apps | head -5'] },
     tail: { e: ['tail -n 20 log.txt', 'history | tail -5'] },
     wc: { d: '何も指定しないと「行数 単語数 文字数」の順に出します。', e: ['wc memo.txt', 'ls /sys/apps | wc -l'] },
@@ -51,7 +71,14 @@
     hostname: { d: '名前はプロンプト（ユーザー@名前）にも出ます。/etc/config.json に保存されます。', e: ['hostname', 'hostname my-pc'] },
     alias: { d: 'エイリアスはこのシェルの中だけで使えます。毎回使いたいときは ~/.jshrc に書いておくと、起動時に読み込みます。', e: ['alias ll="ls -l"', 'alias'] },
     export: { d: 'シェル風の書き方の中では $名前 や ${名前} が値に置き換わります（\' \' で囲むと置き換えません）。', e: ['export NAME=htmlOS', 'echo こんにちは $NAME', 'echo $HOME'] },
-    top: { d: 'HTUi で開いているウィンドウ（プロセス）の一覧を 1 秒ごとに書き直します。' }
+    top: { d: 'HTUi で開いているウィンドウ（プロセス）の一覧を 1 秒ごとに書き直します。' },
+    run: { d: '拡張子が .jsh か、1 行目が #!/bin/jsh のファイルはシェルスクリプトとして 1 行ずつ実行します。それ以外は JavaScript として実行します。\n' +
+      'シェルスクリプトの中では、$1 $2 …（引数）、$@（引数ぜんぶ）、$#（引数の数）、$0（スクリプトの名前）、$?（直前の行が成功なら 0）、$(コマンド)（コマンドの出力）が使えます。\n' +
+      'NAME=値 でシェルの変数を作れます。# で始まる行はコメント、行末の \\ で次の行につなぎます。\n' +
+      'if や for は JavaScript で書きます。{ ( [ が閉じるまでの行は 1 つにまとめて実行するので、複数行のブロックも書けます。exit 1 でスクリプトを終わります。\n' +
+      '~/bin か /bin に置いたスクリプトは、名前だけで実行できます（hello.jsh → hello）。./hello.jsh のようにパスで実行することもできます。',
+      e: ['run ~/hello.jsh 悠', './backup.jsh', 'hello 悠'] },
+    cmd: { d: 'JavaScript の中からシェル風のコマンドを実行して、その出力を文字列で受け取ります。シェル風の行では $( ) と同じです。', e: ['const n = await cmd("ls ~ | wc -l")', 'echo ファイルは $(ls ~ | wc -l) 個'] }
   };
 
   class Jsh {
@@ -64,7 +91,7 @@
       this.help = {}; this.cmds = new Set();
       this.vars = { SHELL: '/bin/jsh', LANG: 'ja_JP.UTF-8', TERM: 'htmlos-tty', PATH: '/bin' };
       this.aliases = { ll: 'ls -l', la: 'ls -a' };
-      this.stdin = null;
+      this.stdin = null; this.status = 0; this.pos = null; this.depth = 0; this.extCmds = {};
       this.env = this.buildEnv();
       Object.keys(this.aliases).forEach(n => this.cmds.add(n));
     }
@@ -101,7 +128,12 @@
     }
 
     // 環境変数（USER・HOME・PWD・HOSTNAME はいつも今の値）
-    allVars() { return Object.assign({}, this.vars, { USER: this.user, HOME: this.home, PWD: this.cwd, HOSTNAME: OS.hostname() }); }
+    allVars() {
+      const v = Object.assign({}, this.vars, { USER: this.user, HOME: this.home, PWD: this.cwd, HOSTNAME: OS.hostname(), '?': String(this.status | 0) });
+      const p = this.pos;
+      if (p) { v['0'] = p.name; p.args.forEach((a, i) => { v[String(i + 1)] = a; }); v['#'] = String(p.args.length); v['@'] = p.args.map(a => /[\s"']/.test(a) ? '"' + a + '"' : a).join(' '); }
+      return v;
+    }
     // $名前 / ${名前} を値に置き換える。' ' の中は置き換えない
     expand(str) {
       const v = this.allVars(); let out = '', q = null;
@@ -111,7 +143,7 @@
         if (ch === "'" && !q) { q = "'"; out += ch; continue; }
         if (ch === '"') { q = q === '"' ? null : '"'; out += ch; continue; }
         if (ch === '$') {
-          const m = str.slice(i + 1).match(/^\{([A-Za-z_]\w*)\}|^([A-Za-z_]\w*)/);
+          const m = str.slice(i + 1).match(/^\{([A-Za-z_]\w*|\d+|[@#?])\}|^([A-Za-z_]\w*|\d|[@#?])/);
           if (m) { const n = m[1] || m[2]; out += v[n] != null ? v[n] : ''; i += m[0].length; continue; }
         }
         out += ch;
@@ -120,56 +152,80 @@
     }
     // シェル風の行なら、パイプ「|」で区切ったコマンドの並びを返す。JavaScript として読むべき行なら null
     pipeline(line) {
-      const parts = []; let cur = '', q = null;
+      const parts = []; let cur = '', q = null, sub = 0;
       for (let i = 0; i < line.length; i++) {
         const ch = line[i];
         if (q) { if (ch === q) q = null; cur += ch; continue; }
         if (ch === '"' || ch === "'") { q = ch; cur += ch; continue; }
+        if (ch === '$' && line[i + 1] === '(') { sub++; cur += '$('; i++; continue; }
+        if (sub) { if (ch === '(') sub++; else if (ch === ')') sub--; cur += ch; continue; }
         if (ch === '|' && line[i + 1] !== '|' && line[i - 1] !== '|') { parts.push(cur.trim()); cur = ''; continue; }
         cur += ch;
       }
       parts.push(cur.trim());
-      const jsLike = /^(\(|\.|\[|=|[+\-*\/%<>&|^?:,]\s|[+\-*\/]=|instanceof\b|in\b)/;
+      // 引数が JavaScript の続きに見えるとき（ls("/") の ( や、.map( など）は JavaScript として読む。cd .config のような . で始まるパスはシェル風
+      const jsLike = /^(\(|\.[A-Za-z_$][\w$]*\s*\(|\[|=|[+\-*\/%<>&|^?:,]\s|[+\-*\/]=|instanceof\b|in\b)/;
       const segs = [];
       for (let seg of parts) {
         let m = seg.match(/^([A-Za-z_$][\w$-]*)(?:\s+([\s\S]*))?$/);
         if (m && this.aliases[m[1]]) { seg = this.aliases[m[1]] + (m[2] ? ' ' + m[2] : ''); m = seg.match(/^([A-Za-z_$][\w$-]*)(?:\s+([\s\S]*))?$/); }
-        if (!m || !this.cmds.has(m[1]) || !this.env[m[1]] || (m[2] && jsLike.test(m[2]))) return null;
+        if (!m || (m[2] && jsLike.test(m[2]))) return null;
+        if (!this.cmds.has(m[1]) || !this.env[m[1]]) {
+          // ~/bin・/bin にある同じ名前（または 名前.jsh）のスクリプト
+          const sc = this.findScript(m[1]);
+          if (!sc) return null;
+          segs.push({ name: 'run', rest: JSON.stringify(sc) + (m[2] ? ' ' + m[2] : '') });
+          continue;
+        }
         segs.push({ name: m[1], rest: m[2] || '' });
       }
       return segs;
+    }
+
+    // シェル風の行を ; && || で区切る。区切りが無いか、どこかが JavaScript として読むべき部分なら null
+    chain(line) {
+      const parts = []; let cur = '', q = null, op = null, sub = 0;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (q) { if (ch === q) q = null; cur += ch; continue; }
+        if (ch === '"' || ch === "'") { q = ch; cur += ch; continue; }
+        if (ch === '$' && line[i + 1] === '(') { sub++; cur += '$('; i++; continue; }
+        if (sub) { if (ch === '(') sub++; else if (ch === ')') sub--; cur += ch; continue; }
+        const two = line.slice(i, i + 2);
+        if (two === '&&' || two === '||' || ch === ';') { parts.push({ op: op, text: cur.trim() }); op = ch === ';' ? ';' : two; cur = ''; if (ch !== ';') i++; continue; }
+        cur += ch;
+      }
+      parts.push({ op: op, text: cur.trim() });
+      if (parts.length < 2) return null;
+      if (!parts[parts.length - 1].text && parts[parts.length - 1].op === ';') parts.pop(); // 最後の ; は無視
+      for (const p of parts) { if (!p.text) return null; p.segs = this.pipeline(p.text); if (!p.segs) return null; }
+      return parts;
     }
 
     async exec(line, quiet) {
       line = line.trim();
       if (!line) return;
       if (!quiet && this.hist[this.hist.length - 1] !== line) this.hist.push(line);
-      const tty = this.tty;
+      const tty = this.tty, cap0 = tty.capture;
+      this.syncCommands();
+      // コマンド1 && コマンド2（1 が成功したら 2）、|| （失敗したら）、; （どちらでも）
+      const ch = this.chain(line);
+      if (ch) {
+        let ok = true;
+        for (const p of ch) {
+          if ((p.op === '&&' && !ok) || (p.op === '||' && ok)) continue;
+          try { const r = await this.runSegs(p.segs); if (r !== undefined) this.show(r); ok = true; }
+          catch (e) { tty.capture = cap0; this.stdin = null; if (e && e.jshExit) throw e; this.showErr(e); ok = false; }
+          this.status = ok ? this.takeExit() : 1;
+          if (this.exited) return;
+        }
+        return;
+      }
       try {
         let result;
         const segs = this.pipeline(line);
-        if (segs) {
-          // シェル風: コマンド 引数... [| コマンド 引数...] [> ファイル]。前のコマンドの出力は次のコマンドの入力（stdin）になる
-          let data = null;
-          for (let i = 0; i < segs.length; i++) {
-            const sg = segs[i], last = i === segs.length - 1;
-            let args = splitArgs(this.expand(sg.rest)), redir = null;
-            if (last) {
-              const ri = args.findIndex(a => a === '>' || a === '>>');
-              if (ri >= 0) { redir = { append: args[ri] === '>>', file: args[ri + 1] }; args = args.slice(0, ri); if (!redir.file) throw new Error('リダイレクト先のファイル名がありません'); }
-            }
-            const cap = !last || !!redir;
-            if (cap) tty.capture = [];
-            this.stdin = data; result = undefined;
-            try { result = await this.env[sg.name](...args); }
-            finally {
-              this.stdin = null;
-              if (cap) { const c = tty.capture ? tty.capture.join('') : ''; tty.capture = null; const f = result === undefined ? '' : this.format(result); data = c + f + (f && !f.endsWith('\n') ? '\n' : ''); }
-            }
-            if (cap) result = undefined;
-            if (redir) { const dest = this.abs(redir.file); this.fs.write(dest, (redir.append && this.fs.exists(dest) ? this.fs.read(dest) : '') + data); }
-          }
-        } else if (/^(\.\.?\/|\/|~\/)\S+/.test(line) && this.fs.isFile(this.abs(splitArgs(line)[0]))) {
+        if (segs) result = await this.runSegs(segs);
+        else if (/^(\.\.?\/|\/|~\/)\S+/.test(line) && this.fs.isFile(this.abs(splitArgs(line)[0]))) {
           const a = splitArgs(line);
           result = await this.env.run(...a);
         } else {
@@ -180,10 +236,143 @@
           result = await this.compile(code, true)(this.env);
         }
         if (result !== undefined) this.show(result);
+        this.status = this.takeExit();
       } catch (e) {
-        tty.capture = null; this.stdin = null;
-        tty.println('jsh: ' + (e && e.message ? (e.name && e.name !== 'Error' ? e.name + ': ' : '') + e.message : String(e)), 'err');
+        tty.capture = cap0; this.stdin = null;
+        if (e && e.jshExit) throw e;
+        this.status = 1; this.exitCode = 0;
+        this.showErr(e);
       }
+    }
+
+    // スクリプトが exit N で終わったときの N（なければ 0）
+    takeExit() { const c = this.exitCode | 0; this.exitCode = 0; return c; }
+    // パッケージが OS.registerCommand で足したコマンドを、このシェルのコマンドにする（消えたものは外す）
+    syncCommands() {
+      const ext = OS.commands || {};
+      for (const n in this.extCmds) if (ext[n] !== this.extCmds[n]) { delete this.env[n]; delete this.help[n]; this.cmds.delete(n); delete this.extCmds[n]; }
+      for (const n in ext) {
+        if (this.extCmds[n] === ext[n] || (this.cmds.has(n) && !this.extCmds[n])) continue;
+        const c = ext[n], self = this;
+        this.extCmds[n] = c;
+        this.env[n] = async function (...a) { return c.run.call(c, a, self.io()); };
+        this.help[n] = { usage: c.usage || n, desc: (c.desc || '') + (c.pkg ? '  [' + c.pkg + ']' : '') };
+        this.cmds.add(n);
+      }
+    }
+    // registerCommand の run(args, sh) に渡す道具
+    io() {
+      const self = this, tty = this.tty;
+      return {
+        user: self.user, home: self.home, cwd: self.cwd, fs: self.fs, tty: tty, env: self.env, vars: self.allVars(),
+        stdin: self.stdin, admin: self.admin, root: self.root,
+        print: (...a) => tty.println(a.map(String).join(' ')), write: s => tty.print(String(s)), error: s => tty.println(String(s), 'err'),
+        read: p => tty.read(p == null ? '' : String(p)), abs: p => self.abs(p), cmd: line => self.capture(line),
+        lines: t => { const l = String(t == null ? '' : t).split('\n'); if (l.length && l[l.length - 1] === '') l.pop(); return l; },
+        getopts: (args, takes) => self.env.__getopts(args, takes)
+      };
+    }
+    // 1 行を実行して、画面に出るはずだった文字を返す（$( … ) と cmd("…")）
+    async capture(line) {
+      const tty = this.tty, prev = tty.capture, prevIn = this.stdin, buf = [];
+      tty.capture = buf; this.stdin = null;
+      try { await this.exec(String(line), true); } finally { tty.capture = prev; this.stdin = prevIn; }
+      return buf.join('');
+    }
+    // $( コマンド ) を、そのコマンドの出力（最後の改行を除く）に置き換える。' ' の中は置き換えない
+    async subst(str) {
+      if (!str.includes('$(')) return str;
+      let out = '', q = null;
+      for (let i = 0; i < str.length; i++) {
+        const ch = str[i];
+        if (q === "'") { if (ch === "'") q = null; out += ch; continue; }
+        if (ch === "'" && !q) { q = "'"; out += ch; continue; }
+        if (ch === '"') { q = q === '"' ? null : '"'; out += ch; continue; }
+        if (ch === '$' && str[i + 1] === '(') {
+          let d = 0, j = i + 1, qq = null;
+          for (; j < str.length; j++) { const c = str[j]; if (qq) { if (c === qq) qq = null; continue; } if (c === '"' || c === "'") { qq = c; continue; } if (c === '(') d++; else if (c === ')') { d--; if (!d) break; } }
+          if (d) throw new Error('$( に対応する ) がありません');
+          const r = (await this.capture(str.slice(i + 2, j))).replace(/\n+$/, '');
+          out += q ? r.replace(/"/g, "'") : r; i = j; continue;
+        }
+        out += ch;
+      }
+      return out;
+    }
+    // ~/bin と /bin から、名前（または 名前.jsh）のスクリプトを探す
+    findScript(name) {
+      if (!/^[\w.-]+$/.test(name)) return null;
+      for (const d of [this.home + '/bin', '/bin']) {
+        for (const n of [name, name + '.jsh']) { const p = d + '/' + n; try { if (fs0.isFile(p)) return p; } catch (e) { /* 読めない */ } }
+      }
+      return null;
+    }
+    // スクリプトかどうか: 拡張子 .jsh か、1 行目が #!/bin/jsh
+    static isShellScript(p, text) { return /\.jsh$/i.test(p) || /^#!\s*\S*jsh\b/.test(text); }
+    // シェルスクリプト（.jsh）を実行する。行ごとに jsh の行として実行し、{ ( [ が閉じるまでは次の行とつなげる
+    async runScript(file, args, text) {
+      if (text == null) text = this.fs.read(file);
+      if ((this.depth = (this.depth | 0) + 1) > 32) { this.depth--; throw new Error('スクリプトの呼び出しが深すぎます（32 段まで）'); }
+      const savedPos = this.pos, savedArgs = this.env.args;
+      this.pos = { name: file, args: args.map(String) }; this.env.args = this.pos.args;
+      const lines = String(text).replace(/\r/g, '').split('\n');
+      let buf = '', code = 0;
+      try {
+        for (let i = 0; i < lines.length; i++) {
+          let l = lines[i];
+          if (i === 0 && l.startsWith('#!')) continue;
+          if (!buf) { const t = l.trim(); if (!t || t.startsWith('#') || t.startsWith('//')) continue; }
+          if (/\\$/.test(l)) { buf += l.slice(0, -1) + ' '; continue; } // 行末の \ で次の行につなぐ
+          buf += l;
+          if (openDepth(buf) > 0 && i < lines.length - 1) { buf += '\n'; continue; }
+          const one = buf.trim(); buf = '';
+          // NAME=値（シェルの変数）。値の中の $変数 と $( ) も展開する
+          const m = one.match(/^([A-Za-z_]\w*)=("[^"]*"|'[^']*'|[^\s"'=;|&<>]*)$/);
+          if (m) { const v = m[2]; this.vars[m[1]] = v[0] === "'" ? v.slice(1, -1) : this.expand(await this.subst(v[0] === '"' ? v.slice(1, -1) : v)); this.status = 0; continue; }
+          await this.exec(one, true);
+          if (this.exited) break;
+        }
+      } catch (e) {
+        if (!(e && e.jshExit)) throw e;
+        code = e.code | 0;
+      } finally { this.pos = savedPos; this.env.args = savedArgs; this.depth--; }
+      this.exitCode = code; // exec が $? にする
+    }
+    showErr(e) { if (e && e.quietExit) return; this.tty.println('jsh: ' + (e && e.message ? (e.name && e.name !== 'Error' ? e.name + ': ' : '') + e.message : String(e)), 'err'); }
+
+    // シェル風: コマンド 引数... [< ファイル] [| コマンド 引数...] [> ファイル]。前のコマンドの出力は次のコマンドの入力（stdin）になる
+    async runSegs(segs) {
+      const tty = this.tty;
+      let result;
+      let data = null;
+      const cap0 = tty.capture;
+      for (let i = 0; i < segs.length; i++) {
+        const sg = segs[i], last = i === segs.length - 1;
+        this.exitCode = 0; // パイプの $? は最後のコマンドのもの
+        let args = splitArgs(this.expand(await this.subst(sg.rest))), redir = null;
+        // < ファイル: そのファイルの中身を入力にする（最初のコマンドだけ）
+        const li = args.indexOf('<');
+        if (li >= 0) {
+          if (i > 0) throw new Error('< は最初のコマンドにだけ使えます');
+          if (!args[li + 1]) throw new Error('< のあとにファイル名がありません');
+          data = this.fs.read(this.abs(args[li + 1])); args.splice(li, 2);
+        }
+        if (last) {
+          const ri = args.findIndex(a => a === '>' || a === '>>');
+          if (ri >= 0) { redir = { append: args[ri] === '>>', file: args[ri + 1] }; args = args.slice(0, ri); if (!redir.file) throw new Error('リダイレクト先のファイル名がありません'); }
+        }
+        const cap = !last || !!redir;
+        if (cap) tty.capture = [];
+        this.stdin = data; result = undefined;
+        try { result = await this.env[sg.name](...args); }
+        finally {
+          this.stdin = null;
+          if (cap) { const c = tty.capture ? tty.capture.join('') : ''; tty.capture = cap0; const f = result === undefined ? '' : this.format(result); data = c + f + (f && !f.endsWith('\n') ? '\n' : ''); }
+        }
+        if (cap) result = undefined;
+        if (redir) { const dest = this.abs(redir.file); this.fs.write(dest, (redir.append && this.fs.exists(dest) ? this.fs.read(dest) : '') + data); }
+      }
+      return result;
     }
 
     format(v) { return v instanceof Listing ? v.join('\n') : inspect(v); }
@@ -237,6 +426,7 @@
         if (name) { const x = self.help[name]; if (!x) throw new Error(name + ': そのようなコマンドはありません'); return x.usage + '\n  ' + x.desc; }
         tty.println('jsh — 入力はJavaScriptです。「ls -l /sys」のようなシェル風の書き方も使えます。', 'dim');
         tty.println('例: ls("/sys").length   /   for (const f of ls()) echo(f)   /   echo hello > memo.txt', 'dim');
+        tty.println('パイプ: ls | grep .js | wc -l   /   sort < list.txt   /   つなぐ: cd /tmp && ls ; echo おわり', 'dim');
         const names = Object.keys(self.help).sort(), w = Math.max(...names.map(n => self.help[n].usage.length));
         names.forEach(n => { tty.print(self.help[n].usage.padEnd(w + 2), 'accent'); tty.println(self.help[n].desc); });
       });
@@ -261,7 +451,10 @@
         }
         const l = Listing.from(shown); l.base = base; return l;
       });
-      def('cat', 'cat ファイル', 'ファイルの中身（JSでは文字列を返す）', p => { const q = A(p), s = fs.stat(q); if (s && s.b) return '[バイナリ ' + fmtSize(s.c.length) + ']'; return fs.read(q); });
+      def('cat', 'cat [ファイル...]', 'ファイルの中身（JSでは文字列を返す。ファイルを省くとパイプの入力をそのまま出す）', (...a) => {
+        if (!a.length) return input([]).replace(/\n$/, '');
+        return a.map(p => { const q = A(p), s = fs.stat(q); if (s && s.b) return '[バイナリ ' + fmtSize(s.c.length) + ']'; return fs.read(q); }).join('');
+      });
       def('write', 'write ファイル テキスト', 'ファイルに書き込む（上書き）', (p, ...t) => { fs.write(A(p), t.join(' ')); });
       def('append', 'append ファイル テキスト', 'ファイルの末尾に1行追加', (p, ...t) => { const q = A(p); fs.write(q, (fs.exists(q) ? fs.read(q) : '') + t.join(' ') + '\n'); });
       def('touch', 'touch ファイル', '空のファイルを作る', p => { const q = A(p); if (!fs.exists(q)) fs.write(q, ''); });
@@ -270,8 +463,26 @@
       def('cp', 'cp コピー元 コピー先', 'コピー（ディレクトリも可）', (a, b) => { if (a == null || b == null) throw new Error('cp コピー元 コピー先'); fs.cp(A(a), A(b)); });
       def('mv', 'mv 移動元 移動先', '移動・名前変更', (a, b) => { if (a == null || b == null) throw new Error('mv 移動元 移動先'); fs.mv(A(a), A(b)); });
       def('stat', 'stat パス', 'ファイル情報', p => { const q = A(p), s = fs.stat(q); if (!s) throw new Error(q + ': そのようなファイルはありません'); return { path: q, type: s.t === 'd' ? 'directory' : 'file', owner: s.o, size: s.t === 'f' ? s.c.length : undefined, binary: !!s.b, modified: fmtDate(s.m) }; });
-      def('grep', 'grep パターン ファイル', '一致する行を表示', (pat, p) => { const re = pat instanceof RegExp ? pat : new RegExp(pat); return fs.read(A(p)).split('\n').filter(l => re.test(l)).join('\n') || undefined; });
-      def('df', 'df', 'ストレージ使用量', () => { const u = fs.usage(); return '使用 ' + fmtSize(u.used) + ' / 約 ' + fmtSize(u.total) + '（' + Math.round(u.used / u.total * 100) + '%）' + (OS.store.ram ? ' [RAMディスク]' : ' [LocalStorage]'); });
+      // grep: ファイルを省くとパイプ（|）の入力から探す。-i 大文字小文字を区別しない / -v 一致しない行 / -n 行番号 / -c 数だけ
+      def('grep', 'grep [-i] [-v] [-n] [-c] パターン [ファイル...]', '一致する行を表示（ファイルを省くとパイプの入力から探す）', (...a) => {
+        const g = getopts(a), pat = g.rest.shift();
+        if (pat == null || pat === '') throw new Error('grep パターン [ファイル...]（例: ls | grep .js）');
+        const re = pat instanceof RegExp ? pat : new RegExp(pat, g.o.i ? 'i' : '');
+        const many = g.rest.length > 1, res = []; let n = 0;
+        const one = (text, name) => lines(text).forEach((l, i) => {
+          re.lastIndex = 0;
+          if (re.test(l) === !g.o.v) { n++; if (!g.o.c) res.push((many ? name + ':' : '') + (g.o.n ? (i + 1) + ':' : '') + l); }
+        });
+        if (g.rest.length) g.rest.forEach(f => one(input([f]), f)); else one(input([]), '');
+        if (g.o.c) return String(n);
+        return res.length ? out(res) : undefined;
+      });
+      def('df', 'df', 'ストレージ使用量（HDD1 をつないでいればそれも）', () => {
+        const u = fs.usage(), rows = ['/          ' + (u.disk ? '使用 ' + fmtSize(u.used) + (u.total ? ' / ' + fmtSize(u.total) + '（' + Math.round(u.used / u.total * 100) + '%）' : '（上限なし）') : '使用 ' + fmtSize(u.used) + ' / 約 ' + fmtSize(u.total) + '（' + Math.round(u.used / u.total * 100) + '%）') + ' [' + OS.storeLabel() + ']'];
+        if (OS.hdd.mounted) rows.push(OS.hdd.at.padEnd(11) + 'PC のフォルダ「' + OS.hdd.name + '」 [HDD1]');
+        else if (OS.hdd.waiting) rows.push(OS.hdd.at.padEnd(11) + '（未接続: 「' + OS.hdd.waiting + '」。mount hdd1 で接続）');
+        return rows.join('\n');
+      });
       def('wget', 'wget URL [保存先]', 'URLをhFSにダウンロード', async (url, dest) => {
         if (!url) throw new Error('URLを指定してください');
         let name = 'download'; try { name = decodeURIComponent(new URL(url).pathname.split('/').pop()) || 'index.html'; } catch (e) { throw new Error('URLが正しくありません'); }
@@ -318,26 +529,35 @@
         if ((await tty.read(name + ' とそのホームを削除しますか? [y/N] ')).trim().toLowerCase() !== 'y') return '中止しました';
         users.remove(name); return name + ' を削除しました';
       });
-      def('exit', 'exit', 'シェルを終了（suから戻る / ログアウト）', () => {
+      def('exit', 'exit [終了コード]', 'シェルを終了（suから戻る / ログアウト）。スクリプトの中ではスクリプトを終わる', code => {
+        if (self.depth > 0) throw { jshExit: true, code: Number(code) || 0 };
         const prev = self.stack.pop();
         if (prev) { self.user = prev.user; self.cwd = prev.cwd; } else self.exited = true;
       });
       alias('logout', 'exit');
 
-      def('run', 'run スクリプト [引数...]', 'jshスクリプト(.js)を実行。引数は args で受け取る', async (p, ...a) => {
-        const code = fs.read(A(p)), old = env.args;
+      def('run', 'run スクリプト [引数...]', 'スクリプトを実行。.jsh（か #!/bin/jsh）はシェルスクリプト、ほかは JavaScript。引数は $1… / args', async (p, ...a) => {
+        if (!p) throw new Error('スクリプトを指定してください');
+        const q = A(p), code = fs.read(q);
+        if (Jsh.isShellScript(q, code)) return self.runScript(q, a, code);
+        const old = env.args;
         env.args = a;
         try { return await self.compile(code, false)(env); } finally { env.args = old; }
       });
+      def('source', 'source スクリプト [引数...]', 'シェルスクリプトを今のシェルで実行（変数・エイリアス・cd がそのまま残る）', async (p, ...a) => {
+        if (!p) throw new Error('スクリプトを指定してください');
+        return self.runScript(A(p), a);
+      });
+      def('cmd', 'cmd "コマンド"', 'コマンドを実行して、出力を文字列で返す（JS から: await cmd("ls | wc -l")）', async line => (await self.capture(line == null ? '' : line)).replace(/\n$/, ''));
       def('sleep', 'sleep ミリ秒', '指定時間待つ（await sleep(500)）', ms => new Promise(r => setTimeout(r, Number(ms) || 0)));
       def('read', 'read [プロンプト]', '1行入力を受け取る（await read("? ")）', p => tty.read(p == null ? '' : String(p)));
       def('history', 'history', '入力履歴', () => self.hist.map((l, i) => String(i + 1).padStart(4) + '  ' + l).join('\n'));
       def('date', 'date', '現在の日時', () => new Date().toLocaleString('ja-JP'));
-      def('uname', 'uname', 'システム情報', () => 'htmlOS ' + OS.version + ' (' + (OS.store.ram ? 'ramdisk' : 'localstorage') + ') ' + navigator.userAgent);
+      def('uname', 'uname', 'システム情報', () => OS.name + ' ' + OS.version + ' [' + OS.htui.sdk.full + '] (' + (OS.store.ram ? 'ramdisk' : OS.store.disk ? 'hdd1' : 'localstorage') + ') ' + navigator.userAgent);
       def('neofetch', 'neofetch', 'システム情報をそれっぽく表示', () => {
         const u = fs.usage(), art = ['  <  / >  ', ' <  /  > ', '<  /   >', ' <  /  > ', '  <  / >  ', '          '];
         const who = self.user + '@' + OS.hostname(), de = OS.htui.running && OS.htui.sessionId ? OS.sessions[OS.htui.sessionId].name : 'なし（CUI）';
-        const info = [who, '-'.repeat(who.length), 'OS: htmlOS ' + OS.version + (OS.live ? ' (Live)' : ''), 'Shell: jsh', 'DE: ' + de, 'Disk: ' + fmtSize(u.used) + ' / ' + fmtSize(u.total) + (OS.store.ram ? ' (RAM)' : ' (LocalStorage)')];
+        const info = [who, '-'.repeat(who.length), 'OS: ' + OS.name + ' (' + OS.version + ')' + (OS.live ? ' (Live)' : ''), 'Shell: jsh', 'UI: ' + OS.htui.sdk.full, 'DE: ' + de, 'Disk: ' + fmtSize(u.used) + (u.disk && !u.total ? '' : ' / ' + fmtSize(u.total)) + ' (' + (OS.store.ram ? 'RAM' : OS.storeLabel()) + ')'];
         art.forEach((a, i) => { tty.print(a + '  ', 'accent'); tty.println(info[i] || ''); });
       });
 
@@ -387,6 +607,70 @@
       def('hstore', 'hstore', 'パッケージマネージャ', () => { OS.launch('hstore'); });
       def('hbackup', 'hbackup', 'バックアップ', () => { OS.launch('hbackup'); });
       def('hserial', 'hserial', 'シリアルモニター', () => { OS.launch('hserial'); });
+      def('hmd', 'hmd [ファイル]', 'Markdown エディター（コードとプレビュー）', p => { OS.launch('hmd', p == null ? null : A(p)); });
+      def('hmines', 'hmines', 'マインスイーパー風のゲーム', () => { OS.launch('hmines'); });
+      // HTUi Studio の CLI 版（GUI 版と同じ OS.studio を使う）
+      def('hstudio', 'hstudio new app|cmd|de 名前 / list / build / run / install / open [プロジェクト]', 'HTUi Studio（アプリ・コマンド・デスクトップ環境を作る）', async (sub, ...a) => {
+        if (!OS.studio) { try { OS.loadFile('/sys/apps/24-hstudio.js'); } catch (e) { /* 下で知らせる */ } }
+        const S = OS.studio;
+        if (!S) throw new Error('HTUi Studio が見つかりません');
+        const usage = ['使い方: hstudio <サブコマンド>',
+          '  new app|cmd|de 名前   新しいプロジェクトを ~/Projects/名前 に作る（app=アプリケーション, cmd=コマンド, de=デスクトップ環境）',
+          '  list                  ~/Projects のプロジェクトの一覧',
+          '  build [プロジェクト]   ビルドして build/ID.js を作る',
+          '  run [プロジェクト] [引数…]  インストールせずに試す（コマンドは引数を付けて実行、アプリは起動、デスクトップ環境は切り替え）',
+          '  install [プロジェクト] /apps にインストール（root のパスワードが要る）',
+          '  open [プロジェクト]    GUI 版で開く',
+          '  templates             作れるものの一覧',
+          'プロジェクトは名前（~/Projects の中）かフォルダのパス。省略すると今のディレクトリ'].join('\n');
+        if (!sub || sub === 'help' || sub === '-h' || sub === '--help') return usage;
+        const projOf = p => {
+          const cands = p ? [A(p), path.join(S.projectsDir(self.user), p)] : [self.cwd];
+          for (const d of cands) if (S.isProject(fs, d)) return S.load(fs, d);
+          throw new Error((p || self.cwd) + ': HTUi Studio のプロジェクトが見つかりません（hstudio list で一覧）');
+        };
+        const show = r => { r.log.forEach(l => tty.println(S.fmt(l), l.lv === 'err' ? 'err' : l.lv === 'ok' ? 'ok' : l.lv === 'warn' ? 'accent' : 'dim')); if (!r.ok) throw Object.assign(new Error('失敗しました'), { quietExit: true }); };
+        if (sub === 'templates') return Object.keys(S.TYPES).map(k => k.padEnd(4) + S.TYPES[k].label + ' — ' + S.TYPES[k].desc).join('\n');
+        if (sub === 'new') {
+          const type = a[0], name = a.slice(1).join(' ');
+          if (!S.TYPES[type] || !name) throw new Error('hstudio new app|cmd|de 名前');
+          const dir = S.create(fs, self.user, type, name);
+          return S.TYPES[type].label + 'のプロジェクトを作りました: ' + dir + '\n  main.js を書いたら  hstudio run "' + name + '"  で試せます';
+        }
+        if (sub === 'list') {
+          const l = S.list(fs, self.user);
+          if (!l.length) return 'プロジェクトはありません（hstudio new app 名前 で作れます）';
+          return l.map(p => (p.meta.id || '').padEnd(16) + (S.TYPES[p.meta.type] ? S.TYPES[p.meta.type].label : '?').padEnd(10) + p.meta.version.padEnd(8) + p.dir).join('\n');
+        }
+        if (sub === 'build') { show(S.build(fs, projOf(a[0]))); return; }
+        if (sub === 'run') {
+          // プロジェクトが省略されていて、最初の引数がプロジェクトでなければ、今のディレクトリのプロジェクトに引数を渡す
+          let p, rest;
+          try { p = projOf(a[0]); rest = a.slice(1); } catch (e) { if (!a.length) throw e; p = projOf(null); rest = a; }
+          const m = p.meta;
+          const r = S.run(fs, p, { launch: m.type !== 'de' });
+          show(r);
+          if (m.type === 'cmd') { self.syncCommands(); return env[m.id](...rest); }
+          if (m.type === 'de') { if (!OS.htui.running || !OS.htui.user) return 'HTUi を起動すると選べます（htui start ' + m.id + '）'; setTimeout(() => OS.htui.switchSession(m.id), 0); return m.name + ' に切り替えます（戻すときは htui session htui）'; }
+          return;
+        }
+        if (sub === 'install') {
+          const p = projOf(a[0]);
+          let who = self.user;
+          if (!self.root) {
+            if (!(await users.verify('root', await tty.read('root のパスワード: ', { mask: true })))) throw new Error('認証に失敗しました');
+            who = 'root';
+          }
+          show(S.install(fs, p, who)); return;
+        }
+        if (sub === 'open') {
+          let d = null;
+          if (a[0] || S.isProject(fs, self.cwd)) d = projOf(a[0]).dir;
+          OS.launch('hstudio', d); return;
+        }
+        throw new Error(usage);
+      });
+      alias('studio', 'hstudio');
       def('apps', 'apps', 'アプリ一覧（ID）', () => Object.values(OS.apps).map(a => a.id.padEnd(12) + a.name + (a.pkg ? '  [' + a.pkg + ']' : '')).join('\n'));
       def('launch', 'launch アプリID [引数]', 'アプリを起動', (id, arg) => { if (!id) throw new Error('アプリIDを指定してください（apps で一覧）'); OS.launch(id, arg); });
       def('pkg', 'pkg list|install|remove', 'パッケージ管理: pkg install ファイルかURL / pkg remove 名前.js', async (sub, target) => {
@@ -444,6 +728,7 @@
       };
       const lines = t => { const l = String(t).split('\n'); if (l.length && l[l.length - 1] === '') l.pop(); return l; };
       const out = l => l.join('\n');
+      Object.defineProperty(env, '__getopts', { value: getopts, enumerable: false });
       def('head', 'head [-n 行数] [ファイル...]', '先頭の行を表示（既定 10 行）', (...a) => { const g = getopts(a, 'n'); return out(lines(input(g.rest)).slice(0, Number(g.o.n || 10))); });
       def('tail', 'tail [-n 行数] [ファイル...]', '末尾の行を表示（既定 10 行）', (...a) => { const g = getopts(a, 'n'), n = Number(g.o.n || 10); const l = lines(input(g.rest)); return out(n ? l.slice(-n) : []); });
       def('wc', 'wc [-l] [-w] [-c] [ファイル...]', '行数・単語数・文字数を数える', (...a) => {
@@ -503,11 +788,6 @@
         tty.println('--- ' + A(f1), 'dim'); tty.println('+++ ' + A(f2), 'dim');
         res.forEach(r => Array.isArray(r) ? tty.println(r[0], r[1] === 'add' ? 'ok' : 'err') : tty.println(r));
       });
-      env.grep = (pat, ...files) => {
-        const re = pat instanceof RegExp ? pat : new RegExp(pat);
-        return lines(input(files)).filter(l => re.test(l)).join('\n') || undefined;
-      };
-      self.help.grep = { usage: 'grep パターン [ファイル...]', desc: '一致する行を表示（パイプでも使える）' };
 
       // ======== ファイル操作
       const walk = (p, fn, depth) => {
@@ -585,11 +865,53 @@
         }).join('\n');
       });
 
+      // sed: s/パターン/置き換え/フラグ だけ使える。パターンは JavaScript の正規表現、置き換えでは $1 や $& が使える
+      def('sed', "sed 's/パターン/置き換え/[g][i]' [ファイル...]", '各行の文字を置き換える（例: ls | sed s/.txt/.md/）', (...a) => {
+        const g = getopts(a), cmd = String(g.rest.shift() || ''), d = cmd[1];
+        if (cmd[0] !== 's' || !d || /[\w\s\\]/.test(d)) throw new Error("sed 's/パターン/置き換え/g' の形で書いてください");
+        const parts = []; let cur = '';
+        for (let i = 2; i < cmd.length; i++) { if (cmd[i] === '\\' && cmd[i + 1] === d) { cur += d; i++; } else if (cmd[i] === d) { parts.push(cur); cur = ''; } else cur += cmd[i]; }
+        parts.push(cur);
+        if (parts.length !== 3 || /[^gim]/.test(parts[2])) throw new Error("sed 's/パターン/置き換え/g' の形で書いてください");
+        const re = new RegExp(parts[0], parts[2]);
+        return out(lines(input(g.rest)).map(l => l.replace(re, parts[1])));
+      });
+
+      // xargs: パイプで受け取った文字を、空白や改行で区切ってコマンドの引数の後ろに並べて実行する
+      def('xargs', 'xargs コマンド [引数...]', '受け取った文字を引数にしてコマンドを実行（例: find ~ -name "*.tmp" | xargs rm）', async (cmd, ...rest) => {
+        if (!cmd) throw new Error('xargs コマンド [引数...]');
+        if (!self.cmds.has(cmd) || !env[cmd] || cmd === 'xargs') throw new Error(cmd + ': そのようなコマンドはありません');
+        const words = splitArgs(input([]).replace(/\n/g, ' '));
+        self.stdin = null;
+        return env[cmd](...rest, ...words);
+      });
+
+      // ======== ドライブ（HDD1 = File System Access API で選んだ PC のフォルダ）
+      def('mount', 'mount [hdd1] [-p]', 'ドライブの一覧。mount hdd1 で PC のフォルダを /mnt/hdd1 に接続（-p でフォルダを選び直す）', async (...a) => {
+        const g = getopts(a), dev = g.rest[0];
+        if (!dev) {
+          const rows = [OS.hdd.root ? 'hdd1   /           PC のフォルダ「' + OS.hdd.name + '」（ここから起動）' : 'hdd0   /           ' + OS.storeLabel()];
+          if (!OS.hdd.root) rows.push('hdd1   ' + OS.hdd.at.padEnd(12) + (OS.hdd.mounted ? 'PC のフォルダ「' + OS.hdd.name + '」' : OS.hdd.supported ? '未接続' + (OS.hdd.waiting ? '（「' + OS.hdd.waiting + '」の許可待ち）' : '') + ' — mount hdd1 で接続' : 'このブラウザでは使えません'));
+          return rows.join('\n');
+        }
+        if (dev !== 'hdd1') throw new Error(dev + ': そのようなドライブはありません（使えるのは hdd1 です）');
+        if (g.o.p && OS.hdd.mounted) await OS.hdd.unmount();
+        tty.println('HDD1 を読み込んでいます…', 'dim');
+        const r = await OS.hdd.mount(!!g.o.p);
+        return 'HDD1（PC のフォルダ「' + r.name + '」）を ' + OS.hdd.at + ' に接続しました（' + r.items + ' 項目' + (r.skipped.length ? '。32MB を超える ' + r.skipped.length + ' 個のファイルは読み込んでいません' : '') + '）';
+      });
+      def('umount', 'umount hdd1', 'HDD1 を切り離す（PC のフォルダの中身はそのまま）', async dev => {
+        if (dev != null && dev !== 'hdd1' && dev !== OS.hdd.at) throw new Error(dev + ': そのようなドライブはありません');
+        await OS.hdd.unmount();
+        if (self.cwd === OS.hdd.at || self.cwd.startsWith(OS.hdd.at + '/')) self.cwd = self.home;
+        return 'HDD1 を切り離しました';
+      });
+
       // ======== システム情報・シェル
       def('free', 'free', 'メモリとストレージの使用量', () => {
         const pm = performance.memory, u = fs.usage(), rows = [['', '合計', '使用', '空き']];
         if (pm) rows.push(['JS ヒープ', fmtSize(pm.jsHeapSizeLimit), fmtSize(pm.usedJSHeapSize), fmtSize(pm.jsHeapSizeLimit - pm.usedJSHeapSize)]);
-        rows.push([OS.store.ram ? 'RAM ディスク' : 'LocalStorage', fmtSize(u.total), fmtSize(u.used), fmtSize(Math.max(0, u.total - u.used))]);
+        rows.push(u.disk ? ['HDD1', u.total ? fmtSize(u.total) : '-', fmtSize(u.used), u.total ? fmtSize(Math.max(0, u.total - u.used)) : '-'] : [OS.store.ram ? 'RAM ディスク' : 'LocalStorage', fmtSize(u.total), fmtSize(u.used), fmtSize(Math.max(0, u.total - u.used))]);
         const lines2 = rows.map(r => r[0].padEnd(14) + r.slice(1).map(x => x.padStart(11)).join(''));
         if (navigator.deviceMemory) lines2.push('端末のメモリ: 約 ' + navigator.deviceMemory + ' GB（ブラウザが教える目安）');
         if (!pm) lines2.push('（このブラウザは JS ヒープの使用量を教えてくれません）');
@@ -651,7 +973,7 @@
           tty.clear();
           const n = new Date(), z = x => String(x).padStart(2, '0'), u = fs.usage(), pm = performance.memory;
           tty.println('top - ' + z(n.getHours()) + ':' + z(n.getMinutes()) + ':' + z(n.getSeconds()) + '  起動から ' + since(Date.now() - (OS.bootTime || Date.now())) + '  ウィンドウ ' + (OS.htui.running ? OS.htui.wins.length : 0) + ' 個', 'accent');
-          tty.println('ストレージ: ' + fmtSize(u.used) + ' / ' + fmtSize(u.total) + (pm ? '   JS ヒープ: ' + fmtSize(pm.usedJSHeapSize) + ' / ' + fmtSize(pm.jsHeapSizeLimit) : '') + '   CPU: ' + (navigator.hardwareConcurrency || '?') + ' コア');
+          tty.println('ストレージ: ' + fmtSize(u.used) + (u.disk && !u.total ? '' : ' / ' + fmtSize(u.total)) + (pm ? '   JS ヒープ: ' + fmtSize(pm.usedJSHeapSize) + ' / ' + fmtSize(pm.jsHeapSizeLimit) : '') + '   CPU: ' + (navigator.hardwareConcurrency || '?') + ' コア');
           tty.println('');
           tty.println('  PID  ユーザー    状態    アプリ       タイトル', 'dim');
           const wins = OS.htui.running ? OS.htui.wins : [];

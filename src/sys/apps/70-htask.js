@@ -1,7 +1,7 @@
 /* hTask — タスクマネージャ（ウィンドウ一覧とストレージの内訳） */
 (function () {
   const OS = window.OS, h = OS.h, path = OS.path;
-  const fmtSize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(2) + ' MB';
+  const fmtSize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : n < 1073741824 ? (n / 1048576).toFixed(2) + ' MB' : (n / 1073741824).toFixed(2) + ' GB';
   OS.registerApp({
     id: 'htask', name: 'hTask', icon: 'chart', color: '#3a944a', desc: 'タスクマネージャ',
     launch() {
@@ -43,8 +43,8 @@
         const fRows = files.slice(0, 12).map(f => h('tr', null, h('td', null, f.p), h('td', { class: 'num' }, fmtSize(f.size)),
           h('td', { class: 'num' }, h('button', { class: 'btn small', type: 'button', onclick: () => OS.htui.run('hfile', f.p) }, 'hFile で表示'))));
         pane.append(
-          h('p', null, '全体: ' + fmtSize(u.used) + ' / 約 5 MB（' + Math.round(u.used / u.total * 100) + '%）' + (OS.store.ram ? ' ・ RAMディスク' : ' ・ LocalStorage')),
-          h('div', { class: 'bar', style: 'height:12px' }, h('i', { style: 'width:' + Math.min(100, u.used / u.total * 100) + '%' })),
+          h('p', null, '全体: ' + fmtSize(u.used) + (u.disk ? (u.total ? ' / ' + fmtSize(u.total) + '（' + Math.round(u.used / u.total * 100) + '%）' : '（上限なし）') : ' / 約 5 MB（' + Math.round(u.used / u.total * 100) + '%）') + ' ・ ' + OS.storeLabel()),
+          h('div', { class: 'bar', style: 'height:12px' }, h('i', { style: 'width:' + (u.total ? Math.min(100, u.used / u.total * 100) : 0) + '%' })),
           h('h3', null, '場所ごとの使用量'),
           h('table', { class: 'tbl' }, h('tbody', null, gRows)),
           h('h3', null, '大きいファイル（上位12件）'),

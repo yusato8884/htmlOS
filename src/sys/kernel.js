@@ -2,8 +2,25 @@
    このファイルは LocalStorage 上の /sys/kernel.js から読み込まれて実行されます。 */
 (function () {
   'use strict';
-  const BOOT = window.BOOT, store = BOOT.store;
-  const OS = window.OS = { version: BOOT.installedVersion, apps: {}, store: store, live: !!BOOT.live, imode: !!BOOT.imode, safe: !!BOOT.safe };
+  const BOOT = window.BOOT, base = BOOT.store;
+  // ---------- マウント。/mnt/hdd1 のように、あるパスより下のキーだけを別のストレージ（PC のフォルダ）に振り分ける
+  const mounts = [];
+  const mountOf = k => { for (const m of mounts) if (k === m.key || k.startsWith(m.key + '/')) return m.s; return null; };
+  const store = {
+    get ram() { return base.ram; },
+    get: k => (mountOf(k) || base).get(k),
+    set: (k, v) => (mountOf(k) || base).set(k, v),
+    del: k => (mountOf(k) || base).del(k),
+    keys(prefix) { let out = base.keys(prefix).filter(k => !mountOf(k)); for (const m of mounts) out = out.concat(m.s.keys(prefix)); return out; },
+    wipe: () => base.wipe()
+  };
+  // OS.store はシステムのドライブ（LocalStorage か、HDD1 から起動したときは HDD1）。マウントしたドライブは含まない
+  const OS = window.OS = { version: BOOT.installedVersion, apps: {}, store: base, live: !!BOOT.live, imode: !!BOOT.imode, safe: !!BOOT.safe };
+  // コードネーム（恒星の名前）と「htmlOS 3.2 Sirius」のような名前
+  try { OS.codename = (JSON.parse(base.get('meta')) || {}).codename || (OS.version === BOOT.version ? BOOT.codename : '') || ''; } catch (e) { OS.codename = ''; }
+  OS.name = BOOT.osName ? BOOT.osName(OS.version, OS.codename) : 'htmlOS ' + OS.version;
+  // システムのドライブの名前（df や設定に出す）
+  OS.storeLabel = () => base.disk ? 'HDD1（' + base.name + '）' : base.ram ? 'RAMディスク' : 'LocalStorage';
 
   // ---------- DOM ヘルパー
   function h(tag, attrs, ...kids) {
@@ -76,8 +93,20 @@
     monitor: '<rect x="3" y="4" width="18" height="12" rx="1"/><path d="M8 20h8M12 16v4"/>',
     win: '<path d="M8 7l-5 5 5 5M16 7l5 5-5 5M13.5 5l-3 14"/>', // htmlOS のマーク </>（Windows 風の環境のスタートに使う）
     down: '<path d="M6 9l6 6 6-6"/>',
-    grid: '<rect x="4" y="4" width="6" height="6"/><rect x="14" y="4" width="6" height="6"/><rect x="4" y="14" width="6" height="6"/><rect x="14" y="14" width="6" height="6"/>'
+    grid: '<rect x="4" y="4" width="6" height="6"/><rect x="14" y="4" width="6" height="6"/><rect x="4" y="14" width="6" height="6"/><rect x="14" y="14" width="6" height="6"/>',
+    markdown: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M5.5 15V9l3 3 3-3v6M17 9v6M14.5 12.5L17 15l2.5-2.5"/>',
+    mine: '<circle cx="12" cy="13" r="5.5"/><path d="M12 4v3.5M12 18.5V21M3.5 13H6.5M17.5 13h3M6 7l2.1 2.1M18 7l-2.1 2.1M6 19l2.1-2.1M18 19l-2.1-2.1"/><circle cx="10" cy="11" r="1"/>',
+    flag: '<path d="M6 21V4M6 4h11l-2.5 4L17 12H6"/>',
+    drive: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 14h.01M11 14h6"/>',
+    code: '<path d="M9 4C6 4 7.5 10 4.5 12 7.5 14 6 20 9 20M15 4c3 0 1.5 6 4.5 8-3 2-1.5 8-4.5 8"/>',
+    hammer: '<path d="M13 7l4-4 4 4-4 4zM15 9L5 19a1.4 1.4 0 0 1-2-2L13 7"/>',
+    info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/>',
+    stop: '<rect x="6" y="6" width="12" height="12" rx="1.5"/>',
+    layers: '<path d="M12 3l9 5-9 5-9-5zM3 12.5l9 5 9-5M3 16.5l9 5 9-5"/>',
+    studio: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 8h18M9 12l-2.5 2.5L9 17M15 12l2.5 2.5L15 17M13 11.5l-2 6"/>',
+    script: '<path d="M6 3h8l4 4v14H6zM14 3v4h4M9 12l2 2-2 2M13 16h3"/>'
   };
+  OS.iconNames = Object.keys(ICONS).filter(n => n !== 'win');
   OS.icon = function (name, size) {
     size = size || 18;
     return h('span', { class: 'ico', 'aria-hidden': 'true', html: '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + (ICONS[name] || ICONS.file) + '</svg>' });
@@ -125,7 +154,7 @@
   }
   function put(p, node) {
     try { store.set(K(p), JSON.stringify(node)); }
-    catch (e) { throw new Error('ストレージの空き容量が足りません（LocalStorageの上限は約5MBです）'); }
+    catch (e) { if (mountOf(K(p)) || base.disk) throw e; throw new Error('ストレージの空き容量が足りません（LocalStorageの上限は約5MBです）'); }
     changed(p);
   }
   const fs = OS.fs = {
@@ -196,6 +225,7 @@
       if (p === '/') throw new Error('/ は削除できません');
       const q = fs._here(p), s = fs._raw(q);
       if (!s) throw new Error(p + ': そのようなファイルはありません');
+      if (mounts.some(m => m.at === q)) throw new Error(p + ' はドライブの接続先（マウントポイント）なので消せません。切り離すときは jsh で umount ' + path.base(q));
       if (s.t === 'd') {
         if (fs.list(q).length && !opt.recursive) throw new Error(p + ': ディレクトリが空ではありません（-r が必要です）');
         store.keys(K(q + '/')).forEach(k => store.del(k));
@@ -222,15 +252,17 @@
     // 移動はリンクそのものを動かす
     mv(a, b) {
       const src = fs._here(a); if (!fs._raw(src)) throw new Error(a + ': そのようなファイルはありません');
+      if (mounts.some(m => m.at === src || m.at.startsWith(src + '/'))) throw new Error(a + ': ドライブの接続先（マウントポイント）を含むので移動できません');
       const d = fs._here(fs.dest(a, b));
       if (d === src || d.startsWith(src + '/')) throw new Error('自分自身の中には移動できません');
       if (!fs.isDir(path.dir(d))) throw new Error(path.dir(d) + ': ディレクトリがありません');
       fs._cp(src, d); fs.rm(src, { recursive: true }); return d;
     },
+    // システムのドライブの使用量。HDD1（PC のフォルダ）から起動しているときは disk が true、total は設定した上限（なければ 0）
     usage() {
       let used = 0;
-      for (const k of store.keys()) used += k.length + 7 + (store.get(k) || '').length;
-      return { used: used, total: 5 * 1024 * 1024 };
+      for (const k of base.keys()) used += k.length + 7 + (base.get(k) || '').length;
+      return base.disk ? { used: base.used ? base.used() : used, total: base.quota ? base.quota() : 0, disk: true } : { used: used, total: 5 * 1024 * 1024 };
     },
     kind(p) { const e = path.ext(p); for (const k in KINDS) if (KINDS[k].includes(e)) return k; return 'other'; },
     mime(p) { return MIME[path.ext(p)] || 'text/plain'; },
@@ -299,13 +331,17 @@
     async verify(name, pw) { const u = users.get(name); return !!u && !!u.pw && BOOT.verify(pw, u.pw); },
     ensureHome(name) {
       const home = users.home(name);
-      if (fs.exists(home)) return;
+      // ホームが無いか空のときだけ、サンプルのファイルも入れる。いつものフォルダ（Desktop など）は、無ければ毎回作る
+      let empty = true;
+      try { empty = !fs.exists(home) || !fs.list(home).length; } catch (e) { /* 読めなければ空とみなす */ }
       const o = { owner: name, parents: true };
-      if (name === 'root') { fs.mkdir(home + '/.config', o); return; }
-      ['Desktop', 'Documents', 'Downloads', 'Pictures', 'Music', 'Videos', '.config'].forEach(d => fs.mkdir(home + '/' + d, o));
+      const mk = d => { const p = home + '/' + d; if (!fs.exists(p) && !fs.isLink(p)) { try { fs.mkdir(p, o); } catch (e) { /* 作れなければ飛ばす */ } } };
+      if (name === 'root') { mk('.config'); return; }
+      ['Desktop', 'Documents', 'Downloads', 'Pictures', 'Music', 'Videos', '.config'].forEach(mk);
+      if (!empty) return;
       const w = (p, c, bin) => fs.write(home + '/' + p, c, { owner: name, bin: bin });
       w('Documents/readme.txt', [
-        'htmlOS ' + OS.version + ' へようこそ',
+        OS.name + '（' + OS.version + '）へようこそ',
         '',
         'このOSはブラウザのLocalStorageにインストールされています。',
         '容量は全体で約5MBです（画像や音声はすぐ一杯になります）。',
@@ -330,6 +366,23 @@
         'echo("おしまい");',
         ''
       ].join('\n'));
+      w('Documents/hello.jsh', [
+        '#!/bin/jsh',
+        '# シェルスクリプト（.jsh）のサンプルです。Terminal で  ./Documents/hello.jsh 悠  か  run ~/Documents/hello.jsh 悠  と打つと動きます。',
+        '# 1 行ずつ jsh の行として実行します。$1 は 1 つめの引数、$# は引数の数、$(コマンド) はそのコマンドの出力です。',
+        'NAME=${1}',
+        'echo こんにちは、${NAME} さん（引数は $# 個）',
+        'echo ホームには $(ls ~ | wc -l) 個の項目があります',
+        'echo Documents の .md ファイル: $(ls ~/Documents | grep -c .md) 個',
+        'whoami && echo ↑ $(whoami) としてログインしています',
+        '# if や for は JavaScript で書きます。{ が閉じるまでの行はまとめて実行します',
+        'for (const n of [3, 2, 1]) {',
+        '  echo(n + "...");',
+        '  await sleep(300);',
+        '}',
+        'echo おしまい',
+        ''
+      ].join('\n'));
       w('Documents/welcome.html', '<!DOCTYPE html>\n<html lang="ja"><meta charset="utf-8"><title>ようこそ</title>\n<body style="font-family:sans-serif;max-width:40em;margin:2em auto;padding:0 1em;line-height:1.7">\n<h1>hBrowser へようこそ</h1>\n<p>これは htmlOS のファイルシステム（LocalStorage）に保存されているHTMLファイルです。hedit で編集して、hBrowser で再読み込みしてみてください。</p>\n<p><a href="https://ja.wikipedia.org/wiki/HTML">Wikipedia: HTML</a></p>\n</body></html>\n');
       w('Pictures/htmlos.svg', '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1f3a5f"/><stop offset="1" stop-color="#5fa8d3"/></linearGradient></defs><rect width="320" height="200" fill="url(#g)"/><g fill="none" stroke="#fff" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"><path d="M110 70l-40 30 40 30"/><path d="M210 70l40 30-40 30"/><path d="M175 55l-30 90"/></g><text x="160" y="182" font-family="monospace" font-size="18" fill="#fff" text-anchor="middle">htmlOS</text></svg>\n');
       try { w('Music/chime.wav', chime(), true); } catch (e) { /* 容量不足なら無くてよい */ }
@@ -349,13 +402,64 @@
     return 'data:audio/wav;base64,' + btoa(b);
   }
 
+  // ---------- HDD1（File System Access API で選んだ PC のフォルダ）
+  //   htmlOS を LocalStorage から起動しているときは /mnt/hdd1 に接続（マウント）する。
+  //   HDD1 から起動しているときは HDD1 が / そのものなので、/mnt/hdd1 には何もつながない
+  const HDD_AT = '/mnt/hdd1', HD = BOOT.hdd || { supported: false };
+  const hdd = OS.hdd = {
+    at: HDD_AT,
+    get supported() { return !!HD.supported; },
+    get root() { return !!base.disk; },
+    get mounted() { return mounts.some(m => m.at === HDD_AT); },
+    get name() { const m = mounts.find(x => x.at === HDD_AT); return m ? m.s.name : base.disk ? base.name : null; },
+    waiting: null, // 前に使ったフォルダ（許可を待っている）の名前
+    // 接続する。pick=true なら別のフォルダを選び直す。ボタンやコマンドなど、ユーザーの操作の中で呼ぶこと
+    async mount(pick, progress) {
+      if (base.disk) throw new Error('htmlOS は HDD1 から起動しています（HDD1 は / そのものです）');
+      if (!HD.supported) throw new Error('このブラウザは File System Access API（showDirectoryPicker）に対応していません。パソコンの Chrome・Edge などで使えます');
+      if (hdd.mounted) throw new Error('HDD1 はすでに ' + HDD_AT + ' に接続されています');
+      let dir = pick ? null : await HD.saved();
+      if (!dir) dir = await HD.pick();
+      if (!(await HD.allowed(dir, true))) throw new Error('フォルダを使う許可がもらえませんでした');
+      return attach(dir, progress);
+    },
+    async unmount() {
+      const i = mounts.findIndex(m => m.at === HDD_AT);
+      if (i < 0) throw new Error('HDD1 は接続されていません');
+      await mounts[i].s.flush();
+      mounts.splice(i, 1); changed(HDD_AT); changed('/mnt');
+    },
+    // 覚えているフォルダを忘れる（PC のフォルダの中身は消さない）
+    async forget() { if (hdd.mounted) await hdd.unmount(); hdd.waiting = null; await HD.forget(); },
+    // 起動したとき: 前に使ったフォルダがあって、許可が残っていれば自動で接続する
+    async auto() {
+      if (base.disk || !HD.supported || hdd.mounted) return null;
+      const dir = await HD.saved(); if (!dir) return null;
+      if (!(await HD.allowed(dir, false))) { hdd.waiting = dir.name; return null; }
+      return attach(dir);
+    },
+    flush: () => Promise.all(mounts.map(m => m.s.flush()))
+  };
+  async function attach(dir, progress) {
+    const s = await HD.open(dir, HDD_AT, progress);
+    s.onerror = (what, e) => { if (OS.notify && OS.htui && OS.htui.user) OS.notify({ app: 'HDD1', icon: 'archive', title: 'HDD1 に書き込めませんでした', body: what + ': ' + ((e && e.message) || e) }); };
+    if (!base.get(K('/mnt'))) base.set(K('/mnt'), JSON.stringify({ t: 'd', m: Date.now(), o: 'root' }));
+    mounts.push({ at: HDD_AT, key: K(HDD_AT), s: s });
+    hdd.waiting = null;
+    await HD.save(dir);
+    changed('/mnt'); changed(HDD_AT);
+    return { name: dir.name, items: s.count() - 1, skipped: s.skipped };
+  }
+  // 書き出しが終わっていないうちにページを閉じようとしたら止める
+  window.addEventListener('beforeunload', e => { if ([base].concat(mounts.map(m => m.s)).some(s => s.pending && s.pending())) { e.preventDefault(); e.returnValue = ''; } });
+
   // ---------- 権限つきファイルシステム
   //   root      : どこでも読み書きできる
   //   管理者    : 書けるのは自分のホームと /tmp だけ。読むのは /root 以外すべて
   //   一般ユーザー: 書けるのは自分のホームと /tmp だけ。他人のホームと /root は読めない
   OS.fsFor = function (getUser) {
     const me = () => users.get(getUser()) || { name: getUser() };
-    const canW = p => { const u = me(); return !!u.root || p.startsWith('/tmp/') || p.startsWith('/home/' + u.name + '/'); };
+    const canW = p => { const u = me(); return !!u.root || p.startsWith('/tmp/') || p.startsWith('/home/' + u.name + '/') || p.startsWith(HDD_AT + '/'); };
     const canR = p => { const u = me(); if (u.root) return true; if (p === '/root' || p.startsWith('/root/')) return false; if (u.admin) return true; if (p === '/root' || p.startsWith('/root/')) return false; const m = p.match(/^\/home\/([^/]+)/); return !m || m[1] === u.name; };
     // リンクを通した書き込み・読み込みも許可を確かめるため、リンクをたどった先のパスでも調べる
     const realOf = p => { try { return fs.real(p); } catch (e) { return p; } };
@@ -477,6 +581,15 @@
   OS.exec = function (code, name) { return (0, eval)(code + '\n//# sourceURL=hfs://' + name); };
   OS.loadFile = function (p) { return OS.exec(fs.read(p), p); };
   OS.registerApp = function (def) { def.pkg = OS._loading || null; OS.apps[def.id] = def; };
+  // jsh のコマンドを足す（4.0）。run(args, sh) の sh には print / read / stdin / cwd / abs / fs / cmd / getopts などが入る
+  //   OS.registerCommand({ name: 'hello', usage: 'hello [名前]', desc: 'あいさつ', run(args, sh) { return 'こんにちは ' + (args[0] || sh.user); } })
+  OS.commands = {};
+  OS.registerCommand = function (def) {
+    if (!def || !/^[A-Za-z_][\w-]*$/.test(def.name || '')) throw new Error('コマンドの名前は英数字・_・- で書いてください');
+    if (typeof def.run !== 'function') throw new Error(def.name + ': run(args, sh) がありません');
+    def.pkg = OS._loading || null; OS.commands[def.name] = def;
+    return def;
+  };
 
   // ---------- パッケージ（あとから入れるアプリ。/apps/*.js に置かれ、起動時に読み込まれる）
   OS.pkg = {
@@ -484,11 +597,15 @@
     list() { return fs.isDir('/apps') ? fs.list('/apps').filter(n => n.endsWith('.js')) : []; },
     load(name) { OS._loading = name; try { OS.exec(fs.read('/apps/' + name), '/apps/' + name); } finally { OS._loading = null; } },
     _admin(user) { if (!users.isRoot(user)) throw new Error('パッケージの追加・削除には root 権限が必要です（jsh では su で root になってください）'); },
-    _unregister(name) { for (const id in OS.apps) if (OS.apps[id].pkg === name) delete OS.apps[id]; },
+    _unregister(name) {
+      for (const id in OS.apps) if (OS.apps[id].pkg === name) delete OS.apps[id];
+      for (const n in OS.commands) if (OS.commands[n].pkg === name) delete OS.commands[n];
+      for (const id in OS.sessions) if (OS.sessions[id].pkg === name) delete OS.sessions[id];
+    },
     install(name, code, user) {
       OS.pkg._admin(user);
       name = String(name).replace(/[^\w.-]/g, '_'); if (!name.endsWith('.js')) name += '.js';
-      if (!/registerApp\s*\(/.test(code)) throw new Error('アプリのパッケージではありません（OS.registerApp の呼び出しが見つかりません）');
+      if (!/register(App|Command|Session)\s*\(/.test(code)) throw new Error('パッケージではありません（OS.registerApp・OS.registerCommand・OS.registerSession のどれも見つかりません）');
       fs.mkdir('/apps', { parents: true });
       const old = fs.exists('/apps/' + name) ? fs.read('/apps/' + name) : null;
       OS.pkg._unregister(name);
@@ -515,6 +632,7 @@
     const k = fs.kind(p);
     if (k === 'image' || k === 'audio' || k === 'video') return OS.launch('hplayer', p);
     if (k === 'html') return OS.launch('hbrowser', 'hfs:' + p);
+    if (path.ext(p) === 'md' && OS.apps.hmd) return OS.launch('hmd', p);
     const s = fs.stat(p);
     if (s && s.b) throw new Error(path.base(p) + ': このバイナリファイルを開けるアプリがありません');
     return OS.launch('hedit', p);
@@ -580,7 +698,9 @@
     tty.println(); tty.println(label);
     await nap(280);
     if (gui) OS.htui.stop();
-    const steps = (gui ? ['HTUi を停止しました'] : []).concat(['アプリを終了しました', 'ユーザーセッションを閉じました', 'LocalStorage ファイルシステムを同期しました', reboot ? '再起動します' : '電源を切ります']);
+    // PC のフォルダ（HDD1）への書き出しが残っていれば、終わるまで待つ
+    try { await Promise.all([hdd.flush(), BOOT.flushAll ? BOOT.flushAll() : null]); } catch (e) { /* 書けなかった分は通知済み */ }
+    const steps = (gui ? ['HTUi を停止しました'] : []).concat(['アプリを終了しました', 'ユーザーセッションを閉じました', (base.disk ? 'HDD1' : 'LocalStorage') + ' ファイルシステムを同期しました'].concat(hdd.mounted ? ['HDD1 を切り離しました'] : []), [reboot ? '再起動します' : '電源を切ります']);
     for (let i = 0; i < steps.length; i++) {
       tty.print('['); tty.print('  OK  ', 'ok'); tty.println('] ' + steps[i]);
       msg.textContent = steps[i]; bar.style.width = (100 - (i + 1) / steps.length * 100) + '%';
@@ -600,7 +720,7 @@
   // ---------- tty1 のログインループ
   async function ttyLogin(tty) {
     for (;;) {
-      tty.println(); tty.println('htmlOS ' + OS.version + ' (tty1)'); tty.println();
+      tty.println(); tty.println(OS.name + ' (' + OS.version + ') tty1'); tty.println();
       let user = OS.imode ? 'root' : null; // htmlOS i はシングルユーザーモード（root で自動ログイン）
       if (user) tty.println('シングルユーザーモード: root でログインしました', 'dim');
       while (!user) {
@@ -675,7 +795,7 @@
     let splash = null; const bar = h('i'), msg = h('div', { class: 'sp-msg' });
     if (mode === 'gui') {
       // 黒い画面に白い </>。BIOS の Quiet Boot から来たときは、同じ位置にマークがもう出ているので描き直さない
-      splash = h('div', { id: 'splash', class: BOOT.quiet ? 'quiet' : '', role: 'status', 'aria-label': 'htmlOS ' + OS.version + ' を起動しています' }, OS.mark(120, 'sp-mark'), spinner());
+      splash = h('div', { id: 'splash', class: BOOT.quiet ? 'quiet' : '', role: 'status', 'aria-label': OS.name + ' を起動しています' }, OS.mark(120, 'sp-mark'), spinner());
       root.append(splash);
     }
     // htmlOS i は最小構成: Welcome・インストーラー・Terminal・hedit・hFile だけ。セーフモードと htmlOS i ではパッケージ（/apps）を読み込まない
@@ -690,9 +810,9 @@
       done++; bar.style.width = Math.min(100, done / total * 100) + '%'; msg.textContent = s;
       await sleep(85);
     };
-    tty.println((OS.imode ? 'htmlOS i ' : 'htmlOS ') + OS.version + (OS.safe ? '（セーフモード）' : '') + ' を起動しています…');
+    tty.println((OS.imode ? 'htmlOS i ' + OS.version : OS.name + ' (' + OS.version + ')') + (OS.safe ? '（セーフモード）' : '') + ' を起動しています…');
     await sleep(120);
-    await step('LocalStorage ファイルシステムをマウントしました' + (store.ram ? '（RAMディスク: 再読み込みで消えます）' : ''));
+    await step(base.disk ? 'HDD1（PC のフォルダ「' + base.name + '」）をルートとしてマウントしました' : 'LocalStorage ファイルシステムをマウントしました' + (store.ram ? '（RAMディスク: 再読み込みで消えます）' : ''));
     for (const f of core) { OS.loadFile(f); await step(f + ' を読み込みました'); }
     for (const n of apps) {
       try { OS.loadFile('/sys/apps/' + n); await step('アプリ ' + n); }
@@ -704,8 +824,14 @@
     }
     users.ensureRoot();
     users.list().forEach(u => users.ensureHome(u.name));
+    if (!fs.exists('/mnt')) fs.mkdir('/mnt');
+    // HDD1: 前に使ったフォルダの許可が残っていれば /mnt/hdd1 に接続する（許可が要るときは hFile の「HDD1」から）
+    if (!base.disk && HD.supported) {
+      try { const r = await hdd.auto(); if (r) await step('HDD1（' + r.name + '）を ' + HDD_AT + ' にマウントしました'); else if (hdd.waiting) await step('HDD1（' + hdd.waiting + '）: 使う許可を待っています（hFile の HDD1 か、jsh の mount hdd1 で接続）'); }
+      catch (e) { await step('HDD1: ' + e.message, true); }
+    }
     OS.mode = mode;
-    await step(mode === 'gui' ? 'HTUi を起動します' : 'tty1 を起動します');
+    await step(mode === 'gui' ? (OS.htui && OS.htui.sdk ? OS.htui.sdk.full : 'HTUi') + ' を起動します' : 'tty1 を起動します');
     const rest = 1200 - (Date.now() - t0);
     if (rest > 0) await sleep(rest);
     ttyLogin(tty);

@@ -95,7 +95,8 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
    ============================================================ */
 (function () {
   'use strict';
-  var MEDIA_VERSION = '__VERSION__', MEDIA_BUILD = '__BUILD__';
+  // コードネーム: htmlOS は恒星の名前（3.2 = Sirius、4.0 = Vega）、描画エンジン HTUi SDK は惑星の名前（2 = Jupiter、3.0 = Venus）
+  var MEDIA_VERSION = '__VERSION__', MEDIA_BUILD = '__BUILD__', MEDIA_CODENAME = '__CODENAME__';
   var BOOT = window.BOOT = {};
   var P = 'htmlos:';
 
@@ -141,7 +142,202 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       get length() { return mem.size; }
     }, true, function () { return Array.from(mem.keys()); });
   }
-  var store = makeStore(ls, ram), realStore = store;
+  // ---- HDD1: File System Access API で選んだ PC のフォルダ
+  //   フォルダの中身をすべてメモリに読み込み、htmlOS のファイルシステムと同じ形（キー "f:<パス>" → ノードの JSON）で見せる。
+  //   書き込みはメモリにすぐ反映し、PC のフォルダへは裏で順番に書き出す（flush() で書き終わるのを待てる）。
+  //   持ち主・シンボリックリンク・ファイル以外のキー（meta など）は、フォルダの .htmlos.json に入れる。
+  //   選んだフォルダ（ハンドル）は IndexedDB に覚えておく。ブラウザの決まりで、開き直したあとは使う許可をもう一度もらう必要がある
+  var HDD = { supported: typeof window.showDirectoryPicker === 'function' && !!window.indexedDB };
+  var HDD_META = '.htmlos.json', HDD_MAX = 32 * 1024 * 1024;
+  var HDD_BIN = /^(png|jpe?g|gif|webp|bmp|ico|avif|mp3|wav|ogg|oga|m4a|flac|aac|opus|mp4|webm|ogv|mov|m4v|zip|gz|7z|rar|pdf|exe|bin|uf2|elf|woff2?|ttf|otf)$/;
+  var HDD_MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif', mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', oga: 'audio/ogg', m4a: 'audio/mp4', flac: 'audio/flac', aac: 'audio/aac', opus: 'audio/ogg', mp4: 'video/mp4', webm: 'video/webm', ogv: 'video/ogg', mov: 'video/quicktime', m4v: 'video/mp4', pdf: 'application/pdf', zip: 'application/zip' };
+  function idb(mode, fn) {
+    return new Promise(function (res, rej) {
+      var r = indexedDB.open('htmlos', 1);
+      r.onupgradeneeded = function () { r.result.createObjectStore('handles'); };
+      r.onerror = function () { rej(r.error); };
+      r.onsuccess = function () {
+        var db = r.result, tx = db.transaction('handles', mode), q = fn(tx.objectStore('handles'));
+        tx.oncomplete = function () { db.close(); res(q && q.result); };
+        tx.onerror = tx.onabort = function () { db.close(); rej(tx.error); };
+      };
+    });
+  }
+  HDD.saved = function () { return HDD.supported ? idb('readonly', function (s) { return s.get('hdd1'); }).catch(function () { return null; }) : Promise.resolve(null); };
+  HDD.save = function (h) { return idb('readwrite', function (s) { return s.put(h, 'hdd1'); }); };
+  HDD.forget = function () { return idb('readwrite', function (s) { return s.delete('hdd1'); }); };
+  // フォルダを選んでもらう（ボタンを押したときなど、ユーザーの操作の中で呼ぶ）
+  HDD.pick = function () {
+    if (!HDD.supported) return Promise.reject(new Error('このブラウザは File System Access API に対応していません（パソコンの Chrome・Edge などで使えます）'));
+    return window.showDirectoryPicker({ id: 'htmlos-hdd1', mode: 'readwrite' });
+  };
+  // 読み書きの許可。ask=true なら、まだのときに許可を求める（これもユーザーの操作の中で呼ぶ）
+  HDD.allowed = async function (h, ask) {
+    var o = { mode: 'readwrite' };
+    try { if ((await h.queryPermission(o)) === 'granted') return true; } catch (e) { return false; }
+    if (!ask) return false;
+    try { return (await h.requestPermission(o)) === 'granted'; } catch (e) { return false; }
+  };
+  // フォルダの様子: 空か、htmlOS が入っているか
+  HDD.inspect = async function (h) {
+    var empty = true, hasOS = false;
+    for await (var e of h.values()) { if (e.name !== HDD_META) { empty = false; break; } }
+    try { await (await h.getDirectoryHandle('sys')).getFileHandle('kernel.js'); hasOS = true; } catch (e2) { /* 入っていない */ }
+    return { empty: empty, hasOS: hasOS };
+  };
+  function fmtBytes(n) { return n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : n < 1073741824 ? (n / 1048576).toFixed(1) + ' MB' : (Math.round(n / 1073741824 * 100) / 100) + ' GB'; }
+  HDD.fmt = fmtBytes;
+  function b64(u) { var s = ''; for (var i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s); }
+  // data: URL → 書き出す中身（base64 ならバイト列）
+  function unData(c) {
+    var m = /^data:([^,]*),/.exec(c); if (!m) return c;
+    var body = c.slice(m[0].length);
+    if (!/;base64$/i.test(m[1])) { try { return decodeURIComponent(body); } catch (e) { return body; } }
+    var bin = atob(body), u = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    return u;
+  }
+  async function hddWrite(dh, name, data) {
+    var fh;
+    try { fh = await dh.getFileHandle(name, { create: true }); }
+    catch (e) { if (e.name !== 'TypeMismatchError') throw e; await dh.removeEntry(name, { recursive: true }); fh = await dh.getFileHandle(name, { create: true }); }
+    var w = await fh.createWritable(); await w.write(data); await w.close();
+  }
+  // フォルダ root を、パス prefix（'' ならルート全体、'/mnt/hdd1' ならその下）のストレージとして開く
+  HDD.open = async function (root, prefix, progress) {
+    prefix = prefix || '';
+    // sizes: パスごとの大きさ（バイト）。used はその合計。meta.q が上限（バイト。0 なら上限なし）
+    var map = new Map(), dirty = new Set(), meta = { keys: {}, o: {}, l: {}, q: 0 }, lastMeta = '', busy = null, count = 0, sizes = new Map(), used = 0;
+    var K = function (rel) { return 'f:' + ((prefix + rel) || '/'); };
+    function relOf(k) {
+      var p = k.slice(2);
+      if (prefix) return p === prefix ? '' : p.indexOf(prefix + '/') === 0 ? p.slice(prefix.length) : null;
+      return p === '/' ? '' : p;
+    }
+    try { var mj = JSON.parse(await (await (await root.getFileHandle(HDD_META)).getFile()).text()); ['keys', 'o', 'l'].forEach(function (k) { if (mj[k] && typeof mj[k] === 'object') meta[k] = mj[k]; }); meta.q = Number(mj.q) > 0 ? Number(mj.q) : 0; lastMeta = JSON.stringify(meta); }
+    catch (e) { /* まだない */ }
+    var st = { ram: false, disk: true, handle: root, name: root.name, skipped: [], errors: [], onerror: null };
+    map.set(K(''), JSON.stringify({ t: 'd', m: Date.now(), o: meta.o[''] || 'root' }));
+    async function walk(dh, rel) {
+      for await (var e of dh.values()) {
+        var r = rel + '/' + e.name;
+        if (!rel && e.name === HDD_META) continue;
+        if (e.kind === 'directory') { map.set(K(r), JSON.stringify({ t: 'd', m: Date.now(), o: meta.o[r] || 'root' })); await walk(e, r); continue; }
+        var f = await e.getFile();
+        if (f.size > HDD_MAX) { st.skipped.push(r); continue; }
+        var u = new Uint8Array(await f.arrayBuffer()), ext = e.name.lastIndexOf('.') > 0 ? e.name.slice(e.name.lastIndexOf('.') + 1).toLowerCase() : '', node = null;
+        if (!HDD_BIN.test(ext)) { try { var t = new TextDecoder('utf-8', { fatal: true }).decode(u); if (t.indexOf('\u0000') < 0) node = { t: 'f', c: t }; } catch (e2) { /* バイナリ */ } }
+        if (!node) node = { t: 'f', c: 'data:' + (HDD_MIME[ext] || 'application/octet-stream') + ';base64,' + b64(u), b: 1 };
+        node.m = f.lastModified || Date.now(); node.o = meta.o[r] || 'root';
+        map.set(K(r), JSON.stringify(node)); sizes.set(r, u.length); used += u.length;
+        if (++count % 40 === 0 && progress) progress(count, r);
+      }
+    }
+    await walk(root, '');
+    // シンボリックリンクは PC のフォルダには作らず、.htmlos.json に覚えておく
+    Object.keys(meta.l).forEach(function (r) {
+      var parent = r.slice(0, r.lastIndexOf('/'));
+      if (!map.has(K(r)) && map.has(K(parent))) map.set(K(r), JSON.stringify({ t: 'l', c: meta.l[r], m: Date.now(), o: meta.o[r] || 'root' }));
+      else delete meta.l[r];
+    });
+    if (progress) progress(count, '');
+    function report(what, e) {
+      st.errors.push(what + ': ' + (e && e.message || e));
+      if (st.onerror) { try { st.onerror(what, e); } catch (e2) { /* 無視 */ } } else console.warn('[hdd1]', what, e);
+    }
+    // 1 つのパスを、いまのメモリの状態に合わせて PC のフォルダに書き出す（なければ消す）
+    async function sync(rel) {
+      var v = map.get(K(rel)), parts = rel.split('/').filter(Boolean), name = parts.pop(), dh = root, i;
+      if (!name) return;
+      if (v == null) {
+        try { for (i = 0; i < parts.length; i++) dh = await dh.getDirectoryHandle(parts[i]); } catch (e) { return; }
+        try { await dh.removeEntry(name, { recursive: true }); } catch (e) { if (e.name !== 'NotFoundError') throw e; }
+        return;
+      }
+      for (i = 0; i < parts.length; i++) dh = await dh.getDirectoryHandle(parts[i], { create: true });
+      var n = JSON.parse(v);
+      if (n.t === 'd') {
+        try { await dh.getDirectoryHandle(name, { create: true }); }
+        catch (e) { if (e.name !== 'TypeMismatchError') throw e; await dh.removeEntry(name); await dh.getDirectoryHandle(name, { create: true }); }
+      } else if (n.t === 'l') {
+        try { await dh.removeEntry(name, { recursive: true }); } catch (e) { /* もともと無い */ }
+      } else await hddWrite(dh, name, n.b ? unData(n.c) : n.c);
+    }
+    function kick() {
+      if (!busy) busy = (async function () {
+        await null; // 同じ処理の中の書き込みをまとめてから書き出す
+        for (;;) {
+          var list = Array.from(dirty); dirty.clear();
+          for (var i = 0; i < list.length; i++) { try { await sync(list[i]); } catch (e) { report(list[i] || '/', e); } }
+          var mj = JSON.stringify(meta);
+          if (mj !== lastMeta) { lastMeta = mj; try { await hddWrite(root, HDD_META, mj); } catch (e) { report(HDD_META, e); } }
+          if (!dirty.size && JSON.stringify(meta) === lastMeta) break;
+        }
+        busy = null;
+      })();
+      return busy;
+    }
+    // ノードの中身の大きさ（PC のフォルダに書いたときのバイト数）
+    function sizeOf(node) {
+      if (!node || node.t !== 'f') return 0;
+      var c = String(node.c || '');
+      if (node.b) { var m = /^data:[^,]*;base64,/i.exec(c); if (m) { var b = c.length - m[0].length; return Math.floor(b * 3 / 4) - (c.endsWith('==') ? 2 : c.endsWith('=') ? 1 : 0); } }
+      var n = 0; for (var i = 0; i < c.length; i++) { var x = c.charCodeAt(i); n += x < 0x80 ? 1 : x < 0x800 ? 2 : (x >= 0xd800 && x < 0xdc00) ? (i++, 4) : 3; }
+      return n;
+    }
+    function track(rel, node) {
+      if (node && node.o && node.o !== 'root') meta.o[rel] = node.o; else delete meta.o[rel];
+      if (node && node.t === 'l') meta.l[rel] = node.c; else delete meta.l[rel];
+    }
+    st.get = function (k) {
+      if (k.indexOf('f:') !== 0) return Object.prototype.hasOwnProperty.call(meta.keys, k) ? meta.keys[k] : null;
+      var v = map.get(k); return v === undefined ? null : v;
+    };
+    st.set = function (k, v) {
+      v = String(v);
+      if (k.indexOf('f:') !== 0) { meta.keys[k] = v; kick(); return; }
+      var rel = relOf(k);
+      if (rel == null) throw new Error(k.slice(2) + ': HDD1 の外のパスです');
+      if (rel === '/' + HDD_META) throw new Error(HDD_META + ' は htmlOS が使う名前なので使えません');
+      var node = null; try { node = JSON.parse(v); } catch (e) { /* 壊れたノードもそのまま */ }
+      var ns = sizeOf(node), os = sizes.get(rel) || 0;
+      if (meta.q && ns > os && used - os + ns > meta.q) throw new Error('HDD1 の容量の上限（' + fmtBytes(meta.q) + '）を超えるため書き込めません（使用中 ' + fmtBytes(used) + '）');
+      used += ns - os; if (ns) sizes.set(rel, ns); else sizes.delete(rel);
+      map.set(k, v); track(rel, node);
+      if (rel) dirty.add(rel);
+      kick();
+    };
+    st.del = function (k) {
+      if (k.indexOf('f:') !== 0) { delete meta.keys[k]; kick(); return; }
+      var rel = relOf(k);
+      if (rel == null || rel === '') return; // フォルダそのものは消さない
+      used -= sizes.get(rel) || 0; sizes.delete(rel);
+      map.delete(k); track(rel, null); dirty.add(rel); kick();
+    };
+    st.used = function () { return used; };
+    st.quota = function () { return meta.q || 0; };
+    // 上限を変える（バイト。0 で上限なし）。いま使っている量より小さくはできない
+    st.setQuota = function (b) {
+      b = Math.max(0, Math.floor(Number(b) || 0));
+      if (b && b < used) throw new Error('上限（' + fmtBytes(b) + '）が、いま使っている量（' + fmtBytes(used) + '）より小さくなっています');
+      meta.q = b; return kick();
+    };
+    st.keys = function (pre) {
+      pre = pre || ''; var out = [];
+      map.forEach(function (v, k) { if (k.indexOf(pre) === 0) out.push(k); });
+      Object.keys(meta.keys).forEach(function (k) { if (k.indexOf(pre) === 0) out.push(k); });
+      return out;
+    };
+    st.wipe = function () { st.keys().forEach(function (k) { if (k !== 'bios') st.del(k); }); };
+    st.flush = function () { return busy || Promise.resolve(); };
+    st.pending = function () { return !!busy || dirty.size > 0; };
+    st.count = function () { return map.size; };
+    return st;
+  };
+  BOOT.hdd = HDD;
+
+  // lsStore はいつも LocalStorage（BIOS の設定もここ）。HDD1 から起動したときは、store と realStore が HDD1 になる
+  var store = makeStore(ls, ram), realStore = store, lsStore = store;
 
   // ---- インストールメディアの中身
   var media = {};
@@ -187,7 +383,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       if (log) log('展開: ' + path + ' (' + media[path].length + ' 文字)');
     });
     var meta = getMeta() || { installedAt: Date.now() };
-    meta.version = MEDIA_VERSION; meta.build = MEDIA_BUILD; meta.updatedAt = Date.now();
+    meta.version = MEDIA_VERSION; meta.build = MEDIA_BUILD; meta.codename = MEDIA_CODENAME; meta.updatedAt = Date.now();
     store.set('meta', JSON.stringify(meta));
   }
   function getMeta() { try { return JSON.parse(store.get('meta')); } catch (e) { return null; } }
@@ -281,15 +477,70 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   };
   // アンインストール: htmlOS のデータをすべて消す（BIOS の設定は残す）
   BOOT.realWipe = function () { onReal(function () { store.wipe(); }); };
+  // o.hdd（フォルダのハンドル）があれば HDD1 に、なければ LocalStorage（HDD0）にインストールする
   BOOT.installReal = async function (o, log) {
-    var cur = store; store = realStore;
+    var target = lsStore;
+    if (o.hdd) {
+      log('HDD1（フォルダ「' + o.hdd.name + '」）を開いています…');
+      target = await HDD.open(o.hdd, '', null);
+      target.setQuota(0); // いまの中身は消すので、上限はインストールしたあとで付ける
+    }
+    var cur = store; store = target;
     try {
       await install(o.user, o.pw, o.mode, log, o.rootPw, o);
       // Live で作ったファイルを、新しいユーザーのホームに移す（親から順に並んでいる）
       (o.files || []).forEach(function (f) { put(f.path, f.node); });
       if (o.files && o.files.length) log('Live のファイルを ' + o.files.length + ' 個引き継ぎました');
     } finally { store = cur; }
+    if (o.hdd) {
+      if (o.quota) { target.setQuota(o.quota); log('容量の上限: ' + fmtBytes(o.quota)); }
+      log('PC のフォルダに書き出しています…');
+      await target.flush();
+      if (target.errors.length) throw new Error('フォルダに書き込めませんでした（' + target.errors[0] + '）');
+      await HDD.save(o.hdd);
+      log('HDD1 に ' + target.count() + ' 個の項目を書き込みました');
+    }
+    BOOT.setBootDev(o.hdd ? 'hdd1' : 'hdd0');
+    log('起動ドライブ: ' + (o.hdd ? 'HDD1（PC のフォルダ）' : 'HDD0（LocalStorage）'));
   };
+  // 起動ドライブ（BIOS の Boot Device）を変える
+  BOOT.setBootDev = function (d) {
+    var c = {}; try { c = JSON.parse(lsStore.get('bios') || '{}'); } catch (e) { /* 壊れていたら作り直す */ }
+    c.boot = d === 'hdd1' ? 'hdd1' : 'hdd0'; lsStore.set('bios', JSON.stringify(c));
+  };
+  BOOT.bootDev = function () { return nvram().boot; };
+  BOOT.lsHasOS = function () { var cur = store; store = lsStore; try { return !!getMeta() && store.get('f:/sys/kernel.js') != null; } finally { store = cur; } };
+  // インストール先（realStore）の名前
+  BOOT.realLabel = function () { return realStore.disk ? 'HDD1（フォルダ「' + realStore.name + '」）' : realStore.ram ? 'RAM ディスク' : 'LocalStorage'; };
+  // インストール先が HDD1 か
+  // 「htmlOS 3.2 Sirius」のような名前（版は x.y まで）
+  BOOT.osName = function (version, codename) { var v = String(version || '?').split('.'); return 'htmlOS ' + v.slice(0, 2).join('.') + (codename ? ' ' + codename : ''); };
+  BOOT.realIsHdd = function () { return !!realStore.disk; };
+  // htmlOS i で、登録してある HDD1 をインストール先として開く（ボタンを押したときに呼ぶ。許可を求めることがある）
+  BOOT.realOpenHdd = async function () {
+    if (realStore.disk) return realStore.name;
+    var h = await HDD.saved();
+    if (!h) throw new Error('HDD1 のフォルダが登録されていません（HDD1 にインストールしたことがない）');
+    if (!(await HDD.allowed(h, true))) throw new Error('フォルダ「' + h.name + '」を使う許可がもらえませんでした');
+    realStore = await HDD.open(h, '', null);
+    return h.name;
+  };
+  BOOT.realQuota = function () { return realStore.disk ? { used: realStore.used(), quota: realStore.quota() } : null; };
+  BOOT.realSetQuota = async function (b) { if (!realStore.disk) throw new Error('インストール先が HDD1 ではありません'); await realStore.setQuota(b); };
+  // メディア（この HTML）のほうが、インストールしてある htmlOS より新しいか
+  function newerMedia(meta) {
+    if (!meta || !meta.version) return false;
+    var a = parseInt(MEDIA_BUILD, 10), b = parseInt(meta.build, 10);
+    if (!isNaN(a) && !isNaN(b)) return a > b;
+    var x = MEDIA_VERSION.split('.').map(Number), y = String(meta.version).split('.').map(Number);
+    for (var i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); }
+    return false;
+  }
+  BOOT.newerMedia = function () { return newerMedia(BOOT.realMeta()); };
+  // 「いいえ」を選んだビルド。同じビルドではもう聞かない（htmlOSセットアップの「アップデート」からはいつでも更新できる）
+  BOOT.skipUpdate = function () { realStore.set('skipupdate', MEDIA_BUILD); };
+  // まだ PC のフォルダに書き出していない分を書き出す（再起動・電源オフの前に呼ぶ）
+  BOOT.flushAll = function () { return Promise.all([store, realStore].map(function (s) { return s.flush ? s.flush() : null; })); };
 
   // ---- 画面
   var scr = document.getElementById('boot');
@@ -696,7 +947,49 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   }
 
   // POST のあとの起動: 何も押さない → 既定、Alt → htmlOS i、Ctrl → jsh、Shift → セーフモード。インストールされていなければ htmlOS i
+  // HDD1（PC のフォルダ）から起動する。許可があればそのまま、なければボタンを押して許可してもらう
+  async function hddBoot() {
+    keyHandler = null;
+    var h = await HDD.saved();
+    var box = el('div', 'in-box'), body = el('div', 'in-body'), btns = el('div', 'in-btns'), msg = el('p', '');
+    msg.style.whiteSpace = 'pre-wrap';
+    box.appendChild(el('div', 'in-head', 'HDD1 から起動'));
+    body.appendChild(msg); body.appendChild(btns); box.appendChild(body);
+    function btn(label, fn) { var b = el('button', 'in-btn', label); b.type = 'button'; b.onclick = fn; btns.appendChild(b); return b; }
+    var hdd0 = function () { BOOT.hddSkip = true; main(); };
+    if (!h) {
+      msg.textContent = HDD.supported ? 'BIOS の起動ドライブが HDD1 になっていますが、HDD1 のフォルダが登録されていません。\nフォルダを選ぶか、HDD0（LocalStorage）から起動してください。'
+        : 'BIOS の起動ドライブが HDD1 になっていますが、このブラウザは File System Access API に対応していません。HDD0（LocalStorage）から起動します。';
+      if (HDD.supported) btn('フォルダを選ぶ', async function () { try { var p = await HDD.pick(); await HDD.save(p); load(p); } catch (e) { if (e.name !== 'AbortError') msg.textContent = '選べませんでした: ' + e.message; } });
+      var b0 = btn('HDD0 から起動', hdd0);
+      show(box, 'inst'); b0.focus();
+      if (!HDD.supported) setTimeout(hdd0, 2500);
+      return;
+    }
+    if (await HDD.allowed(h, false)) { load(h); return; }
+    msg.textContent = 'HDD1（PC のフォルダ「' + h.name + '」）から htmlOS を起動します。\nブラウザの決まりで、ページを開くたびにフォルダを使う許可が必要です。「許可して起動」を押して、ブラウザの確認で許可してください。';
+    var go = btn('許可して起動', async function () {
+      if (await HDD.allowed(h, true)) load(h); else msg.textContent = '許可されませんでした。もう一度押すか、HDD0（LocalStorage）から起動してください。';
+    });
+    btn('HDD0 から起動', hdd0);
+    btn('htmlOS i を起動', function () { BOOT.hddSkip = true; iBoot(); });
+    keyHandler = function (e) { if (e.key === 'Enter') { e.preventDefault(); go.click(); } };
+    show(box, 'inst'); go.focus();
+    async function load(dir) {
+      keyHandler = null;
+      var lb = el('div', 'bl-box'), lt = el('div', 'bl-list', 'HDD1（' + dir.name + '）を読み込んでいます…');
+      lb.appendChild(el('div', 'bl-head', 'htmlOS Boot Loader')); lb.appendChild(lt); show(lb);
+      try {
+        var d = await HDD.open(dir, '', function (n, p) { lt.textContent = 'HDD1（' + dir.name + '）を読み込んでいます… ' + n + ' 個\n' + p; });
+        store = realStore = BOOT.store = d; BOOT.hddReady = true;
+        if (d.skipped.length) console.warn('[hdd1] 大きすぎて読み込まなかったファイル:', d.skipped);
+        main();
+      } catch (e) { msg.textContent = '読み込めませんでした: ' + e.message; show(box, 'inst'); }
+    }
+  }
+
   function main() {
+    if (!BOOT.hddReady && !BOOT.hddSkip && nvram().boot === 'hdd1') { hddBoot(); return; }
     var flag = store.get('bootflag'); if (flag) store.del('bootflag');
     if (flag === 'reinstall') store.wipe();
     var hold = BOOT.hold; BOOT.hold = null;
@@ -705,6 +998,8 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     if (!hasOS || flag === 'i' || hold === 'i') { iBoot(); return; }
     var def = getConfig().bootMode === 'cui' ? 'cui' : 'gui';
     if (flag === 'repair') { writeSys(); boot(def); return; }
+    // このメディアのほうが新しいときは htmlOS i を開き、htmlOSセットアップで更新するかを聞く
+    if (!flag && !hold && newerMedia(getMeta()) && store.get('skipupdate') !== MEDIA_BUILD) { BOOT.offerUpdate = true; iBoot(); return; }
     if (flag === 'safe' || hold === 'safe') { BOOT.safe = true; boot(def); return; }
     if (flag === 'gui' || flag === 'cui') { boot(flag); return; }
     if (hold === 'cui') { boot('cui'); return; }
@@ -712,11 +1007,11 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   }
 
   // ---- BIOS。設定は LocalStorage の "htmlos:bios" に保存する（CMOS の代わり）
-  var BIOS_DEFAULTS = { quiet: false, speed: 'normal', beep: false };
+  var BIOS_DEFAULTS = { quiet: false, speed: 'normal', beep: false, boot: 'hdd0' };
   function nvram() {
     var c = {}, k;
     for (k in BIOS_DEFAULTS) c[k] = BIOS_DEFAULTS[k];
-    try { var v = JSON.parse(store.get('bios') || '{}'); for (k in BIOS_DEFAULTS) if (k in v) c[k] = v[k]; } catch (e) { /* 壊れていたら既定値 */ }
+    try { var v = JSON.parse(lsStore.get('bios') || '{}'); for (k in BIOS_DEFAULTS) if (k in v) c[k] = v[k]; } catch (e) { /* 壊れていたら既定値 */ }
     return c;
   }
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
@@ -794,11 +1089,16 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       line('Network          : ' + (navigator.onLine === false ? 'Offline' : 'Online') + '\n\n'); await sleep(140 * k);
       line('Detecting boot devices ...\n'); await sleep(260 * k);
       line('  HDD0 : ' + (store.ram ? 'RAM disk (volatile)' : 'LocalStorage [htmlos:]') + '   ' + usedKB() + ' KB / 5120 KB   ');
-      line(hasOS ? 'htmlOS ' + meta.version + '\n' : 'No operating system\n', hasOS ? 'ok' : 'warn'); await sleep(140 * k);
+      line(hasOS ? BOOT.osName(meta.version, meta.codename) + ' (' + meta.version + ')\n' : 'No operating system\n', hasOS ? 'ok' : 'warn'); await sleep(140 * k);
+      var hd1 = await HDD.saved();
+      if (hd1 || cfg.boot === 'hdd1') {
+        line('  HDD1 : ' + (hd1 ? 'PC Folder "' + hd1.name + '" [File System Access API]' : 'PC Folder (not registered)') + '   ');
+        line(cfg.boot === 'hdd1' ? 'Boot device\n' : 'Data\n', cfg.boot === 'hdd1' ? 'ok' : 'dim'); await sleep(140 * k);
+      }
       line('  CD0  : htmlOS.html (install media)   ');
       line('htmlOS ' + MEDIA_VERSION + '\n\n', 'ok'); await sleep(160 * k);
       line('POST completed.  ' + (store.ram ? '1 warning: LocalStorage が使えません（再読み込みで消えます）' : '0 errors') + '\n', store.ram ? 'warn' : '');
-      line(hasOS ? 'Booting from HDD0 ...\n' : 'Booting from CD0 (installer) ...\n');
+      line(cfg.boot === 'hdd1' ? 'Booting from HDD1 ...\n' : hasOS ? 'Booting from HDD0 ...\n' : 'Booting from CD0 (installer) ...\n');
     }
     if (cfg.beep) beep();
     await sleep(Math.max(350 * k, 1400 - (Date.now() - t0)));
@@ -814,7 +1114,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       { name: 'Main', items: [
         { info: 'BIOS Version', val: function () { return 'htmlBIOS v' + MEDIA_VERSION; } },
         { info: 'Install Media', val: function () { return 'htmlOS ' + MEDIA_VERSION + ' (' + Object.keys(media).length + ' files)'; } },
-        { info: 'Installed OS', val: function () { return meta && store.get('f:/sys/kernel.js') != null ? 'htmlOS ' + meta.version : 'なし'; } },
+        { info: 'Installed OS', val: function () { return meta && store.get('f:/sys/kernel.js') != null ? BOOT.osName(meta.version, meta.codename) + ' (' + meta.version + ')' : 'なし'; } },
         { info: 'System Time', val: function () { return new Date().toLocaleString('ja-JP'); } },
         { info: 'Processor', val: function () { return (navigator.hardwareConcurrency || '?') + ' logical cores'; } },
         { info: 'Storage', val: function () { return (store.ram ? 'RAM disk' : 'LocalStorage') + '  ' + usedKB() + ' KB / 5120 KB'; } },
@@ -823,10 +1123,11 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       { name: 'Boot', items: [
         { key: 'quiet', label: 'Quiet Boot', opts: [[false, 'Disabled'], [true, 'Enabled']], help: 'Enabled にすると、起動時の自己診断（POST）の文字を出さず、ロゴだけを表示します。' },
         { key: 'speed', label: 'POST Speed', opts: [['normal', 'Normal'], ['slow', 'Slow']], help: 'POST の表示の速さです。\nSlow にすると、じっくり読める速さで進みます。' },
-        { key: 'beep', label: 'POST Beep', opts: [[false, 'Disabled'], [true, 'Enabled']], help: 'POST が終わったときに「ピッ」と鳴らします。\nブラウザが音を許可していないときは鳴りません（ページを一度クリックしたあとは鳴りやすくなります）。' }
+        { key: 'beep', label: 'POST Beep', opts: [[false, 'Disabled'], [true, 'Enabled']], help: 'POST が終わったときに「ピッ」と鳴らします。\nブラウザが音を許可していないときは鳴りません（ページを一度クリックしたあとは鳴りやすくなります）。' },
+        { key: 'boot', label: 'Boot Device', opts: [['hdd0', 'HDD0 (LocalStorage)'], ['hdd1', 'HDD1 (PC Folder)']], help: 'htmlOS を読み込むドライブです。\nHDD0: このブラウザの LocalStorage（約 5MB）。\nHDD1: File System Access API で選んだ PC のフォルダ。インストーラーで HDD1 を選ぶと、ここが自動で HDD1 になります。' + (HDD.supported ? '' : '\n（このブラウザは HDD1 に対応していません）') }
       ] },
       { name: 'Security', items: [
-        { info: 'Installed OS', val: function () { return meta && store.get('f:/sys/kernel.js') != null ? 'htmlOS ' + meta.version : 'なし'; } },
+        { info: 'Installed OS', val: function () { return meta && store.get('f:/sys/kernel.js') != null ? BOOT.osName(meta.version, meta.codename) + ' (' + meta.version + ')' : 'なし'; } },
         { info: 'Users', val: function () { try { return JSON.parse(JSON.parse(store.get('f:/etc/passwd')).c).map(function (u) { return u.name; }).join(', '); } catch (e) { return '-'; } } },
         { label: 'Erase htmlOS Storage', act: function () {
           if (!armed) { armed = true; note = '本当に消去するときは、もう一度この項目を選んでください（Enter かクリック）。\nユーザー・ファイル・設定はすべて消え、元に戻せません。'; return; }
@@ -834,10 +1135,10 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         }, help: 'インストールした htmlOS のユーザー・ファイル・設定をすべて消去して再起動します（BIOS の設定は残ります）。\nroot のパスワードもわからなくなったときに使います。消去したあとは htmlOS i が起動するので、もう一度インストールしてください。\n大事なファイルがある場合は、先に hBackup などで書き出してください。' }
       ], help: 'インストールした htmlOS の管理です。' },
       { name: 'Exit', items: [
-        { label: 'Save Changes and Exit', act: function () { store.set('bios', JSON.stringify(cfg)); leave(true); }, help: '変更を保存して再起動します。（F10）' },
+        { label: 'Save Changes and Exit', act: function () { lsStore.set('bios', JSON.stringify(cfg)); leave(true); }, help: '変更を保存して再起動します。（F10）' },
         { label: 'Discard Changes and Exit', act: function () { leave(false); }, help: '変更を保存せずに SETUP を終了して、ブートメニューへ進みます。（Esc）' },
         { label: 'Load Setup Defaults', act: function () { for (var k in BIOS_DEFAULTS) cfg[k] = BIOS_DEFAULTS[k]; note = '既定値を読み込みました（まだ保存していません）'; }, help: 'すべての項目を既定値に戻します。保存するまでは反映されません。' },
-        { label: 'Clear CMOS', act: function () { store.del('bios'); leave(true); }, help: '保存してある BIOS 設定を消して再起動します。htmlOS 本体やファイルは消えません。' }
+        { label: 'Clear CMOS', act: function () { lsStore.del('bios'); leave(true); }, help: '保存してある BIOS 設定を消して再起動します。htmlOS 本体やファイルは消えません。' }
       ] }
     ];
     function leave(reboot) { if (timer) clearInterval(timer); keyHandler = null; if (reboot) location.reload(); else main(); }
@@ -878,7 +1179,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       else if (e.key === 'ArrowUp') move(-1);
       else if (e.key === 'ArrowDown') move(1);
       else if (e.key === 'Enter' || e.key === ' ' || e.key === '+' || e.key === '-') fire();
-      else if (e.key === 'F10') { e.preventDefault(); store.set('bios', JSON.stringify(cfg)); leave(true); return; }
+      else if (e.key === 'F10') { e.preventDefault(); lsStore.set('bios', JSON.stringify(cfg)); leave(true); return; }
       else if (e.key === 'Escape') { leave(false); return; }
       else return;
       e.preventDefault();
@@ -888,7 +1189,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     timer = setInterval(function () { if (tab === 0 && keyHandler) render(); }, 1000);
   }
 
-  Object.assign(BOOT, { version: MEDIA_VERSION, build: MEDIA_BUILD, store: store, media: media, hash: hash, verify: verify, writeSys: writeSys, getMeta: getMeta, menu: main });
+  Object.assign(BOOT, { version: MEDIA_VERSION, build: MEDIA_BUILD, codename: MEDIA_CODENAME, store: store, media: media, hash: hash, verify: verify, writeSys: writeSys, getMeta: getMeta, menu: main });
   post().then(function (wantSetup) { if (wantSetup) setup(); else main(); });
 })();
 </script>

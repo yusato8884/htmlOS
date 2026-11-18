@@ -264,7 +264,7 @@
     const row = (label, ctl) => h('label', { class: 'wm-row' }, h('span', null, label), ctl);
     f.form.append(row('ユーザー', name), row('パスワード', f.input), row('セッション', c.sessionSelect('wm-in')), h('div', { class: 'wm-acts' }, f.submit));
     el.append(h('div', { class: 'wm-box', 'data-shake': '' },
-      h('div', { class: 'wm-head' }, h('b', null, 'htmlOS ' + OS.version), c.clock(h('span'), d => pad(d.getHours()) + ':' + pad(d.getMinutes()))),
+      h('div', { class: 'wm-head' }, h('b', null, OS.name), c.clock(h('span'), d => pad(d.getHours()) + ':' + pad(d.getMinutes()))),
       f.form, f.msg),
       h('div', { class: 'wm-foot' }, c.modeButton('wm-ibtn', 15), c.powerButton('wm-ibtn', 15)));
   };

@@ -1,4 +1,8 @@
-/* HTUi — HTml UI。ウィンドウマネージャ・ダイアログと、デスクトップ環境（セッション）の土台。
+/* HTUi SDK 3.0（コードネーム Venus）— htmlOS の描画エンジン。ウィンドウマネージャ・ダイアログと、デスクトップ環境（セッション）の土台。
+   2（Jupiter）で子ウインドウ（htui.open の parent）に対応し、確認などのダイアログは開いたウインドウの子ウインドウとして出る。
+   3.0（Venus）で、ボタン・入力欄・チェックボックス・スライダー・スクロールバーなどを独自のデザインにし、
+   WebView（htui.WebView）と、タイトルバーにアプリ独自のボタンを置くキャプションボタン（htui.open の buttons / win.addButton）を追加した。
+   コードネームは惑星の名前から選ぶ。
    ログイン画面は hdm（/sys/hdm.js）、各デスクトップ環境は /sys/shells.js にあります。
    jsh から  htui start [セッション] / htui stop  で起動・終了できます。 */
 (function () {
@@ -9,6 +13,10 @@
   // 決まった並びの「ランダム」な星（毎回同じ位置になるように）
   const stars = (n, h, seed) => { let s = seed, out = ''; const r = () => (s = (s * 9301 + 49297) % 233280) / 233280; for (let i = 0; i < n; i++) out += "<circle cx='" + Math.round(r() * 1600) + "' cy='" + Math.round(r() * h) + "' r='" + (r() * 1.4 + .4).toFixed(1) + "' fill='#fff' opacity='" + (r() * .6 + .25).toFixed(2) + "'/>"; return out; };
   const LEAF = 'M0 0C60-150 300-235 480-150C335-18 140 34 0 0Z';
+  // 決まった並びの「ランダム」な点を n 個。fn(x, y, r, a, o) の結果をつなげる（r, a, o は 0〜1）
+  const scatter = (n, seed, fn) => { let s = seed, out = ''; const r = () => (s = (s * 9301 + 49297) % 233280) / 233280; for (let i = 0; i < n; i++) out += fn(Math.round(r() * 1600), Math.round(r() * 1000), r(), r(), r()); return out; };
+  // 針葉樹の並んだ稜線（y: 根元の高さ, amp: 木の高さ）
+  const trees = (y, amp, seed) => { let s = seed, d = 'M0 ' + (y + 40); const r = () => (s = (s * 9301 + 49297) % 233280) / 233280; for (let x = 0; x < 1600; x += 34) { const w = 26 + r() * 20; d += 'L' + Math.round(x) + ' ' + y + 'L' + Math.round(x + w / 2) + ' ' + Math.round(y - amp * (.55 + r() * .45)) + 'L' + Math.round(x + w) + ' ' + y; } return d + 'L1600 ' + y + 'V1000H0Z'; };
   const WALLPAPERS = [
     { name: 'ブルーム', css: svgWall(
       "<defs><radialGradient id='g' cx='.63' cy='.58' r='.85'><stop offset='0' stop-color='#2a6ae0'/><stop offset='.5' stop-color='#0f3184'/><stop offset='1' stop-color='#060f2a'/></radialGradient>" +
@@ -66,7 +74,60 @@
       "<radialGradient id='a' cx='.76' cy='.24' r='.5'><stop offset='0' stop-color='#46506a' stop-opacity='.55'/><stop offset='1' stop-color='#46506a' stop-opacity='0'/></radialGradient>" +
       "<radialGradient id='b' cx='.2' cy='.86' r='.45'><stop offset='0' stop-color='#3a3346' stop-opacity='.5'/><stop offset='1' stop-color='#3a3346' stop-opacity='0'/></radialGradient></defs>" +
       "<rect width='1600' height='1000' fill='url(#g)'/><rect width='1600' height='1000' fill='url(#a)'/><rect width='1600' height='1000' fill='url(#b)'/>" +
-      "<g transform='translate(860 220) scale(30)' fill='none' stroke='#fff' stroke-width='.16' stroke-linecap='round' stroke-linejoin='round' opacity='.07'><path d='M8 7l-5 5 5 5M16 7l5 5-5 5M13.5 5l-3 14'/></g>", '#16181c') }
+      "<g transform='translate(860 220) scale(30)' fill='none' stroke='#fff' stroke-width='.16' stroke-linecap='round' stroke-linejoin='round' opacity='.07'><path d='M8 7l-5 5 5 5M16 7l5 5-5 5M13.5 5l-3 14'/></g>", '#16181c') },
+    // ---- 4.0 Vega で追加した壁紙
+    { name: 'ベガ（こと座）', css: svgWall(
+      "<defs><radialGradient id='g' cx='.68' cy='.3' r='.95'><stop offset='0' stop-color='#1b2a6b'/><stop offset='.45' stop-color='#0d1340'/><stop offset='1' stop-color='#03040f'/></radialGradient>" +
+      "<radialGradient id='mw' cx='.5' cy='.5' r='.5'><stop offset='0' stop-color='#9fb4ff' stop-opacity='.28'/><stop offset='1' stop-color='#9fb4ff' stop-opacity='0'/></radialGradient>" +
+      "<radialGradient id='v' cx='.5' cy='.5' r='.5'><stop offset='0' stop-color='#fff'/><stop offset='.12' stop-color='#e4efff'/><stop offset='.35' stop-color='#8fb6ff' stop-opacity='.55'/><stop offset='1' stop-color='#5b7dff' stop-opacity='0'/></radialGradient>" +
+      "<filter id='s' x='-50%' y='-50%' width='200%' height='200%'><feGaussianBlur stdDeviation='26'/></filter></defs>" +
+      "<rect width='1600' height='1000' fill='url(#g)'/>" +
+      "<ellipse cx='520' cy='560' rx='900' ry='170' transform='rotate(-28 520 560)' fill='url(#mw)' filter='url(#s)'/>" + stars(260, 1000, 17) +
+      "<g stroke='#cfe0ff' stroke-width='1.6' opacity='.45' fill='none'><path d='M1110 270L1185 205M1110 270L1160 380L1245 545L1090 620L1015 510L1160 380'/></g>" +
+      "<g fill='#e8f0ff'><circle cx='1185' cy='205' r='3.2'/><circle cx='1160' cy='380' r='3.6'/><circle cx='1245' cy='545' r='3.4'/><circle cx='1090' cy='620' r='3.8'/><circle cx='1015' cy='510' r='3.6'/></g>" +
+      "<circle cx='1110' cy='270' r='120' fill='url(#v)'/><g stroke='#fff' stroke-linecap='round' opacity='.85'><path d='M1110 215V325M1055 270H1165' stroke-width='2'/></g><circle cx='1110' cy='270' r='7' fill='#fff'/>" +
+      "<path d='M0 900C320 860 600 910 900 885S1350 850 1600 890V1000H0Z' fill='#02030a'/>", '#0d1340') },
+    { name: '金星', css: svgWall(
+      "<defs><radialGradient id='g' cx='.3' cy='.4' r='.9'><stop offset='0' stop-color='#3a1d0e'/><stop offset='.5' stop-color='#160a07'/><stop offset='1' stop-color='#050303'/></radialGradient>" +
+      "<radialGradient id='p' cx='.38' cy='.36' r='.7'><stop offset='0' stop-color='#fff1c9'/><stop offset='.35' stop-color='#f3c27a'/><stop offset='.7' stop-color='#c5793a'/><stop offset='1' stop-color='#5b2a10'/></radialGradient>" +
+      "<radialGradient id='a' cx='.5' cy='.5' r='.5'><stop offset='.82' stop-color='#ffd28a' stop-opacity='0'/><stop offset='.9' stop-color='#ffd28a' stop-opacity='.45'/><stop offset='1' stop-color='#ffb35a' stop-opacity='0'/></radialGradient>" +
+      "<linearGradient id='sh' x1='0' y1='0' x2='1' y2='.4'><stop offset='.35' stop-color='#000' stop-opacity='0'/><stop offset='.75' stop-color='#000' stop-opacity='.85'/></linearGradient>" +
+      "<filter id='s' x='-50%' y='-50%' width='200%' height='200%'><feGaussianBlur stdDeviation='40'/></filter><clipPath id='c'><circle cx='1000' cy='520' r='330'/></clipPath></defs>" +
+      "<rect width='1600' height='1000' fill='url(#g)'/>" + stars(90, 1000, 29) +
+      "<circle cx='1000' cy='520' r='380' fill='#ff9d45' opacity='.25' filter='url(#s)'/><circle cx='1000' cy='520' r='330' fill='url(#p)'/>" +
+      "<g clip-path='url(#c)' fill='none' stroke='#fff3d6' stroke-linecap='round' opacity='.22'><path d='M640 420C820 380 980 470 1360 400' stroke-width='26'/><path d='M640 520C860 470 1040 580 1360 500' stroke-width='18'/><path d='M640 640C840 600 1060 690 1360 610' stroke-width='30'/></g>" +
+      "<circle cx='1000' cy='520' r='330' fill='url(#sh)'/><circle cx='1000' cy='520' r='365' fill='url(#a)'/>", '#160a07') },
+    { name: '桜', css: svgWall(
+      "<defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='#fff4f7'/><stop offset='.55' stop-color='#fbd3e0'/><stop offset='1' stop-color='#f19bb8'/></linearGradient>" +
+      "<path id='pt' d='M0-22C9-22 14-12 9 0L0 18L-9 0C-14-12-9-22 0-22Z'/>" +
+      "<filter id='s' x='-50%' y='-50%' width='200%' height='200%'><feGaussianBlur stdDeviation='5'/></filter></defs>" +
+      "<rect width='1600' height='1000' fill='url(#g)'/>" +
+      "<path d='M1600 120C1420 160 1300 240 1180 300S960 380 860 470M1300 238C1340 320 1330 380 1300 440M1060 350C1020 300 960 280 900 290' stroke='#6b3a3f' stroke-width='14' fill='none' stroke-linecap='round' opacity='.75'/>" +
+      scatter(70, 31, (x, y, r, a, o) => "<use href='#pt' fill='" + (r > .5 ? '#ffffff' : '#ffc4d6') + "' opacity='" + (o * .8 + .2).toFixed(2) + "' transform='translate(" + x + ' ' + y + ') rotate(' + Math.round(a * 360) + ') scale(' + (r * .9 + .4).toFixed(2) + ")'" + (r < .25 ? " filter='url(#s)'" : '') + '/>'), '#fbd3e0') },
+    { name: '森', css: svgWall(
+      "<defs><linearGradient id='g' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#d9eedb'/><stop offset='.5' stop-color='#9bc9a2'/><stop offset='1' stop-color='#2f5f3c'/></linearGradient>" +
+      "<linearGradient id='m' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#fff' stop-opacity='0'/><stop offset='1' stop-color='#fff' stop-opacity='.55'/></linearGradient></defs>" +
+      "<rect width='1600' height='1000' fill='url(#g)'/><circle cx='1220' cy='230' r='90' fill='#fffbe6' opacity='.8'/>" +
+      [['#7fb08a', 560, 70, 41], ['#5b9268', 650, 85, 43], ['#3d7550', 750, 100, 47], ['#24563a', 860, 120, 53]].map(L => "<path d='" + trees(L[1], L[2], L[3]) + "' fill='" + L[0] + "'/>").join('') +
+      "<rect y='500' width='1600' height='500' fill='url(#m)' opacity='.6'/>", '#9bc9a2') },
+    { name: 'プリズム', css: svgWall(
+      "<defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='#18123a'/><stop offset='1' stop-color='#2b0f3d'/></linearGradient>" +
+      "<linearGradient id='a' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='#47e3ff'/><stop offset='1' stop-color='#4b6bff'/></linearGradient>" +
+      "<linearGradient id='b' x1='1' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#ff5fa2'/><stop offset='1' stop-color='#8a3dff'/></linearGradient>" +
+      "<linearGradient id='c' x1='0' y1='1' x2='1' y2='0'><stop offset='0' stop-color='#ffb84d'/><stop offset='1' stop-color='#ff4f7b'/></linearGradient>" +
+      "<filter id='s' x='-50%' y='-50%' width='200%' height='200%'><feGaussianBlur stdDeviation='50'/></filter></defs>" +
+      "<rect width='1600' height='1000' fill='url(#g)'/>" +
+      "<g filter='url(#s)' opacity='.7'><circle cx='420' cy='300' r='260' fill='#4b6bff'/><circle cx='1200' cy='700' r='300' fill='#ff4f9a'/><circle cx='1000' cy='240' r='200' fill='#8a3dff'/></g>" +
+      "<g style='mix-blend-mode:screen'><path d='M560 760L860 180L1160 760Z' fill='url(#a)' opacity='.55'/><path d='M700 820L1000 260L1300 820Z' fill='url(#b)' opacity='.5'/><path d='M420 700L720 260L960 820Z' fill='url(#c)' opacity='.4'/></g>" +
+      "<g fill='none' stroke='#fff' stroke-width='1.5' opacity='.35'><path d='M560 760L860 180L1160 760Z'/><path d='M700 820L1000 260L1300 820Z'/></g>", '#18123a') },
+    { name: '朝の湖', css: svgWall(
+      "<defs><linearGradient id='g' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#bcd9f2'/><stop offset='.5' stop-color='#f5dcc8'/><stop offset='.5' stop-color='#d3c4c9'/><stop offset='1' stop-color='#7d97b5'/></linearGradient>" +
+      "<filter id='s' x='-50%' y='-50%' width='200%' height='200%'><feGaussianBlur stdDeviation='30'/></filter></defs>" +
+      "<rect width='1600' height='1000' fill='url(#g)'/><circle cx='800' cy='470' r='150' fill='#fff1df' opacity='.8' filter='url(#s)'/><circle cx='800' cy='470' r='54' fill='#fff8ee'/>" +
+      "<path d='M0 500L180 400L330 450L520 330L720 460L900 380L1080 450L1260 360L1440 430L1600 390V500Z' fill='#8ea3c0'/>" +
+      "<path d='M0 500L240 440L420 480L640 420L860 490L1100 430L1320 480L1600 440V500Z' fill='#6d84a6'/>" +
+      "<g opacity='.35' transform='translate(0 1000) scale(1 -1)'><path d='M0 500L180 400L330 450L520 330L720 460L900 380L1080 450L1260 360L1440 430L1600 390V500Z' fill='#8ea3c0'/></g>" +
+      "<g stroke='#fff' stroke-linecap='round' opacity='.5'><path d='M700 540H900M730 575H870M760 610H840M650 660H950' stroke-width='3'/></g>", '#d3c4c9') }
   ];
   // 壁紙の CSS。prefs.wallpaper が 'custom' なら、そのユーザーの ~/.config/wallpaper（画像の data: URL）を使う
   function wallCss(prefs, user) {
@@ -83,7 +144,7 @@
 
   // ---------- セッション（デスクトップ環境）の登録。パッケージからも OS.registerSession で追加できる
   OS.sessions = {};
-  OS.registerSession = function (def) { OS.sessions[def.id] = def; };
+  OS.registerSession = function (def) { def.pkg = def.pkg || OS._loading || null; OS.sessions[def.id] = def; };
 
   function avatar(u, size) {
     const st = 'width:' + size + 'px;height:' + size + 'px;font-size:' + Math.round(size * 0.45) + 'px;';
@@ -202,7 +263,7 @@
       htui.el.append(h('div', { class: 'safe-mark', 'aria-hidden': 'true' }, h('span', null, 'セーフモード'), h('span', null, 'セーフモード'), h('span', null, 'セーフモード'), h('span', null, 'セーフモード')));
       setTimeout(() => OS.notify({ app: 'htmlOS', icon: 'gear', title: 'セーフモードで起動しています', body: '追加したアプリ（パッケージ）と ~/.jshrc は無効です。ふつうに再起動すると元に戻ります' }), 600);
     } else if (!OS.live && BOOT.version && OS.version && BOOT.version !== OS.version) {
-      setTimeout(() => OS.notify({ app: 'htmlOS', icon: 'download', title: 'htmlOS ' + BOOT.version + ' に更新できます', body: 'Alt を押しながら起動して htmlOS i を開き、「アップデート」を選んでください（いまは ' + OS.version + '）' }), 1500);
+      setTimeout(() => OS.notify({ app: 'htmlOS', icon: 'download', title: BOOT.osName(BOOT.version, BOOT.codename) + ' に更新できます', body: 'Alt を押しながら起動して htmlOS i を開き、「アップデート」を選んでください（いまは ' + OS.version + '）' }), 1500);
     }
   }
   htui.switchSession = async function (sid) {
@@ -327,7 +388,7 @@
     if (dir && htui.fs.exists(OS.path.join(dir, n))) throw new Error(n + ' はすでにあります');
     return n;
   };
-  const fmtSize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(2) + ' MB';
+  const fmtSize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : n < 1073741824 ? (n / 1048576).toFixed(2) + ' MB' : (n / 1073741824).toFixed(2) + ' GB';
 
   // ---------- デスクトップ: ~/Desktop の中身を並べるファイル置き場（タッチモードの HTUi だけはアプリのランチャー）
   //   左上（hAqua は右上）から、ホーム・/（ルート）・ゴミ箱（HTUi と hWin）・~/Desktop のファイルの順に並ぶ
@@ -539,7 +600,7 @@
     const selText = String(window.getSelection() || '');
     if (isEditable(t) || (selText && window.getSelection().containsNode(t, true))) items = textMenu(t);
     if (!items && htui.shell && htui.shell.onContext) items = htui.shell.onContext(e);
-    if (!items) { const head = t.closest('.win-head'); if (head && !t.closest('.win-btn')) { const w = htui.wins.find(x => x.el.contains(head)); if (w) items = winMenu(w); } }
+    if (!items) { const head = t.closest('.win-head'); if (head && !t.closest('.win-btn,.win-cbtn')) { const w = htui.wins.find(x => x.el.contains(head)); if (w) items = winMenu(w); } }
     if (!items) { const tb = t.closest('.p-task'); const w = tb && htui.wins.find(x => x.task === tb); if (w) items = [{ head: w.title }, { label: w.el.classList.contains('hidden') ? '元に戻す' : '最小化', icon: 'min', act: () => (w.el.classList.contains('hidden') ? w.focus() : w.minimize()) }, { label: w.zone === 'max' ? '元のサイズに戻す' : '最大化', icon: 'max', act: () => (w.zone === 'max' ? w.unsnap() : w.snap('max')) }, { label: '新しいウィンドウ', icon: 'plus', act: () => run(w.app) }, { sep: true }, { label: '閉じる', icon: 'x', act: () => w.close() }]; }
     if (!items) { const df = t.closest('.desk-file'); if (df && df._o) { htui.iconsEl.querySelectorAll('.sel').forEach(x => x.classList.toggle('sel', x === df)); items = deskFileMenu(df._o); } }
     if (!items) { const di = t.closest('.desk-icon[data-app]'); if (di) { const a = Object.values(OS.apps).find(x => di.title === (x.desc || x.name)); if (a) items = [{ head: a.name }, { label: '開く', icon: a.icon, act: () => run(a.id) }, { label: 'このアプリについて', act: () => ui.alert((a.desc || a.name) + (a.pkg ? '\n（パッケージ ' + a.pkg + '）' : ''), a.name) }]; } }
@@ -674,53 +735,298 @@
     p.style.left = g[0] + '%'; p.style.top = g[1] + '%'; p.style.width = g[2] + '%'; p.style.height = g[3] + '%';
     p.style.zIndex = z - 1; p.classList.add('on');
   }
-  htui.active = () => htui.wins.find(w => w.el.classList.contains('active') && !w.el.classList.contains('hidden')) || null;
+  // 子ウインドウ（ダイアログなど）がアクティブなときは、その親（いちばん上の親）を返す
+  const hasActive = w => w.el.classList.contains('active') || w.children.some(hasActive);
+  // 描画エンジンの名前と版
+  htui.sdk = { name: 'HTUi SDK', version: '3.0', codename: 'Venus', full: 'HTUi SDK 3.0 (Venus)' };
+  // Venus のスライダー: 値までを色で塗るために --v-p を入れる
+  const rangeFill = r => { const mn = +r.min || 0, mx = r.max === '' ? 100 : +r.max, v = +r.value; r.style.setProperty('--v-p', (mx > mn ? (v - mn) / (mx - mn) * 100 : 0) + '%'); };
+  htui.syncRanges = root => (root || document).querySelectorAll('input[type=range]').forEach(rangeFill);
+  document.addEventListener('input', e => { if (e.target && e.target.type === 'range') rangeFill(e.target); }, true);
+  if (window.MutationObserver) {
+    let rq = 0;
+    new MutationObserver(() => { if (rq) return; rq = requestAnimationFrame(() => { rq = 0; const r = document.getElementById('os-root'); if (r) htui.syncRanges(r); }); }).observe(document.body, { childList: true, subtree: true });
+  }
+  htui.active = () => htui.wins.find(w => hasActive(w) && !w.el.classList.contains('hidden')) || null;
+  // 子ウインドウも含めた、すべてのウインドウ
+  htui.allWins = () => { const out = [], add = w => { out.push(w); w.children.forEach(add); }; htui.wins.forEach(add); return out; };
+  const rootOf = w => { while (w.parent) w = w.parent; return w; };
 
+  // ---------- HTUi SDK 3.0（Venus）: WebView
+  //   hBrowser の表示部分を部品にしたもの。アプリのウインドウの中に web ページ・hFS の HTML・HTML の文字列を表示できる。
+  //   const wv = OS.htui.WebView({ url, proxy, onnavigate, onload, onstatus, ontitle, ondownload, onerror, onmessage });
+  //   win.body.append(wv.el); wv.go('https://example.com/');
+  //   ・url        … https://… / hfs:パス / /home/…（hFS） / about:blank。ドメインだけなら https://、それ以外は検索語として DuckDuckGo で検索
+  //   ・proxy      … false（直接 iframe に表示）/ true（CORS プロキシで取得して表示。埋め込みを拒否するサイトも読める）
+  //   ・onnavigate(url) … ページの中のリンクが押されたとき。渡さないと、WebView がそのまま移動する（履歴つき）
+  //   ・onmessage(data) … ページから parent.postMessage(…) で送られたもの（WebView 自身の連絡は除く）。wv.post(data) でページへ送れる
+  //   メソッド: go(url) / load(url)（履歴に入れない） / back() / forward() / reload() / html(文字列, base) / show(要素) / post(data) / destroy()
+  //   プロパティ: el / url / title / proxy / history / index / canBack / canForward / lastHtml / frame
+  const WV_DL = /\.(zip|gz|tgz|7z|rar|pdf|mp3|wav|flac|m4a|mp4|webm|mov|uf2|bin|hex|iso|deb|exe|apk)$/i;
+  const wvEsc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  // プロキシ表示・HTML 表示したページの中で動かす小さなスクリプト（リンクとフォームとタイトルを親に伝える）
+  function wvAgent() {
+    var send = function (m) { m.hbrowser = 1; try { parent.postMessage(m, '*'); } catch (e) { /* 親がいない */ } };
+    document.addEventListener('click', function (e) {
+      var a = e.target && e.target.closest && e.target.closest('a[href]');
+      if (!a) return;
+      var raw = a.getAttribute('href') || '';
+      if (raw.charAt(0) === '#') {
+        e.preventDefault();
+        var t = document.getElementById(raw.slice(1)) || document.getElementsByName(raw.slice(1))[0];
+        if (t) t.scrollIntoView();
+        return;
+      }
+      if (/^javascript:/i.test(raw)) return;
+      if (/^hfs:/i.test(raw)) { e.preventDefault(); send({ nav: raw }); return; }
+      if (!/^https?:/i.test(a.href)) return;
+      e.preventDefault();
+      send({ nav: a.href, dl: a.hasAttribute('download') });
+    }, true);
+    document.addEventListener('submit', function (e) {
+      var f = e.target; e.preventDefault();
+      if ((f.getAttribute('method') || 'get').toLowerCase() !== 'get') { send({ note: 'post' }); return; }
+      var u = new URL(f.getAttribute('action') || '', document.baseURI);
+      u.search = '';
+      new FormData(f).forEach(function (v, k) { if (typeof v === 'string') u.searchParams.append(k, v); });
+      send({ nav: u.href });
+    }, true);
+    var title = function () { send({ title: document.title || '' }); };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', title); else title();
+  }
+  htui.WebView = function (o) {
+    o = o || {};
+    const fsx = () => htui.fs || OS.fs;
+    const home = () => o.home || (htui.user ? users.home(htui.user) : '/');
+    const el = h('div', { class: 'webview hb-view' });
+    const wv = { el: el, url: null, title: '', proxy: !!o.proxy, history: [], index: -1, lastHtml: null, frame: null, destroyed: false };
+    let seq = 0;
+    const emit = (name, ...a) => { const f = o['on' + name]; if (typeof f === 'function') { try { return f.apply(wv, a); } catch (e) { console.error(e); } } };
+    const status = t => emit('status', t || '');
+    const setTitle = t => { wv.title = t || ''; emit('title', wv.title); };
+    wv.resolve = function (u) {
+      u = String(u || '').trim();
+      if (!u) return 'about:blank';
+      if (/^hfs:/i.test(u)) return 'hfs:' + path.norm(u.slice(4), '/', home());
+      if (/^(about:|data:|blob:|https?:\/\/)/i.test(u)) return u;
+      if (u.startsWith('/') || u.startsWith('~')) return 'hfs:' + path.norm(u, '/', home());
+      if (/^[\w-]+(\.[\w-]+)+(:\d+)?(\/\S*)?$/.test(u) || /^localhost(:\d+)?(\/\S*)?$/.test(u)) return 'https://' + u;
+      return 'https://html.duckduckgo.com/html/?q=' + encodeURIComponent(u);
+    };
+    const mkFrame = sandbox => {
+      el.textContent = '';
+      const f = wv.frame = h('iframe', { sandbox: sandbox, title: o.label || 'ページ', referrerpolicy: 'no-referrer' });
+      el.append(f);
+      return f;
+    };
+    const page = (title, lines, actions) => {
+      wv.frame = null; el.textContent = '';
+      el.append(h('div', { class: 'hb-page' }, h('h1', null, title), (lines || []).map(l => h('p', null, l)), h('div', { class: 'hb-marks' }, actions || [])));
+    };
+    const inject = (doc, base) => {
+      const inj = (base ? '<base href="' + wvEsc(base) + '">' : '') + '<scr' + 'ipt>(' + String(wvAgent) + ')();</scr' + 'ipt>';
+      doc = String(doc).replace(/<meta[^>]+http-equiv\s*=\s*["']?(content-security-policy|x-frame-options|refresh)[^>]*>/gi, '');
+      return /<head[^>]*>/i.test(doc) ? doc.replace(/<head[^>]*>/i, x => x + inj) : inj + doc;
+    };
+    // 中身を直接見せる（アプリが作った要素）。HTML の文字列は html() で
+    wv.show = function (...nodes) { seq++; wv.frame = null; el.textContent = ''; el.append(...nodes); };
+    wv.html = function (doc, base) { seq++; wv.lastHtml = String(doc); mkFrame('allow-scripts allow-forms').srcdoc = inject(doc, base); setTitle(''); };
+    wv.post = function (data) { if (wv.frame && wv.frame.contentWindow) wv.frame.contentWindow.postMessage(data, '*'); };
+    wv.load = async function (u) {
+      u = wv.resolve(u);
+      // DuckDuckGo の検索結果リンクは転送URLなので中身を取り出す
+      try { const U = new URL(u); if (/duckduckgo\.com$/.test(U.hostname) && U.pathname === '/l/' && U.searchParams.get('uddg')) u = U.searchParams.get('uddg'); } catch (e) { /* URLでない */ }
+      wv.url = u; wv.lastHtml = null;
+      const my = ++seq;
+      status('');
+      if (u === 'about:blank') { el.textContent = ''; wv.frame = null; setTitle(''); emit('load', u); return; }
+      if (u.startsWith('hfs:')) {
+        const p = u.slice(4);
+        try {
+          const k = fsx().kind(p), s = fsx().stat(p);
+          if (!s || s.t !== 'f') throw new Error(p + ': そのようなファイルはありません');
+          if (k === 'html') { wv.lastHtml = s.c; mkFrame('allow-scripts allow-forms').srcdoc = inject(s.c); }
+          else if (k === 'image') wv.show(h('div', { class: 'hb-page' }, h('img', { src: fsx().dataURL(p), alt: path.base(p), style: 'max-width:100%' })));
+          else if (s.b) throw new Error(path.base(p) + ' は表示できません');
+          else wv.show(h('pre', { class: 'hb-pre' }, s.c));
+          wv.url = u; setTitle(path.base(p));
+          status('hFS 上のファイルを表示中');
+          emit('load', u);
+        } catch (e) { page('表示できません', [e.message]); emit('error', e, u); }
+        return;
+      }
+      if (/^(data|blob):/i.test(u)) { mkFrame('allow-scripts').src = u; emit('load', u); return; }
+      const forceProxy = /(^|\.)duckduckgo\.com$/.test(new URL(u).hostname);
+      if (!wv.proxy && !forceProxy) {
+        mkFrame('allow-scripts allow-same-origin allow-forms allow-popups').src = u;
+        setTitle(u.replace(/^https?:\/\//, ''));
+        status('直接モードで表示中。真っ白のままなら、サイトが埋め込みを拒否しています。プロキシをオンにしてください。');
+        emit('load', u);
+        return;
+      }
+      page('読み込み中…', [u]);
+      status('プロキシ経由で取得しています…');
+      try {
+        const r = await OS.net.get(u, { direct: false });
+        const type = (r.headers.get('content-type') || '').toLowerCase();
+        const buf = await r.arrayBuffer();
+        if (my !== seq || wv.destroyed) return;
+        if (/^(image|audio|video)\//.test(type)) {
+          const c = await OS.net.blobToContent(new Blob([buf], { type: type }), 'x.bin');
+          wv.show(h('div', { class: 'hb-page' }, h(type.startsWith('image') ? 'img' : type.startsWith('audio') ? 'audio' : 'video', { src: c.content, controls: true, style: 'max-width:100%' })));
+        } else {
+          let cs = (type.match(/charset=([\w-]+)/) || [])[1];
+          const m = new TextDecoder('latin1').decode(buf.slice(0, 4096)).match(/<meta[^>]+charset\s*=\s*["']?([\w-]+)/i);
+          if (m) cs = m[1];
+          let text; try { text = new TextDecoder(cs || 'utf-8').decode(buf); } catch (e) { text = new TextDecoder().decode(buf); }
+          if (/html|xml/.test(type) || /^\s*<(!doctype|html|head|body)/i.test(text)) { mkFrame('allow-scripts allow-forms').srcdoc = inject(text, u); }
+          else wv.show(h('pre', { class: 'hb-pre' }, text));
+          wv.lastHtml = text;
+        }
+        status('プロキシモードで表示中（' + Math.round(buf.byteLength / 1024) + ' KB）。ログインが必要なページやスクリプト主体のサイトは正しく動きません。');
+        emit('load', u);
+      } catch (e) {
+        if (my !== seq || wv.destroyed) return;
+        status('');
+        if (emit('error', e, u, forceProxy) === true) return; // アプリが自分で表示した
+        page('ページを取得できませんでした', [u, e.message, 'プロキシは外部の無料サービスです。止まっている場合は、設定 → ネットワーク で別のプロキシに変更できます。'],
+          [h('button', { class: 'btn', type: 'button', onclick: () => wv.reload() }, '再試行')]);
+      }
+    };
+    wv.go = function (u) {
+      u = wv.resolve(u);
+      wv.history.splice(wv.index + 1); wv.history.push(u); wv.index = wv.history.length - 1;
+      return wv.load(u);
+    };
+    wv.back = () => { if (wv.index > 0) return wv.load(wv.history[--wv.index]); };
+    wv.forward = () => { if (wv.index < wv.history.length - 1) return wv.load(wv.history[++wv.index]); };
+    wv.reload = () => { if (wv.url) return wv.load(wv.url); };
+    Object.defineProperty(wv, 'canBack', { get: () => wv.index > 0 });
+    Object.defineProperty(wv, 'canForward', { get: () => wv.index < wv.history.length - 1 });
+    const onMsg = e => {
+      if (!wv.frame || e.source !== wv.frame.contentWindow || !e.data) return;
+      const d = e.data;
+      if (d.hbrowser !== 1) { emit('message', d); return; }
+      if (typeof d.title === 'string') { setTitle(d.title); return; }
+      if (d.note === 'post') { OS.ui.toast('フォームの送信（POST）はできません'); return; }
+      if (typeof d.nav !== 'string') return;
+      const u = d.nav;
+      if (/^https?:/i.test(u) && (d.dl || WV_DL.test(u.split(/[?#]/)[0]))) { if (emit('download', u) === undefined && !o.ondownload) OS.ui.toast('ダウンロードには対応していません'); return; }
+      if (!/^(https?|hfs):/i.test(u)) return;
+      if (o.onnavigate) emit('navigate', u); else wv.go(u);
+    };
+    window.addEventListener('message', onMsg);
+    wv.destroy = () => { wv.destroyed = true; seq++; window.removeEventListener('message', onMsg); el.remove(); };
+    // ウインドウに入れたら、そのウインドウが閉じるときに一緒に片づける
+    wv.attach = function (win, parentEl) {
+      (parentEl || win.body).append(el);
+      const prev = win.onDispose;
+      win.onDispose = () => { wv.destroy(); if (prev) prev(); };
+      return wv;
+    };
+    if (o.url) wv.go(o.url);
+    return wv;
+  };
+
+  // ---------- HTUi SDK 2（Jupiter）〜 3.0（Venus）: ウインドウ
+  //   o.parent を渡すと、そのウインドウの子ウインドウになる。子ウインドウは
+  //   ・タスクバーなどには出ず、親の真ん中に開く（htui.wins には入らず、親の children に入る）
+  //   ・開いているあいだ、親は操作できない（親を押すと子が前に出て点滅する）
+  //   ・親を最小化・非表示にすると一緒に隠れ、親を閉じると一緒に閉じる
+  //   o.dialog: 最小化・最大化ボタンと大きさの変更をなくす。o.h が 'auto' なら中身に合わせた高さ
+  //   o.buttons（3.0）: タイトルバーに置くアプリ独自のボタン [{ icon, label, title, onclick(e, on), toggle, on, disabled }]
+  //     あとから足すときは win.addButton({...})。返り値（win.captionButtons にも入る）で active / disabled / setIcon / setTitle / remove
   htui.open = function (o) {
     const desk = htui.desk, dw = desk.clientWidth, dh = desk.clientHeight;
-    const win = { pid: ++htui.pid, title: o.title, app: o.app, zone: null, rect: null, onClose: null, onDispose: null, onFocus: null };
+    const parent = o.parent && !o.parent.closed ? o.parent : null;
+    const win = { pid: ++htui.pid, title: o.title, app: o.app || (parent && parent.app), zone: null, rect: null, onClose: null, onDispose: null, onFocus: null, parent: parent, children: [], dialog: !!o.dialog };
     const titleEl = h('span', { class: 'win-title' }, o.title);
     const bMin = h('button', { class: 'win-btn', type: 'button', title: '最小化', 'aria-label': '最小化' }, OS.icon('min', 14));
     const bMax = h('button', { class: 'win-btn', type: 'button', title: '最大化（右クリックでスナップ配置を選ぶ）', 'aria-label': '最大化' }, OS.icon('max', 14));
     const bX = h('button', { class: 'win-btn close', type: 'button', title: '閉じる', 'aria-label': '閉じる' }, OS.icon('x', 14));
-    const head = h('div', { class: 'win-head' }, OS.icon(o.icon, 16), titleEl, h('span', { class: 'win-btns' }, bMin, bMax, bX));
+    const capBox = h('span', { class: 'win-cap' });
+    const head = h('div', { class: 'win-head' }, OS.icon(o.icon, 16), titleEl, capBox, h('span', { class: 'win-btns' }, o.dialog ? null : bMin, o.dialog ? null : bMax, bX));
     const body = win.body = h('div', { class: 'win-body' });
-    const el = win.el = h('div', { class: 'win', role: 'group', 'aria-label': o.title }, head, body);
-    const w = Math.min(o.w || 640, dw - 8), hh = Math.min(o.h || 420, dh - 8), n = htui.wins.length % 7;
-    el.style.width = px(w); el.style.height = px(hh);
+    const el = win.el = h('div', { class: 'win' + (parent ? ' child' : '') + (o.dialog ? ' dialog' : ''), role: o.dialog ? 'dialog' : 'group', 'aria-label': o.title, 'aria-modal': parent ? 'true' : null }, head, body);
+    const w = Math.min(o.w || 640, dw - 8), hh = o.h === 'auto' ? 0 : Math.min(o.h || 420, dh - 8), n = htui.wins.length % 7;
+    el.style.width = px(w);
+    if (hh) el.style.height = px(hh); else el.style.maxHeight = px(dh - 8);
     el.style.left = px(clamp(90 + n * 26, 4, Math.max(4, dw - w - 4)));
     el.style.top = px(clamp(16 + n * 24, 4, Math.max(4, dh - hh - 4)));
 
     const task = win.task = h('button', { class: 'p-task', type: 'button', title: o.title }, OS.icon(o.icon, 14), h('span', null, o.title));
     task.addEventListener('click', () => { if (el.classList.contains('active') && !el.classList.contains('hidden')) win.minimize(); else win.focus(); });
-    htui.tasks.append(task);
+    if (!parent) htui.tasks.append(task);
 
+    win.captionButtons = [];
+    win.addButton = spec => {
+      spec = spec || {};
+      const ic = h('span', { class: 'cap-ico' }, spec.icon ? OS.icon(spec.icon, 15) : null), lb = h('span', { class: 'cap-l' }, spec.label || '');
+      const b = h('button', { class: 'win-cbtn', type: 'button', title: spec.title || spec.label || '', 'aria-label': spec.title || spec.label || '' }, ic, spec.label ? lb : null);
+      const handle = {
+        el: b, spec: spec,
+        get active() { return b.classList.contains('on'); },
+        set active(v) { b.classList.toggle('on', !!v); if (spec.toggle) b.setAttribute('aria-pressed', v ? 'true' : 'false'); },
+        get disabled() { return b.disabled; }, set disabled(v) { b.disabled = !!v; },
+        setIcon(n) { ic.textContent = ''; if (n) ic.append(OS.icon(n, 15)); },
+        setLabel(t) { lb.textContent = t || ''; if (t && !lb.parentNode) b.append(lb); },
+        setTitle(t) { b.title = t; b.setAttribute('aria-label', t); },
+        remove() { b.remove(); win.captionButtons = win.captionButtons.filter(x => x !== handle); }
+      };
+      if (spec.toggle) handle.active = !!spec.on;
+      if (spec.disabled) b.disabled = true;
+      b.addEventListener('click', e => {
+        e.stopPropagation();
+        if (spec.toggle) handle.active = !handle.active;
+        try { if (spec.onclick) spec.onclick.call(win, e, handle.active, handle); } catch (er) { OS.ui.alert(er.message); }
+      });
+      b.addEventListener('dblclick', e => e.stopPropagation());
+      capBox.append(b); win.captionButtons.push(handle);
+      return handle;
+    };
+    (o.buttons || []).forEach(win.addButton);
     win.setTitle = t => { win.title = t; titleEl.textContent = t; task.lastChild.textContent = t; task.title = t; el.setAttribute('aria-label', t); htui.syncTitle(); };
     win.focus = () => {
       win._min = 0;
       el.classList.remove('hidden', 'minimizing');
-      htui.wins.forEach(x => { x.el.classList.remove('active'); x.task.classList.remove('active'); });
-      el.classList.add('active'); task.classList.add('active');
+      // 子ウインドウがあれば、親を前に出してから、いちばん新しい子にフォーカスする
+      if (win.children.length) { el.style.zIndex = ++htui.z; win.children[win.children.length - 1].focus(); return; }
+      if (parent) { const r = rootOf(win); r.el.classList.remove('hidden', 'minimizing'); }
+      htui.allWins().forEach(x => { x.el.classList.remove('active'); x.task.classList.remove('active'); });
+      el.classList.add('active'); rootOf(win).task.classList.add('active');
       el.style.zIndex = ++htui.z;
-      if (htui.shell && htui.shell.onFocus) htui.shell.onFocus(win);
+      if (htui.shell && htui.shell.onFocus) htui.shell.onFocus(rootOf(win));
       htui.syncTitle();
       if (win.onFocus) win.onFocus();
     };
+    // 子ウインドウを開いているあいだに親を押したら、子を点滅させて知らせる
+    win.flash = () => { const c = win.children[win.children.length - 1]; if (!c) return; c.focus(); c.el.classList.remove('cw-flash'); void c.el.offsetWidth; c.el.classList.add('cw-flash'); };
     win.minimize = () => {
+      if (parent) { rootOf(win).minimize(); return; }
       const tok = win._min = Date.now() + Math.random();
       el.classList.remove('active'); task.classList.remove('active');
       animOut(el, 'minimizing', 170, () => { if (win._min !== tok || win.closed) return; el.classList.add('hidden'); focusTop(); });
     };
     win.close = async force => {
+      // 子ウインドウ（確認のダイアログなど）が開いているあいだは閉じない。強制のときは子も一緒に閉じる
+      if (!force && win.children.length) {
+        for (const c of win.children.slice()) { if ((await c.close()) === false) { win.flash(); return false; } }
+      }
       if (!force && win.onClose && (await win.onClose()) === false) return false;
       if (win.closed) return true;
       win.closed = true;
+      win.children.slice().forEach(c => c.close(true));
       try { if (win.onDispose) win.onDispose(); } catch (e) { /* 後始末の失敗は無視 */ }
       task.remove();
-      htui.wins = htui.wins.filter(x => x !== win);
+      if (win._mo) win._mo.disconnect();
+      if (parent) {
+        parent.children = parent.children.filter(x => x !== win);
+        if (!parent.children.length) { parent.el.classList.remove('has-child'); if (parent._block) parent._block.remove(); }
+      } else htui.wins = htui.wins.filter(x => x !== win);
       el.classList.remove('active');
       if (force) el.remove(); else animOut(el, 'closing', 150, () => el.remove());
-      focusTop();
+      if (parent && !parent.closed) { if (!parent.el.classList.contains('hidden')) parent.focus(); }
+      else focusTop();
       return true;
     };
 
@@ -753,12 +1059,15 @@
       menu(bMax, [['左半分', 'left'], ['右半分', 'right'], ['左上', 'tl'], ['右上', 'tr'], ['左下', 'bl'], ['右下', 'br'], ['最大化', 'max']]
         .map(x => ({ label: x[0], act: () => win.snap(x[1]) })).concat([{ label: '元のサイズに戻す', act: () => win.unsnap() }]), true);
     });
-    head.addEventListener('dblclick', e => { if (!e.target.closest('.win-btn') && (!OS.touch || win.free)) toggleMax(); });
-    el.addEventListener('pointerdown', () => { if (!el.classList.contains('active')) win.focus(); }, true);
+    head.addEventListener('dblclick', e => { if (!e.target.closest('.win-btn,.win-cbtn') && (!OS.touch || win.free) && !o.dialog) toggleMax(); });
+    el.addEventListener('pointerdown', e => {
+      if (win.children.length) { e.preventDefault(); e.stopPropagation(); win.flash(); return; }
+      if (!el.classList.contains('active')) win.focus();
+    }, true);
 
     // ---- タイトルバーのドラッグで移動。画面の端まで運ぶとスナップ
     head.addEventListener('pointerdown', e => {
-      if (e.target.closest('.win-btn') || e.button > 0 || (OS.touch && !win.free)) return;
+      if (e.target.closest('.win-btn,.win-cbtn') || e.button > 0 || (OS.touch && !win.free)) return;
       const dr = desk.getBoundingClientRect(), x0 = e.clientX, y0 = e.clientY;
       let sx = e.clientX - dr.left - el.offsetLeft, sy = e.clientY - dr.top - el.offsetTop, moved = false, zone = null;
       const startRect = win.zone ? win.rect : curRect();
@@ -785,7 +1094,7 @@
     });
 
     // ---- 8方向のリサイズハンドル
-    'n s e w ne nw se sw'.split(' ').forEach(d => {
+    if (!o.dialog) 'n s e w ne nw se sw'.split(' ').forEach(d => {
       const hd = h('div', { class: 'rz rz-' + d });
       hd.addEventListener('pointerdown', e => {
         if (e.button > 0 || win.zone === 'max') return;
@@ -808,6 +1117,24 @@
     });
 
     desk.append(el);
+    if (parent) {
+      // 子ウインドウ: 親の真ん中に置き、親の操作をふさぐ。親が隠れたら一緒に隠れる
+      win.free = true; el.classList.add('free');
+      parent.children.push(win);
+      parent.el.classList.add('has-child');
+      if (!parent._block) parent._block = h('div', { class: 'cw-block', 'aria-hidden': 'true' });
+      parent.el.append(parent._block);
+      const pr = { l: parent.el.offsetLeft, t: parent.el.offsetTop, w: parent.el.offsetWidth, h: parent.el.offsetHeight };
+      const ww = el.offsetWidth, wh = el.offsetHeight;
+      el.style.left = px(clamp(pr.l + (pr.w - ww) / 2, 4, Math.max(4, dw - ww - 4)));
+      el.style.top = px(clamp(pr.t + Math.min(60, (pr.h - wh) / 2), 4, Math.max(4, dh - wh - 4)));
+      if (!parent._mo && window.MutationObserver) {
+        const sync = () => { const hide = parent.el.classList.contains('hidden') || parent.el.classList.contains('minimizing'); htui.allWins().filter(c => c !== parent && rootOf(c) === rootOf(parent) && c.parent).forEach(c => c.el.classList.toggle('hidden', hide)); };
+        parent._mo = new MutationObserver(sync); parent._mo.observe(parent.el, { attributes: true, attributeFilter: ['class'] });
+      }
+      win.focus();
+      return win;
+    }
     htui.wins.push(win);
     // タッチでは全画面。ただし環境が「ふつうのウィンドウ」を許す場面（hWin のデスクトップ）なら free にして動かせるようにする
     win.free = !!(OS.touch && htui.shell && htui.shell.freeWindows && htui.shell.freeWindows());
@@ -817,6 +1144,7 @@
     return win;
   };
   function focusTop() {
+    // 子ウインドウは親の children にあるので、ここでは親だけを見る（親の focus が子にフォーカスを渡す）
     const vis = htui.wins.filter(w => !w.el.classList.contains('hidden') && !w.el.classList.contains('minimizing'));
     if (!vis.length) { htui.syncTitle(); return; }
     vis.sort((a, b) => (+b.el.style.zIndex || 0) - (+a.el.style.zIndex || 0))[0].focus();
@@ -880,7 +1208,12 @@
 
   // ---------- ダイアログ
   const ui = OS.ui = {};
+  // ダイアログ。ウインドウの中から開いたとき（o.parent か、フォーカスのあるウインドウがあるとき）は、そのウインドウの子ウインドウとして開く。
+  // デスクトップやログイン画面など、持ち主のウインドウがないときは画面全体を暗くして真ん中に出す
+  const ownerOf = node => { if (!node || !htui.running || !htui.desk) return null; const l = htui.allWins().filter(w => !w.closed && w.el.contains(node)); return l[l.length - 1] || null; };
   ui.modal = function (o) {
+    const owner = o.parent === null ? null : o.parent || ownerOf(document.activeElement) || (htui.running && htui.desk && htui.user ? htui.active() : null);
+    if (owner && !owner.closed && htui.desk && htui.desk.isConnected) return childModal(o, owner);
     return new Promise(res => {
       const foot = h('div', { class: 'modal-foot' });
       const box = h('div', { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': o.title, style: o.width ? 'width:' + o.width + 'px' : null },
@@ -905,6 +1238,40 @@
       if (o.onOpen) o.onOpen(done);
     });
   };
+  function childModal(o, owner) {
+    return new Promise(res => {
+      const foot = h('div', { class: 'modal-foot' });
+      const box = h('div', { class: 'modal cw-modal' }, h('div', { class: 'modal-title' }, o.title), h('div', { class: 'modal-body' }, o.body), foot);
+      // 持ち主がもう子ウインドウを開いているときは、その子の子にする
+      let p = owner; while (p.children.length) p = p.children[p.children.length - 1];
+      const win = htui.open({ title: o.title, icon: o.icon || (OS.apps[p.app] || {}).icon || 'bell', w: (o.width || 380) + 2, h: 'auto', parent: p, dialog: true });
+      win.body.append(box);
+      const prev = document.activeElement;
+      let finished = false, cancel = null, primary = null;
+      const done = v => {
+        if (finished) return; finished = true;
+        win.close(true);
+        try { if (prev && prev.isConnected && prev.focus && !prev.closest('.win.has-child')) prev.focus(); } catch (e) { /* 戻せなくてもよい */ }
+        res(v);
+      };
+      const fire = b => { const v = typeof b.value === 'function' ? b.value() : b.value; if (v === ui.KEEP) return; done(v); };
+      o.buttons.forEach(b => {
+        foot.append(h('button', { class: 'btn' + (b.primary ? ' primary' : '') + (b.danger ? ' danger' : ''), type: 'button', onclick: () => fire(b) }, b.label));
+        if (b.primary) primary = b; if (b.cancel) cancel = b;
+      });
+      // × で閉じたら「キャンセル」と同じ。キャンセルが無いダイアログは null
+      win.onClose = () => { if (!finished) { if (cancel) fire(cancel); else done(null); } return finished; };
+      win.onDispose = () => { if (!finished) { finished = true; res(cancel && typeof cancel.value !== 'function' ? cancel.value : null); } };
+      win.el.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && cancel) { e.preventDefault(); e.stopPropagation(); fire(cancel); }
+        else if (e.key === 'Enter' && primary && !e.isComposing && e.target.tagName !== 'TEXTAREA' && e.target.tagName !== 'BUTTON') { e.preventDefault(); fire(primary); }
+      });
+      const f = box.querySelector('input,select,textarea') || foot.querySelector('.primary') || foot.querySelector('button');
+      win.onFocus = () => { if (!win.el.contains(document.activeElement)) { const g = box.querySelector('input,select,textarea') || foot.querySelector('.primary') || foot.querySelector('button'); if (g) g.focus(); } };
+      if (f) { f.focus(); if (f.select && f.type !== 'password') f.select(); }
+      if (o.onOpen) o.onOpen(done);
+    });
+  }
   ui.KEEP = {};
   ui.alert = (msg, title) => ui.modal({ title: title || 'お知らせ', body: h('p', { class: 'modal-msg' }, msg), buttons: [{ label: 'OK', primary: true, cancel: true, value: true }] });
   ui.confirm = (msg, o) => ui.modal({ title: (o && o.title) || '確認', body: h('p', { class: 'modal-msg' }, msg), buttons: [{ label: 'キャンセル', cancel: true, value: false }, { label: (o && o.ok) || 'OK', primary: true, danger: o && o.danger, value: true }] });

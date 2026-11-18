@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """src/ 以下を1枚の index.html（インストールメディア兼ブートローダ）にまとめる。"""
-import pathlib, subprocess, sys
+import pathlib, sys
 
-VERSION = '3.0.3'
+VERSION = '4.0.0'
+# コードネーム: htmlOS は恒星の名前（3.2 = Sirius、4.0 = Vega）。描画エンジン HTUi SDK は惑星の名前（/sys/htui.js の htui.sdk）
+CODENAME = 'Vega'
+# ビルド番号: リリースごとに 1 つずつ増やす（3.1.0 = 22、3.2.0 = 23〜24、4.0.0 = 25）。
+# 3.1・3.2 はこのリポジトリの外で配ったので、コミット数ではなくここに書く
+BUILD = '25'
 root = pathlib.Path(__file__).parent
-# ビルド番号: このリポジトリのコミット数 + 1（次のコミットに入る番号）
-try:
-    BUILD = str(int(subprocess.run(['git', 'rev-list', '--count', 'HEAD'], cwd=root, capture_output=True, text=True, check=True).stdout.strip()) + 1)
-except Exception:
-    BUILD = '0'
 src = root / 'src'
 blocks = []
 for f in sorted((src / 'sys').rglob('*')):
@@ -20,7 +20,7 @@ for f in sorted((src / 'sys').rglob('*')):
     vpath = '/sys/' + f.relative_to(src / 'sys').as_posix()
     blocks.append(f'<script type="text/x-htmlos" data-path="{vpath}">\n{text}</script>')
 html = (src / 'boot.html').read_text(encoding='utf-8')
-html = html.replace('<!--SYSFILES-->', '\n'.join(blocks)).replace('__VERSION__', VERSION).replace('__BUILD__', BUILD)
+html = html.replace('<!--SYSFILES-->', '\n'.join(blocks)).replace('__VERSION__', VERSION).replace('__BUILD__', BUILD).replace('__CODENAME__', CODENAME)
 out = root / 'index.html'
 out.write_text(html, encoding='utf-8')
 print(out, len(html), 'chars,', len(blocks), 'system files, build', BUILD)

@@ -40,13 +40,13 @@
         const same = has && meta.version === BOOT.version && String(meta.build || '') === String(BOOT.build);
         body.append(
           h('div', { class: 'wl-head' }, OS.mark(64, 'wl-mark'), h('h1', null, 'htmlOS'),
-            h('p', null, 'htmlOS i ・ バージョン ' + BOOT.version + ' ・ ビルド ' + BOOT.build)),
+            h('p', null, 'htmlOS i ・ ' + BOOT.osName(BOOT.version, BOOT.codename) + '（' + BOOT.version + '）・ ビルド ' + BOOT.build)),
           h('div', { class: 'wl-grid' },
             tile('try', 'play', 'htmlOS を試す', 'インストールせずに使う（再読み込みで消えます）', tryLive),
             tile('install', 'download', 'インストール', 'このブラウザに htmlOS を入れる', () => OS.launch('installer')),
             tile('update', 'reload', 'アップデート', has ? (same ? '最新です（' + meta.version + '）。もう一度書き直すこともできます' : meta.version + (meta.build ? '（ビルド ' + meta.build + '）' : '') + ' → ' + BOOT.version) : 'インストール済みの htmlOS がありません', update, !has),
             tile('recover', 'gear', 'htmlOS を回復', '修復・パスワード・バックアップ・アンインストール', recover)),
-          h('p', { class: 'wl-foot' }, has ? 'インストール先: htmlOS ' + meta.version + (meta.build ? '（ビルド ' + meta.build + '）' : '') + ' が見つかりました' : 'インストール先: htmlOS は見つかりませんでした',
+          h('p', { class: 'wl-foot' }, 'インストール先（' + (BOOT.realLabel ? BOOT.realLabel() : 'LocalStorage') + '）: ', has ? 'htmlOS ' + meta.version + (meta.build ? '（ビルド ' + meta.build + '）' : '') + ' が見つかりました' : 'htmlOS は見つかりませんでした',
             BOOT.realIsRam() ? '（このブラウザは LocalStorage が使えないため、インストールしても再読み込みで消えます）' : ''));
         if (!OS.imode) body.querySelector('#wl-try').disabled = true;
       }
@@ -125,6 +125,7 @@
               } catch (e) { ui().alert(e.message); }
             }, { disabled: !has }),
             row('restore', 'upload', 'バックアップから復元', 'バックアップのファイルを読み込み、インストール先をその内容に置き換えます' + (has ? '。管理者のサインインが必要です' : ''), '復元…', restore),
+            row('quota', 'drive', 'ディスクの上限', BOOT.realIsHdd && BOOT.realIsHdd() ? 'HDD1（PC のフォルダ）に htmlOS が使ってよい容量を GB で決めます。管理者のサインインが必要です' : 'HDD1 にインストールした htmlOS が使ってよい容量を GB で決めます（HDD0 の LocalStorage は約 5MB で固定です）', '設定…', setQuota, { disabled: !(BOOT.hdd && BOOT.hdd.supported) }),
             row('uninstall', 'trash', 'htmlOS をアンインストール', '管理者としてサインインし、このブラウザから htmlOS のユーザー・ファイル・設定をすべて消去します（BIOS の設定は残ります）', 'アンインストール…', uninstall, { danger: true, disabled: !has })));
       }
       async function resetPassword() {
@@ -183,6 +184,46 @@
         return ui().modal({ title, body, onOpen: d => { close = d; pw.focus(); },
           buttons: [{ label: 'キャンセル', cancel: true, value: null }, { label: 'サインイン', primary: true, value: go }] });
       }
+      // ディスクの上限（HDD1 だけ）。インストール先が LocalStorage のときは、登録してある HDD1 を開いてから
+      async function setQuota() {
+        if (!BOOT.realIsHdd()) {
+          try { await BOOT.realOpenHdd(); } catch (e) { ui().alert(e.message); return; }
+          recover();
+        }
+        if (!BOOT.realHasOS()) { ui().alert('HDD1（' + BOOT.realLabel() + '）に htmlOS が見つかりません。'); return; }
+        if (!(await signIn('ディスクの上限', BOOT.realLabel() + ' に htmlOS が使ってよい容量を決めます。\n続けるには、管理者としてサインインしてください。'))) return;
+        const q = BOOT.realQuota(), fmt = BOOT.hdd.fmt;
+        const inp = h('input', { class: 'inp', type: 'number', id: 'wl-quota', min: '0.01', step: '0.5', placeholder: '空欄なら上限なし', value: q.quota ? String(Math.round(q.quota / 1073741824 * 100) / 100) : '', 'aria-label': '上限（GB）' });
+        const r = await ui().modal({ title: 'ディスクの上限', body: h('div', { class: 'wl-form' },
+            h('p', null, 'いま使っている量: ' + fmt(q.used) + '　／　いまの上限: ' + (q.quota ? fmt(q.quota) : 'なし')),
+            h('label', null, '上限（GB）', inp), h('p', { class: 'gi-lead' }, '上限を超える書き込みはエラーになります。いま使っている量より小さくはできません。')),
+          onOpen: () => inp.focus(),
+          buttons: [{ label: 'キャンセル', cancel: true, value: null }, { label: '上限なしにする', value: 'none' }, { label: '設定する', primary: true, value: 'set' }] });
+        if (!r) return;
+        let b = 0;
+        if (r === 'set' && inp.value.trim()) {
+          const gb = Number(inp.value);
+          if (!(gb >= 0.01)) { ui().alert('0.01 GB 以上の数を入れてください。'); return; }
+          b = Math.round(gb * 1073741824);
+        }
+        try { await BOOT.realSetQuota(b); ui().toast(b ? 'ディスクの上限を ' + fmt(b) + ' にしました' : 'ディスクの上限をなくしました'); recover(); }
+        catch (e) { ui().alert(e.message); }
+      }
+      // 新しいバージョンが使えるとき（ブートローダが htmlOS i を開いたとき）に、更新するかを聞く
+      async function offerUpdate() {
+        BOOT.offerUpdate = false;
+        const yes = await ui().modal({ title: 'htmlOSセットアップ', body: h('div', { class: 'modal-msg', id: 'wl-upd-msg' },
+            h('p', { style: 'margin:0 0 4px;font-size:17px;font-weight:600' }, BOOT.osName(BOOT.version, BOOT.codename) + 'が使用可能'),
+            h('p', { style: 'margin:0 0 10px' }, 'ビルド番号:' + BOOT.build),
+            h('p', { style: 'margin:0' }, '更新しますか？')),
+          buttons: [{ label: 'いいえ', cancel: true, value: false }, { label: 'はい', primary: true, value: true }] });
+        if (yes) { await rewrite('アップデートしています', '更新しました。再起動すると htmlOS ' + BOOT.version + ' が起動します。'); return; }
+        // いいえ: このビルドではもう聞かず、インストールしてある htmlOS を起動する
+        try { BOOT.skipUpdate(); } catch (e) { /* 覚えられなくても続ける */ }
+        ui().toast('インストールしてある htmlOS を起動します');
+        setTimeout(() => OS.reboot(), 600);
+      }
+
       async function uninstall() {
         const user = await signIn('htmlOS をアンインストール', 'アンインストールするには、インストール先の htmlOS の管理者としてサインインしてください。');
         if (!user) return;
@@ -193,6 +234,7 @@
       }
 
       home();
+      if (BOOT.offerUpdate && BOOT.realHasOS()) setTimeout(offerUpdate, 400);
       return win;
     }
   });

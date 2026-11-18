@@ -1,7 +1,7 @@
 /* hFile — ファイルブラウザー */
 (function () {
   const OS = window.OS, h = OS.h, path = OS.path, ui = OS.ui;
-  const fmtSize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(2) + ' MB';
+  const fmtSize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : n < 1073741824 ? (n / 1048576).toFixed(2) + ' MB' : (n / 1073741824).toFixed(2) + ' GB';
   OS.registerApp({
     id: 'hfile', name: 'hFile', icon: 'folder', color: '#c88800', desc: 'ファイルブラウザー',
     launch(arg) {
@@ -30,10 +30,28 @@
         h('div', { class: 'statusbar' }, stSel, stUse, h('span', { class: 'hf-meter' }, meter)));
 
       const places = [['ホーム', home, 'home'], ['デスクトップ', home + '/Desktop', 'monitor'], ['Documents', home + '/Documents', 'text'], ['Downloads', home + '/Downloads', 'download'], ['Pictures', home + '/Pictures', 'image'], ['Music', home + '/Music', 'audio'], ['Videos', home + '/Videos', 'video'], ['/ (ルート)', '/', 'folder'], ['/sys', '/sys', 'gear'], ['/tmp', '/tmp', 'folder'], ['ゴミ箱', trash.dir(), 'trash']];
+      // HDD1（PC のフォルダ）。HDD1 から起動しているときは / そのものなので出さない
+      const hddOk = OS.hdd.supported && !OS.hdd.root, inHdd = p => p === OS.hdd.at || p.startsWith(OS.hdd.at + '/');
+      if (hddOk) places.splice(7, 0, ['HDD1', OS.hdd.at, 'drive']);
       const placeBtns = places.map(p => { const b = h('button', { class: 'hf-place', type: 'button', title: p[1], onclick: () => go(p[1]) }, OS.icon(p[2], 16), h('span', null, p[0])); side.append(b); return b; });
 
       const err = e => ui.alert(e.message);
+      // HDD1 をつなぐ（pick なら別のフォルダを選び直す）。ボタンを押したときに呼ばれるので、そのままフォルダの選択や許可の確認を出せる
+      async function connectHdd(to, pick) {
+        try {
+          if (pick && OS.hdd.mounted) await OS.hdd.unmount();
+          stSel.textContent = 'HDD1 を読み込んでいます…';
+          const r = await OS.hdd.mount(pick, n => { stSel.textContent = 'HDD1 を読み込んでいます… ' + n + ' 個'; });
+          ui.toast('HDD1（' + r.name + '）を ' + OS.hdd.at + ' に接続しました');
+          if (r.skipped.length) ui.alert('大きすぎる（32MB を超える）ため、読み込まなかったファイルがあります。\n' + r.skipped.slice(0, 10).join('\n') + (r.skipped.length > 10 ? '\nほか ' + (r.skipped.length - 10) + ' 個' : ''));
+          go(to || OS.hdd.at);
+        } catch (e) { status(); if (e.name !== 'AbortError') err(e); }
+      }
+      async function disconnectHdd() {
+        try { if (inHdd(dir)) go(path.dir(OS.hdd.at)); await OS.hdd.unmount(); ui.toast('HDD1 を切り離しました'); render(); } catch (e) { err(e); }
+      }
       function go(p, isBack) {
+        if (hddOk && inHdd(p) && !OS.hdd.mounted) { connectHdd(p); return; }
         if (p === trash.dir()) { try { trash.ensure(); } catch (e) { /* 作れない */ } }
         try { fsx.list(p); } catch (e) { addr.value = dir; return err(e); }
         if (!isBack && p !== dir) back.push(dir);
@@ -84,8 +102,10 @@
           { label: '貼り付け' + (clip ? '（' + path.base(clip.path) + '）' : ''), disabled: !clip, act: paste },
           { sep: true }, { label: 'PC から取り込む…', icon: 'upload', act: () => up.click() },
           { label: 'ここで Terminal を開く', icon: 'terminal', act: () => OS.launch('terminal', { cmd: 'cd "' + dir + '"' }) },
-          { sep: true }, { label: showHidden ? '隠しファイルを隠す' : '隠しファイルを表示', act: () => { showHidden = !showHidden; bHidden.classList.toggle('on', showHidden); render(); } },
-          { label: '更新', icon: 'reload', act: () => render() }]);
+          { sep: true }].concat(hddOk ? [OS.hdd.mounted ? { label: 'HDD1 を切り離す', icon: 'drive', act: disconnectHdd } : { label: 'HDD1 を接続', icon: 'drive', act: () => connectHdd() },
+            { label: 'HDD1 のフォルダを選び直す…', act: () => connectHdd(null, true) }, { sep: true }] : []).concat([
+          { label: showHidden ? '隠しファイルを隠す' : '隠しファイルを表示', act: () => { showHidden = !showHidden; bHidden.classList.toggle('on', showHidden); render(); } },
+          { label: '更新', icon: 'reload', act: () => render() }]));
       }
       grid.addEventListener('contextmenu', e => { if (e.target === grid || e.target.classList.contains('hf-empty')) { e.preventDefault(); select(null); areaMenu(e); } });
       function status() {
@@ -100,8 +120,10 @@
         bRestore.hidden = !inTrash; bEmpty.hidden = !inTrash; bEmpty.disabled = !trash.items().length;
         if (inTrash && sel) { const f = trash.from(path.base(sel)); if (f) stSel.textContent += ' ・ 元の場所 ' + f; }
         const u = fsx.usage();
-        stUse.textContent = fmtSize(u.used) + ' / 5 MB';
-        meter.style.width = Math.min(100, u.used / u.total * 100) + '%';
+        const onHdd = dir === OS.hdd.at || dir.startsWith(OS.hdd.at + '/');
+        stUse.textContent = onHdd ? 'HDD1: PC のフォルダ「' + OS.hdd.name + '」' : u.disk ? fmtSize(u.used) + (u.total ? ' / ' + fmtSize(u.total) + '（HDD1）' : '（HDD1・上限なし）') : fmtSize(u.used) + ' / 5 MB';
+        meter.parentNode.hidden = onHdd || (!!u.disk && !u.total);
+        meter.style.width = (u.total ? Math.min(100, u.used / u.total * 100) : 0) + '%';
       }
       function open(p) { try { if (OS.fs.isDir(p)) go(p); else OS.openFile(p); } catch (e) { err(e); } }
       async function newDir() { const n = await ui.prompt('フォルダの名前', '新しいフォルダ', { title: '新しいフォルダ' }); if (!n) return; try { check(n); fsx.mkdir(path.join(dir, n)); sel = path.join(dir, n); render(); } catch (e) { err(e); } }
@@ -125,10 +147,11 @@
       // 削除: ふつうはゴミ箱へ。ゴミ箱の中・「完全に削除」・Shift+Delete のときは本当に消す
       async function del(now) {
         if (!sel) return;
-        const isDir = OS.fs.isDir(sel), forever = now === true || trash.inside(dir);
+        // HDD1 のファイルはゴミ箱（LocalStorage）に移さず、確認してから PC のフォルダからも消す
+        const isDir = OS.fs.isDir(sel), forever = now === true || trash.inside(dir) || inHdd(sel);
         try {
           if (!forever) { trash.move(sel); sel = null; render(); return; }
-          if (!(await ui.confirm(path.base(sel) + (isDir ? '（フォルダとその中身すべて）' : '') + ' を完全に削除しますか? 元に戻せません。', { ok: '削除', danger: true, title: '完全に削除' }))) return;
+          if (!(await ui.confirm(path.base(sel) + (isDir ? '（フォルダとその中身すべて）' : '') + ' を完全に削除しますか? 元に戻せません。' + (inHdd(sel) ? '\nHDD1 のファイルなので、PC のフォルダからも消えます。' : ''), { ok: '削除', danger: true, title: '完全に削除' }))) return;
           if (trash.inside(dir)) trash.remove(path.base(sel)); else fsx.rm(sel, { recursive: true });
           sel = null; render();
         } catch (e) { err(e); }

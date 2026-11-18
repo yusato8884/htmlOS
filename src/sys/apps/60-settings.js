@@ -1,7 +1,7 @@
 /* Settings — 設定（ユーザー管理 / 起動 / 外観 / ネットワーク / システム） */
 (function () {
   const OS = window.OS, h = OS.h, ui = OS.ui, users = OS.users;
-  const fmtSize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(2) + ' MB';
+  const fmtSize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : n < 1073741824 ? (n / 1048576).toFixed(2) + ' MB' : (n / 1073741824).toFixed(2) + ' GB';
 
   // 画像ファイルを 96x96 の正方形 JPEG(data URL) に縮小する
   function shrink(file) {
@@ -159,14 +159,15 @@
           const d = ms => ms ? new Date(ms).toLocaleString('ja-JP') : '-';
           page.append(h('h2', null, 'システム'),
             h('dl', { class: 'st-kv' },
-              h('dt', null, 'インストール済み'), h('dd', null, 'htmlOS ' + OS.version),
+              h('dt', null, 'インストール済み'), h('dd', null, OS.name + '（' + OS.version + '）'),
+              h('dt', null, '描画エンジン'), h('dd', null, OS.htui.sdk ? OS.htui.sdk.full : 'HTUi'),
               h('dt', null, 'メディア（このHTML）'), h('dd', null, 'htmlOS ' + window.BOOT.version),
               h('dt', null, 'インストール日時'), h('dd', null, d(meta.installedAt)),
               h('dt', null, 'システム更新日時'), h('dd', null, d(meta.updatedAt)),
-              h('dt', null, 'ストレージ'), h('dd', null, OS.store.ram ? 'RAMディスク（再読み込みで消えます）' : 'LocalStorage')),
+              h('dt', null, 'ストレージ'), h('dd', null, OS.store.ram ? 'RAMディスク（再読み込みで消えます）' : OS.storeLabel())),
             h('h3', null, '使用量'),
-            h('div', { class: 'st-meter' }, h('i', { style: 'width:' + Math.min(100, u.used / u.total * 100) + '%' })),
-            h('p', null, fmtSize(u.used) + ' / 約 5 MB（ブラウザによって上限は多少違います）'),
+            h('div', { class: 'st-meter' }, h('i', { style: 'width:' + (u.total ? Math.min(100, u.used / u.total * 100) : 0) + '%' })),
+            h('p', null, u.disk ? fmtSize(u.used) + (u.total ? ' / ' + fmtSize(u.total) + '（HDD1 の上限。htmlOS i の「htmlOS を回復」で変えられます）' : '（上限なし。htmlOS i の「htmlOS を回復」で設定できます）') : fmtSize(u.used) + ' / 約 5 MB（ブラウザによって上限は多少違います）'),
             h('h3', null, 'htmlOS i（インストール・アップデート・回復）'),
             h('p', null, 'このHTMLファイルはインストールメディア兼ブートローダです。OS本体は LocalStorage の /sys に展開されていて、起動のたびにそこから読み込まれます。アップデート・システム修復・パスワードのリセット・バックアップ・アンインストールは htmlOS i から行います。'),
             h('p', null, '起動するときに押すキー: 何も押さない → htmlOS ／ Alt → htmlOS i ／ Ctrl → jsh ／ Shift → セーフモード ／ Esc → ブートメニュー ／ Del・F2 → BIOS SETUP'),

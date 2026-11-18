@@ -1,7 +1,7 @@
 /* hBackup — バックアップと復元。LocalStorage の中身を1つの .json ファイルにして PC に書き出す */
 (function () {
   const OS = window.OS, h = OS.h, ui = OS.ui;
-  const fmtSize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(2) + ' MB';
+  const fmtSize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : n < 1073741824 ? (n / 1048576).toFixed(2) + ' MB' : (n / 1073741824).toFixed(2) + ' GB';
   OS.registerApp({
     id: 'hbackup', name: 'hBackup', icon: 'archive', color: '#986a44', desc: 'バックアップと復元',
     launch() {
