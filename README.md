@@ -25,6 +25,11 @@
   - **名前付きパイプ**: `mkfifo /tmp/p` → `cat /tmp/p` で待ち、ほかのシェルから `echo hi > /tmp/p`
 - **Tab 補完**: systemctl・ps・hjournal など、あとから登録されたコマンドと `~/bin` `/bin` のスクリプトも、ターミナルを開いた直後から補完できるようにしました。`sudo` や `|` のあとでもコマンド名を補完します
 
+### 5.1.2
+
+- **Tab 補完でサブコマンド・オプションも**: `systemctl st` → start / status / stop、`systemctl stop cl` → clock、`ipc call htmlos.So` → htmlos.Sound → Play / List、`hjournal -u ` → unit 名、`kill -K` → -KILL、`su ` → ユーザー名、`chmod ` → 755・u+x など、`cd` はディレクトリだけ。ほかのコマンドも使い方に書いたオプション（`-l` など）を補完します。`OS.registerCommand({ …, complete(args, tok, sh) { return [候補] } })` で自分のコマンドにも付けられます
+- **hBrowser のプロキシ**: 既定のプロキシを入れ替えました（corsproxy.io は API キーが必要になったので外しました）。上から 2 秒ずつずらして同時に試し、最初に返事が来たものを使い、次からはそれを最初に試します。JSON で返すプロキシ（` json:キー`）と `{rawurl}` にも対応。設定 → ネットワーク に「接続テスト」を付けました。5.1.1 までの既定のまま保存されている設定は、新しい既定に置き換わります
+
 ### 5.1.1
 
 - HDD1 から起動すると「読み込めませんでした: ext is not a function」で起動できなかったのを直しました（5.1.0 で入った不具合）

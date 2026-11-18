@@ -298,7 +298,8 @@
   };
 
   // ---------- 設定
-  const DEFAULT_PROXIES = ['https://corsproxy.io/?url={url}', 'https://api.allorigins.win/raw?url={url}', 'https://api.codetabs.com/v1/proxy?quest={url}'];
+  // corsproxy.io は API キーが必要になったので外した（5.1.2）
+  const DEFAULT_PROXIES = ['https://api.cors.lol/?url={url}', 'https://whateverorigin.org/get?url={url} json:contents', 'https://everyorigin.jwvbremen.nl/api/get?url={url} json:html', 'https://cors.eu.org/{rawurl}', 'https://api.codetabs.com/v1/proxy?quest={url}', 'https://api.allorigins.win/raw?url={url}'];
   const config = OS.config = {
     all() { try { return JSON.parse(fs.read('/etc/config.json')); } catch (e) { return {}; } },
     get(k, def) { const v = config.all()[k]; return v === undefined ? def : v; },
@@ -968,23 +969,75 @@
   };
 
   // ---------- ネットワーク
+  //   CORS プロキシは外部の無料サービスなので、よく止まる。上から順に 2 秒ずつずらして同時に試し、最初に返事が来たものを使う（ほかは取りやめる）。
+  //   うまくいったプロキシは覚えておき、次からは最初に試す。
+  //   書き方: {url} がエンコードした URL に置き換わる。後ろに「 json:キー」を付けると、JSON で返すプロキシの そのキー を中身として使う
+  const OLD_PROXIES = [['https://corsproxy.io/?url={url}', 'https://api.allorigins.win/raw?url={url}', 'https://api.codetabs.com/v1/proxy?quest={url}']]; // 5.1.1 までの既定
+  let goodProxy = null;
+  const proxyList = () => {
+    let l = config.get('proxies', null);
+    // 4.x〜5.1.1 の既定のまま保存されていたら、新しい既定に置き換える
+    if (!Array.isArray(l) || !l.length || OLD_PROXIES.some(o => JSON.stringify(o) === JSON.stringify(l))) l = DEFAULT_PROXIES;
+    return l;
+  };
+  const hostOf = u => { try { return new URL(u).host; } catch (e) { return u; } };
   OS.net = {
     defaults: DEFAULT_PROXIES,
-    proxied(url) { return config.get('proxies', DEFAULT_PROXIES).map(t => t.replace('{url}', encodeURIComponent(url))); },
+    list: proxyList,
+    proxied(url) { return proxyList().map(t => t.split(/\s+json:/)[0].trim().replace('{rawurl}', url).replace('{url}', encodeURIComponent(url))); },
+    // 1 つの URL を取りに行く。tpl はプロキシの書き方（直接なら null）
+    async _one(url, tpl, signal, timeout) {
+      const jsonKey = tpl && (tpl.match(/\s+json:([\w.]+)\s*$/) || [])[1];
+      const u = tpl ? tpl.split(/\s+json:/)[0].trim().replace('{rawurl}', url).replace('{url}', encodeURIComponent(url)) : url;
+      const ac = new AbortController(), stop = () => ac.abort();
+      if (signal) { if (signal.aborted) ac.abort(); else signal.addEventListener('abort', stop, { once: true }); }
+      const tm = setTimeout(() => { ac.timedOut = true; ac.abort(); }, timeout);
+      try {
+        const r = await fetch(u, { signal: ac.signal, credentials: 'omit' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        if (!jsonKey) { await r.clone().arrayBuffer(); return r; } // 中身まで届くのを確かめる
+        const j = await r.json(), v = jsonKey.split('.').reduce((o, k) => o == null ? o : o[k], j);
+        if (typeof v !== 'string') throw new Error('返事の形が違います');
+        const ct = (j.status && j.status.content_type) || 'text/html; charset=utf-8';
+        return new Response(v, { status: 200, headers: { 'content-type': ct } });
+      } catch (e) { throw ac.timedOut ? new Error('タイムアウト') : signal && signal.aborted ? new Error('取りやめ') : e.name === 'TypeError' && /fetch/i.test(e.message) ? new Error('つながりません') : e; }
+      finally { clearTimeout(tm); if (signal) signal.removeEventListener('abort', stop); }
+    },
     async get(url, opt) {
       opt = opt || {};
-      const tries = (opt.direct === false ? [] : [url]).concat(OS.net.proxied(url));
-      let last;
-      for (const u of tries) {
-        const ac = new AbortController(), tm = setTimeout(() => ac.abort(), opt.timeout || 15000);
-        try {
-          const r = await fetch(u, { signal: ac.signal, credentials: 'omit' });
-          clearTimeout(tm);
-          if (r.ok) return r;
-          last = new Error('HTTP ' + r.status);
-        } catch (e) { clearTimeout(tm); last = e.name === 'AbortError' ? new Error('タイムアウト') : e; }
-      }
-      throw new Error('取得できませんでした（' + ((last && last.message) || '不明なエラー') + '）');
+      let tpls = proxyList().slice();
+      if (goodProxy && tpls.includes(goodProxy)) tpls = [goodProxy].concat(tpls.filter(t => t !== goodProxy));
+      const tries = (opt.direct === false ? [] : [null]).concat(tpls);
+      const all = new AbortController(), errs = [], timeout = opt.timeout || 20000, gap = opt.gap == null ? 2000 : opt.gap;
+      return new Promise((res, rej) => {
+        let left = tries.length, done = false, idx = 0, timer = 0;
+        const next = () => {
+          if (done || idx >= tries.length) return;
+          const tpl = tries[idx++], name = tpl ? hostOf(tpl.split(/\s+json:/)[0].replace(/\{(raw)?url\}/, '')) : '直接';
+          OS.net._one(url, tpl, all.signal, timeout).then(r => {
+            if (done) return; done = true; clearTimeout(timer); all.abort();
+            if (tpl) goodProxy = tpl;
+            res(r);
+          }, e => {
+            if (done) return;
+            errs.push(name + ': ' + e.message);
+            clearTimeout(timer); next(); // 失敗したらすぐ次を始める
+            if (--left === 0) { done = true; rej(new Error('取得できませんでした（' + errs.join(' / ') + '）')); }
+          });
+          if (idx < tries.length) timer = setTimeout(next, gap);
+        };
+        if (!tries.length) return rej(new Error('プロキシが設定されていません（設定 → ネットワーク）'));
+        next();
+      });
+    },
+    // 設定のプロキシを 1 つずつ試す（設定 → ネットワーク の「接続テスト」）
+    async test(url) {
+      url = url || 'https://example.com/';
+      return Promise.all(proxyList().map(async tpl => {
+        const t0 = Date.now();
+        try { const r = await OS.net._one(url, tpl, null, 15000); const n = (await r.text()).length; return { proxy: tpl, ok: true, ms: Date.now() - t0, size: n }; }
+        catch (e) { return { proxy: tpl, ok: false, ms: Date.now() - t0, error: e.message }; }
+      }));
     },
     // Blob を hFS に保存できる形へ。テキストはそのまま、それ以外は data: URL にする
     blobToContent(blob, name) {

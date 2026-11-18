@@ -397,30 +397,139 @@
       } else tty.println(inspect(v));
     }
 
+    // Tab 補完（5.1.2）。コマンドの位置ではコマンド名、引数ではサブコマンド・オプション・unit 名・ユーザー名など、ほかはファイル名
     complete(v) {
       const m = v.match(/^([\s\S]*?)([^\s'"(]*)$/);
       const head = m[1], tok = m[2];
-      let cands, prefix;
-      // コマンドの位置: 行の先頭・| ; && || のあと・sudo（と -u ユーザー などのオプション）のあと・help / which のあと
-      const cmdPos = /(^|[|;&]\s*|\b(?:help|which|type|man)\s+)(sudo\s+(?:(?:-u\s+\S+|-\S+)\s+)*)?$/.test(head);
-      if (cmdPos && !tok.includes('/')) {
-        this.syncCommands(); // パッケージや hinit が足したコマンド（systemctl・ps など）も候補に入れる
-        const names = new Set(this.cmds);
-        for (const d of [this.home + '/bin', '/bin']) { try { this.fs.list(d).forEach(n => { if (fs0.isFile(path.join(d, n))) names.add(n.replace(/\.jsh$/i, '')); }); } catch (e) { /* なければ飛ばす */ } }
-        cands = [...names].filter(n => n.startsWith(tok)).sort(); prefix = '';
+      // いまのコマンド（| ; && || のあと）の単語。sudo とそのオプションは外す
+      const seg = head.split(/\|\||&&|[|;]/).pop();
+      let words = seg.trim() ? seg.trim().split(/\s+/) : [];
+      let sudoOpts = false;
+      if (words[0] === 'sudo') {
+        let i = 1;
+        while (i < words.length && /^-/.test(words[i])) i += words[i] === '-u' ? 2 : 1;
+        words = words.slice(i);
+        if (!words.length && /^-/.test(tok)) sudoOpts = true;
+        else if (!words.length && /(^|\s)-u\s+$/.test(seg)) return this._fin(head, '', tok, this._users());
       }
+      let cands = null, prefix = '', dirsOnly = false;
+      if (sudoOpts) cands = ['-u', '-i', '-s', '-l', '-k', '-v'];
+      else if (!words.length && !tok.includes('/')) cands = this._cmdNames();
+      else if (words.length) {
+        const r = this._args(words[0], words.slice(1), tok);
+        if (Array.isArray(r)) cands = r;
+        else if (r === 'dirs') dirsOnly = true;
+      }
+      if (cands) cands = Array.from(new Set(cands.map(String))).filter(n => n.startsWith(tok)).sort();
       else {
         const i = tok.lastIndexOf('/');
         prefix = i >= 0 ? tok.slice(0, i + 1) : '';
         const base = tok.slice(i + 1), dir = this.abs(prefix || '.');
-        try { cands = this.fs.list(dir).filter(n => n.startsWith(base)).map(n => n + (fs0.isDir(path.join(dir, n)) ? '/' : '')); } catch (e) { cands = []; }
+        try { cands = this.fs.list(dir).filter(n => n.startsWith(base) && (!base.length ? !n.startsWith('.') || base === '.' : true)).map(n => n + (fs0.isDir(path.join(dir, n)) ? '/' : '')).filter(n => !dirsOnly || n.endsWith('/')); } catch (e) { cands = []; }
       }
+      return this._fin(head, prefix, tok, cands);
+    }
+    _fin(head, prefix, tok, cands) {
+      cands = (cands || []).filter(n => n.startsWith(tok.slice(prefix.length)) || prefix);
       if (!cands.length) return null;
-      if (cands.length === 1) return head + prefix + cands[0] + (cands[0].endsWith('/') ? '' : ' ');
+      if (cands.length === 1) return head + prefix + cands[0] + (/[/=:]$/.test(cands[0]) ? '' : ' ');
       let common = cands[0];
       for (const c of cands) while (!c.startsWith(common)) common = common.slice(0, -1);
-      const nv = head + prefix + common;
-      return nv !== v ? nv : cands;
+      const v = head + prefix + tok.slice(prefix.length), nv = head + prefix + common;
+      return nv.length > v.length ? nv : cands;
+    }
+    _cmdNames() {
+      this.syncCommands(); // パッケージや hinit が足したコマンド（systemctl・ps など）も候補に入れる
+      const names = new Set(this.cmds);
+      for (const d of [this.home + '/bin', '/bin']) { try { this.fs.list(d).forEach(n => { if (fs0.isFile(path.join(d, n))) names.add(n.replace(/\.jsh$/i, '')); }); } catch (e) { /* なければ飛ばす */ } }
+      return [...names];
+    }
+    _users() { return users.list().map(u => u.name); }
+    _groups() { const s = new Set(); users.list().forEach(u => OS.perm.groupsOf(u.name).forEach(g => s.add(g))); return [...s]; }
+    _units() { return OS.init ? OS.init.units().map(u => u.name.replace(/\.service$/, '')) : []; }
+    // 引数の候補。配列を返すとその中から、'dirs' はディレクトリだけ、null はファイル名
+    _args(cmd, a, tok) {
+      if (this.aliases[cmd]) { const w = this.aliases[cmd].split(/\s+/); cmd = w[0]; a = w.slice(1).concat(a); }
+      const prev = a[a.length - 1], pos = a.filter(x => !/^-/.test(x)), n = pos.length;
+      const help = this.help[cmd];
+      // オプション（使い方の文字から拾う）
+      const optsOf = () => help ? (help.usage.match(/(?:^|[\s\[|(])(--?[A-Za-z][\w-]*)/g) || []).map(x => x.replace(/^[\s\[|(]/, '')) : [];
+      const ext = OS.commands && OS.commands[cmd];
+      if (ext && typeof ext.complete === 'function') { try { const r = ext.complete(a, tok, this.io()); if (r !== undefined) return r; } catch (e) { /* 補完の失敗は無視 */ } }
+      const spec = this._spec(cmd, a, pos, n, prev, tok);
+      if (spec !== undefined) return spec;
+      if (/^-/.test(tok)) { const o = optsOf(); if (o.length) return o; }
+      return null;
+    }
+    _spec(cmd, a, pos, n, prev, tok) {
+      const S = OS.sound, I = OS.ipc, SIG = OS.proc ? Object.keys(OS.proc.SIG) : [];
+      const procNames = () => OS.proc ? OS.proc.list().map(p => p.name) : [];
+      const appIds = () => Object.keys(OS.apps || {});
+      const envs = () => Object.keys(OS.sessions || {});
+      const vars = () => Object.keys(this.allVars());
+      switch (cmd) {
+        case 'help': case 'man': case 'which': case 'type': return this._cmdNames();
+        case 'xargs': case 'time': return n ? null : this._cmdNames();
+        case 'cd': case 'hfile': case 'tree': case 'du': case 'rmdir': return /^-/.test(tok) ? ['-s'] : 'dirs';
+        case 'su': case 'passwd': case 'userdel': case 'groups': case 'id': return n ? [] : this._users();
+        case 'useradd': return n === 1 ? ['admin'] : [];
+        case 'usermod': return n === 0 && !/^-/.test(prev || '') ? ['-aG', '-rG'] : /^-[ar]G$/.test(prev || '') ? this._groups() : this._users();
+        case 'chown': if (/^-/.test(tok)) return ['-R']; if (n === 0) { const i = tok.indexOf(':'); return i >= 0 ? this._groups().map(g => tok.slice(0, i + 1) + g) : this._users().map(u => u).concat(this._users().map(u => u + ':')); } return null;
+        case 'chgrp': if (/^-/.test(tok)) return ['-R']; return n === 0 ? this._groups() : null;
+        case 'chmod': if (n === 0) return ['755', '750', '700', '644', '640', '600', '777', '1777', '+x', 'u+x', 'a+x', '-x', 'go-w', 'go-rwx', 'a+r', 'u+rw', '+t', '-R']; return null;
+        case 'umask': return n ? [] : ['022', '027', '077', '002'];
+        case 'systemctl': {
+          const subs = ['list-units', 'list-unit-files', 'status', 'start', 'stop', 'restart', 'reload', 'try-restart', 'enable', 'disable', 'is-active', 'is-enabled', 'is-failed', 'list-dependencies', 'cat', 'daemon-reload', 'reset-failed', 'poweroff', 'reboot', 'help'];
+          if (/^-/.test(tok)) return pos[0] === 'enable' || pos[0] === 'disable' ? ['--now'] : ['--all', '--help'];
+          if (n === 0) return subs;
+          if (['status', 'start', 'stop', 'restart', 'reload', 'try-restart', 'enable', 'disable', 'is-active', 'is-enabled', 'is-failed', 'list-dependencies', 'cat', 'reset-failed'].includes(pos[0])) {
+            const all = OS.init ? OS.init.units() : [];
+            return all.map(u => u.type === 'target' && pos[0] !== 'status' && pos[0] !== 'list-dependencies' ? u.name : u.name.replace(/\.service$/, ''));
+          }
+          return [];
+        }
+        case 'hjournal': {
+          if (prev === '-u' || prev === '--unit') return this._units().concat(['kernel', 'sudo', 'hinit']);
+          if (prev === '-p' || prev === '--priority') return OS.journal ? OS.journal.PRIO : [];
+          if (prev === '-b' || prev === '--boot') return ['-1', '0'];
+          if (prev === '-n' || prev === '--lines') return ['10', '50', '100'];
+          if (prev === '--since') return [];
+          return ['-n', '-u', '-p', '-k', '-b', '-r', '-f', '--since'];
+        }
+        case 'ps': if (prev === '-u') return this._users(); if (prev === '-t') return ['init', 'kernel', 'service', 'session', 'app', 'shell']; return ['-u', '-t'];
+        case 'kill': if (/^-/.test(tok)) return ['-l'].concat(SIG.map(s => '-' + s)); return OS.proc ? OS.proc.list().map(p => String(p.pid)) : [];
+        case 'pkill': case 'killall': if (/^-/.test(tok)) return SIG.map(s => '-' + s); return procNames();
+        case 'pidof': return n ? [] : procNames();
+        case 'sudo': return this._cmdNames();
+        case 'ipc': {
+          if (n === 0) return ['list', 'call', 'pub', 'monitor', 'listen', 'introspect'];
+          const sub = pos[0], names = I ? I.list() : [];
+          if ((sub === 'call' || sub === 'introspect') && n === 1) return names.map(x => x.name);
+          if (sub === 'call' && n === 2) { const x = names.find(y => y.name === pos[1]); return x ? x.methods.map(mm => mm.name) : []; }
+          if ((sub === 'listen' || sub === 'monitor' || sub === 'pub') && n === 1) return ['unit.changed', 'unit.*', 'session.login', 'session.logout', 'session.*', 'notify', 'power.reboot', 'power.shutdown', 'power.*', 'bus.name', '**'];
+          if (sub === 'call' && pos[1] === 'htmlos.Init' && n === 3) return this._units();
+          if (sub === 'call' && pos[1] === 'htmlos.Sound' && n === 3) return S.list();
+          return [];
+        }
+        case 'sound': if (n === 0) return ['on', 'off', 'vol', 'play', 'list']; if (pos[0] === 'play' && n === 1) return S.list(); if (pos[0] === 'vol' && n === 1) return ['0', '25', '50', '75', '100']; return [];
+        case 'bell': case 'clear': case 'pwd': case 'whoami': case 'users': case 'df': case 'date': case 'env': case 'uptime': case 'uname': case 'free': case 'neofetch': case 'history': case 'top': case 'dmesg': case 'poweroff': case 'reinstall': return [];
+        case 'htui': if (n === 0) return ['start', 'stop', 'status', 'sessions', 'session', 'mode']; if ((pos[0] === 'start' || pos[0] === 'session') && n === 1) return envs(); return [];
+        case 'startx': return n ? [] : envs();
+        case 'bootmode': return n ? [] : ['gui', 'cui'];
+        case 'reboot': return n ? [] : ['i', 'safe', 'cui', 'gui'];
+        case 'mount': return ['hdd1', '-p'];
+        case 'umount': return n ? [] : ['hdd1'];
+        case 'pkg': if (n === 0) return ['list', 'install', 'remove']; if (pos[0] === 'remove') return OS.pkg ? OS.pkg.list() : []; return null;
+        case 'hstudio': if (n === 0) return ['tui', 'new', 'list', 'build', 'run', 'install', 'open']; if (pos[0] === 'new' && n === 1) return ['app', 'cmd', 'de']; return [];
+        case 'launch': return n ? null : appIds();
+        case 'unalias': return Object.keys(this.aliases);
+        case 'unset': return vars();
+        case 'export': return n ? [] : vars().map(x => x + '=');
+        case 'find': if (prev === '-type') return ['f', 'd', 'l']; if (prev === '-name') return []; if (/^-/.test(tok)) return ['-name', '-type']; return 'dirs';
+        case 'ln': if (/^-/.test(tok)) return ['-s']; return null;
+        case 'mkfifo': case 'mkdir': case 'touch': case 'rm': case 'cp': case 'mv': case 'cat': case 'stat': return undefined; // オプションは使い方から・あとはファイル名
+      }
+      return undefined;
     }
 
     buildEnv() {
