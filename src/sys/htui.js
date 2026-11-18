@@ -738,7 +738,7 @@
   // 子ウインドウ（ダイアログなど）がアクティブなときは、その親（いちばん上の親）を返す
   const hasActive = w => w.el.classList.contains('active') || w.children.some(hasActive);
   // 描画エンジンの名前と版
-  htui.sdk = { name: 'HTUi SDK', version: '3.0', codename: 'Venus', full: 'HTUi SDK 3.0 (Venus)' };
+  htui.sdk = { name: 'HTUi SDK', version: '3.0.1', codename: 'Venus', full: 'HTUi SDK 3.0.1 (Venus)' };
   // Venus のスライダー: 値までを色で塗るために --v-p を入れる
   const rangeFill = r => { const mn = +r.min || 0, mx = r.max === '' ? 100 : +r.max, v = +r.value; r.style.setProperty('--v-p', (mx > mn ? (v - mn) / (mx - mn) * 100 : 0) + '%'); };
   htui.syncRanges = root => (root || document).querySelectorAll('input[type=range]').forEach(rangeFill);

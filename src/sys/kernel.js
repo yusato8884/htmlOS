@@ -104,7 +104,9 @@
     stop: '<rect x="6" y="6" width="12" height="12" rx="1.5"/>',
     layers: '<path d="M12 3l9 5-9 5-9-5zM3 12.5l9 5 9-5M3 16.5l9 5 9-5"/>',
     studio: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 8h18M9 12l-2.5 2.5L9 17M15 12l2.5 2.5L15 17M13 11.5l-2 6"/>',
-    script: '<path d="M6 3h8l4 4v14H6zM14 3v4h4M9 12l2 2-2 2M13 16h3"/>'
+    script: '<path d="M6 3h8l4 4v14H6zM14 3v4h4M9 12l2 2-2 2M13 16h3"/>',
+    ttt: '<path d="M9 3v18M15 3v18M3 9h18M3 15h18"/>',
+    reversi: '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 0 0 17z" fill="currentColor"/>'
   };
   OS.iconNames = Object.keys(ICONS).filter(n => n !== 'win');
   OS.icon = function (name, size) {

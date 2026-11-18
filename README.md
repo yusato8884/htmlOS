@@ -4,6 +4,13 @@
 
 **▶ 使ってみる: GitHub Pages で公開中**（このリポジトリの Pages の URL を開くと htmlOS i が起動し、「htmlOSを試す」か「インストール」を選べます）
 
+## htmlOS 4.1 の新しいところ
+
+- **HTUi SDK 3.0.1**: トグルスイッチ（`class="switch"`）のつまみの位置がズレていたのを修正
+- **hdm**: パスワードを入力して Enter でログインできないことがあったのを修正（どのテーマでも Enter でログイン）
+- **hTic-tac-toe**: 三目並べ。CPU（やさしい・ふつう・つよい）か二人で対戦。マスの数（3×3〜9×9）と、何個並べたら勝ちかを変えられます
+- **hReversi**: リバーシ。CPU（やさしい・ふつう・つよい）か二人で対戦。打てる場所の表示・一手戻す
+
 ## htmlOS 4.0 Vega の新しいところ
 
 - **HTUi SDK 3.0（Venus）**: 描画エンジン（/sys/htui.js）の新しい版
@@ -83,6 +90,8 @@
 | hTask | タスクマネージャ |
 | hCalc | 電卓（16進・2進・ビット演算） |
 | hMines | マインスイーパー風のゲーム |
+| hTic-tac-toe | 三目並べ（CPU・二人、マスの数を変えられる） |
+| hReversi | リバーシ（CPU・二人） |
 | hPaint | お絵かき（PNG保存） |
 | hStore | パッケージマネージャ |
 | hBackup | バックアップと復元 |
@@ -113,4 +122,4 @@ python3 build.py
 
 [MIT License](LICENSE)
 
-4.0.1 の公開時に [SCANOSS](https://www.scanoss.com/)（scanoss-py 1.54.3、`--all-extensions`）で全ファイル（29 個）をスキャンし、既存のオープンソースコードとの一致がないことを確認しています。
+4.1.0 の公開時に [SCANOSS](https://www.scanoss.com/)（scanoss-py 1.54.3、`--all-extensions`）で全ファイル（31 個）をスキャンし、既存のオープンソースコードとの一致がないことを確認しています。

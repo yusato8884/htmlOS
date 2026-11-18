@@ -1476,8 +1476,9 @@
 #os-root :where(input[type=checkbox],input[type=radio]):focus-visible{outline:0!important;box-shadow:var(--v-ring)}
 #os-root :where(input[type=checkbox],input[type=radio]):disabled{opacity:.45;cursor:default}
 /* スイッチ: <input type="checkbox" class="switch"> */
-#os-root input[type=checkbox].switch{display:inline-flex;align-items:center;width:38px;height:22px;padding:0 3px;border:0;border-radius:11px;background:var(--v-track)}
-#os-root input[type=checkbox].switch::before{width:16px;height:16px;border-radius:50%;clip-path:none;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transform:none;transition:transform .16s}
+/* 3.0.1: つまみは左端からの位置で置く（中央寄せの指定が残ってズレていたのを直した） */
+#os-root input[type=checkbox].switch{display:inline-block;position:relative;width:38px;height:22px;padding:0;border:0;border-radius:11px;background:var(--v-track);place-content:normal;vertical-align:middle;overflow:hidden}
+#os-root input[type=checkbox].switch::before{content:'';position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;clip-path:none;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transform:none;transition:transform .16s}
 #os-root input[type=checkbox].switch:checked{background:var(--accent)}
 #os-root input[type=checkbox].switch:checked::before{transform:translateX(16px)}
 /* スライダー（--v-p は HTUi が値に合わせて入れる） */
@@ -1568,3 +1569,47 @@
 .t-head{color:#fff;font-weight:700}
 .tty-tuikeys{display:none}
 .touch .tty-tuikeys{display:flex}
+/* ---- hTic-tac-toe */
+.tt-root{background:linear-gradient(160deg,#fff7ef,#fde7d3)}
+.tt-main{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px 12px 14px}
+.tt-score{display:flex;gap:18px;font:600 15px var(--ui);color:var(--ink-2)}
+.tt-sx{color:#e0452b}.tt-so{color:#2a6ae0}
+.tt-status{font-size:13.5px;color:var(--ink-2);text-align:center;min-height:1.5em}
+.tt-wrap{flex:1;min-height:0;width:100%;display:flex;align-items:center;justify-content:center;container-type:size}
+.tt-board{--n:3;display:grid;grid-template-columns:repeat(var(--n),1fr);grid-template-rows:repeat(var(--n),1fr);gap:clamp(3px,1.2cqmin,8px);width:min(100cqw,100cqh);aspect-ratio:1;padding:clamp(4px,1.5cqmin,12px);border-radius:16px;background:#f3d2b3;box-shadow:inset 0 2px 6px rgba(120,60,10,.18),0 8px 24px rgba(160,80,20,.18)}
+.tt-cell{position:relative;display:flex;align-items:center;justify-content:center;min-width:0;min-height:0;padding:0;border:0;border-radius:calc(30cqmin / var(--n));background:#fffaf5;box-shadow:0 2px 0 #e8bf98;cursor:pointer;font:700 calc(62cqmin / var(--n))/1 var(--ui);transition:background-color .12s,transform .12s}
+.tt-cell:not(:disabled):hover{background:#fff;transform:translateY(-1px)}
+.tt-cell:disabled{cursor:default;opacity:1}
+.tt-cell.x .tt-mark{color:#e0452b}.tt-cell.o .tt-mark{color:#2a6ae0}
+.tt-cell.last{box-shadow:0 2px 0 #e8bf98,inset 0 0 0 2px rgba(0,0,0,.12)}
+.tt-cell.win{background:#ffe08a;box-shadow:0 0 0 3px #f5b400,0 2px 0 #e8bf98}
+.tt-mark{display:block;font:700 calc(62cqmin / var(--n))/1 var(--ui);animation:tt-pop .22s cubic-bezier(.2,1.6,.4,1)}
+@keyframes tt-pop{from{transform:scale(.2);opacity:0}to{transform:none;opacity:1}}
+.tt-set{display:flex;flex-direction:column;gap:6px}
+.tt-set label{display:flex;justify-content:space-between}
+/* ---- hReversi */
+.rv-root{background:linear-gradient(160deg,#1f3a2c,#10231a);color:#e8f2ec}
+.rv-root .toolbar{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.1)}
+.rv-main{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;gap:10px;padding:10px 12px 14px}
+.rv-score{display:flex;align-items:center;gap:12px;width:100%;max-width:520px}
+.rv-side{flex:none;display:flex;align-items:center;gap:7px;padding:5px 12px;border-radius:999px;background:rgba(255,255,255,.07);border:1.5px solid transparent;transition:border-color .2s,background-color .2s}
+.rv-side b{font:700 18px var(--mono)}
+.rv-side small{color:#a9c4b4}
+.rv-side.turn{border-color:#7ee2a8;background:rgba(126,226,168,.14)}
+.rv-status{flex:1;text-align:center;font-size:13.5px;color:#cfe3d7}
+.rv-dot{width:16px;height:16px;border-radius:50%}
+.rv-dot.b,.rv-cell.b .rv-disc{background:radial-gradient(circle at 35% 30%,#5b5f66,#141518 60%)}
+.rv-dot.w,.rv-cell.w .rv-disc{background:radial-gradient(circle at 35% 30%,#fff,#d6d8dc 70%)}
+.rv-wrap{flex:1;min-height:0;width:100%;display:flex;align-items:center;justify-content:center;container-type:size}
+.rv-board{display:grid;grid-template-columns:repeat(8,1fr);gap:2px;width:min(100cqw,100cqh);aspect-ratio:1;padding:8px;border-radius:14px;background:#0b3d22;box-shadow:0 10px 30px rgba(0,0,0,.45),inset 0 0 0 2px #2c6b45}
+.rv-cell{position:relative;display:flex;align-items:center;justify-content:center;min-width:0;min-height:0;padding:0;border:0;border-radius:4px;background:#1f8a4c;cursor:default;perspective:300px}
+.rv-cell:nth-child(odd){background:#1d8448}
+.rv-cell:disabled{opacity:1}
+.rv-disc{width:80%;height:80%;border-radius:50%;transform:scale(0);box-shadow:0 2px 4px rgba(0,0,0,.45);transition:transform .25s cubic-bezier(.2,1.4,.4,1)}
+.rv-cell.b .rv-disc,.rv-cell.w .rv-disc{transform:none}
+.rv-cell.flip .rv-disc{animation:rv-flip .4s ease}
+@keyframes rv-flip{0%{transform:rotateY(0)}50%{transform:rotateY(90deg)}100%{transform:rotateY(0)}}
+.rv-cell.can{cursor:pointer}
+.rv-cell.can::after{content:'';position:absolute;width:24%;height:24%;border-radius:50%;background:rgba(255,255,255,.28)}
+.rv-cell.can:hover::after{background:rgba(255,255,255,.55)}
+.rv-cell.last::before{content:'';position:absolute;z-index:1;width:12%;height:12%;border-radius:50%;background:#ff5a5a}

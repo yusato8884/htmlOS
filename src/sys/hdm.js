@@ -65,8 +65,22 @@
           const input = h('input', { type: 'password', class: o.inputClass || 'inp', id: 'gr-pw', placeholder: o.placeholder || 'パスワード', 'aria-label': 'パスワード', autocomplete: 'off' });
           const submit = h('button', { class: o.submitClass || 'btn primary', type: 'submit', 'aria-label': 'ログイン', title: 'ログイン' }, o.submitLabel || OS.icon('fwd', 18));
           const msg = h('div', { class: 'gr-msg ' + (o.msgClass || ''), role: 'alert' }, st.msg);
-          const form = h('form', { class: o.formClass || '', onsubmit: async e => {
-            e.preventDefault();
+          // Enter でのログインは、フォームの送信（submit）だけに頼らず、欄のキーでも受け取る
+          //   （送信ボタンを置かないテーマや、ブラウザーによって Enter で submit が起きない場合があるため）。busy で二重のログインを防ぐ
+          let busy = false;
+          const login = async () => {
+            if (busy) return;
+            busy = true;
+            try { await doLogin(); } finally { busy = false; }
+          };
+          // keydown で受け取れなかった Enter（日本語入力の状態などで isComposing が付いたまま来る場合）は、keyup で拾う
+          let downDone = false;
+          const onKey = e => { if (e.key !== 'Enter' || e.shiftKey || e.altKey) return; if (e.isComposing || e.keyCode === 229) { downDone = false; return; } e.preventDefault(); e.stopPropagation(); downDone = true; login(); };
+          input.addEventListener('keydown', onKey);
+          input.addEventListener('keyup', e => { if (e.key !== 'Enter' || e.isComposing) return; if (!downDone && input.value) login(); downDone = false; });
+          if (o.nameInput) o.nameInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); if (!input.value) input.focus(); else login(); } });
+          const form = h('form', { class: o.formClass || '', onsubmit: e => { e.preventDefault(); login(); } });
+          async function doLogin() {
             const u = o.nameInput ? users.get(o.nameInput.value.trim()) : st.user;
             if (u && !u.root && await users.verify(u.name, input.value)) {
               const cf = hdm.conf(); cf.lastUser = u.name; cf.users = cf.users || {}; cf.users[u.name] = st.sid; hdm.save(cf);
@@ -77,7 +91,7 @@
               msg.textContent = st.msg; input.value = ''; input.focus();
               const box = form.closest('[data-shake]') || form; box.classList.remove('shake'); void box.offsetWidth; box.classList.add('shake');
             }
-          } });
+          }
           return { input: input, submit: submit, msg: msg, form: form };
         },
         userButtons(cls, size, square) {

@@ -2626,6 +2626,175 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   });
 })();
 </script>
+<script type="text/x-htmlos" data-path="/sys/apps/75-htictactoe.js">
+/* hTic-tac-toe — 三目並べ。CPU と対戦・二人で対戦。マスの数（3〜9）と、何個並べたら勝ちか（3〜マスの数）を変えられる
+   CPU: やさしい（ときどき適当）・ふつう（勝てる手・止める手・よい場所）・つよい（3×3 は読み切り、大きい盤は先読みつきの評価） */
+(function () {
+  const OS = window.OS, h = OS.h, ui = OS.ui;
+  const CFG = '/.config/htictactoe.json';
+  OS.registerApp({
+    id: 'htictactoe', name: 'hTic-tac-toe', icon: 'ttt', color: '#e66100', desc: '三目並べ（CPU・二人で対戦、マスの数を変えられる）',
+    launch() {
+      const fsx = OS.htui.fs, home = OS.users.home(OS.htui.user);
+      let cfg = { n: 3, k: 3, mode: 'cpu2', level: 'normal' }; // mode: cpu2 = 自分が先手（×）、cpu1 = CPU が先手、pvp = 二人
+      try { cfg = Object.assign(cfg, JSON.parse(fsx.read(home + CFG))); } catch (e) { /* 初回 */ }
+      const save = () => { try { fsx.mkdir(home + '/.config', { parents: true }); fsx.write(home + CFG, JSON.stringify(cfg)); } catch (e) { /* 保存できなくても続ける */ } };
+      const score = { X: 0, O: 0, draw: 0 };
+      const win = OS.htui.open({ title: 'hTic-tac-toe', icon: 'ttt', w: 520, h: 600, app: 'htictactoe', buttons: [
+        { icon: 'reload', label: '新しいゲーム', onclick: () => newGame() },
+        { icon: 'gear', title: '盤の大きさと対戦相手', onclick: () => settings() }
+      ] });
+      const status = h('div', { class: 'tt-status', role: 'status' });
+      const board = h('div', { class: 'tt-board', role: 'grid', 'aria-label': '盤' });
+      const scoreEl = h('div', { class: 'tt-score' });
+      const sel = (id, label, opts, val, on) => { const s = h('select', { class: 'sel', id: id + win.pid, 'aria-label': label, onchange: () => on(s.value) }, opts.map(o => h('option', { value: o[0], selected: String(o[0]) === String(val) }, o[1]))); return s; };
+      const bar = h('div', { class: 'toolbar tt-bar' });
+      win.body.classList.add('tt-root');
+      win.body.append(bar, h('div', { class: 'tt-main' }, scoreEl, status, h('div', { class: 'tt-wrap' }, board)));
+
+      let B, turn, over, line, busy = false, last = -1;
+      const N = () => cfg.n, K = () => Math.min(cfg.k, cfg.n);
+      const human = p => cfg.mode === 'pvp' || (cfg.mode === 'cpu2' ? p === 'X' : p === 'O');
+      const nameOf = p => cfg.mode === 'pvp' ? (p === 'X' ? '×（先手）' : '○（後手）') : human(p) ? 'あなた（' + (p === 'X' ? '×' : '○') + '）' : 'CPU（' + (p === 'X' ? '×' : '○') + '）';
+
+      function paintBar() {
+        bar.textContent = '';
+        bar.append(
+          sel('tt-mode-', '対戦相手', [['cpu2', 'CPU と（自分が先手）'], ['cpu1', 'CPU と（CPU が先手）'], ['pvp', '二人で']], cfg.mode, v => { cfg.mode = v; save(); newGame(); }),
+          sel('tt-lv-', 'CPU の強さ', [['easy', 'やさしい'], ['normal', 'ふつう'], ['hard', 'つよい']], cfg.level, v => { cfg.level = v; save(); }),
+          sel('tt-n-', 'マスの数', [3, 4, 5, 6, 7, 8, 9].map(n => [n, n + '×' + n]), cfg.n, v => { cfg.n = +v; cfg.k = Math.min(cfg.k, cfg.n); if (cfg.n >= 6 && cfg.k === 3) cfg.k = cfg.n >= 7 ? 5 : 4; save(); paintBar(); newGame(); }),
+          sel('tt-k-', '並べる数', Array.from({ length: cfg.n - 2 }, (x, i) => [i + 3, (i + 3) + ' 個並べたら勝ち']), K(), v => { cfg.k = +v; save(); newGame(); }));
+        bar.querySelector('[id^=tt-lv-]').disabled = cfg.mode === 'pvp';
+      }
+      async function settings() {
+        const n = h('input', { type: 'range', min: 3, max: 9, value: cfg.n, id: 'tt-sn-' + win.pid, 'aria-label': 'マスの数' });
+        const k = h('input', { type: 'range', min: 3, max: cfg.n, value: K(), id: 'tt-sk-' + win.pid, 'aria-label': '並べる数' });
+        const nl = h('b'), kl = h('b');
+        const upd = () => { k.max = n.value; if (+k.value > +n.value) k.value = n.value; nl.textContent = n.value + '×' + n.value; kl.textContent = k.value + ' 個'; OS.htui.syncRanges && OS.htui.syncRanges(k.parentNode || document); };
+        n.addEventListener('input', upd); k.addEventListener('input', upd); upd();
+        const ok = await ui.modal({ title: '盤の大きさ', width: 380, body: [h('div', { class: 'tt-set' }, h('label', null, 'マスの数 ', nl), n, h('label', null, '並べたら勝ち ', kl), k)],
+          buttons: [{ label: 'キャンセル', cancel: true, value: false }, { label: 'この大きさで始める', primary: true, value: true }] });
+        if (!ok) return;
+        cfg.n = +n.value; cfg.k = +k.value; save(); paintBar(); newGame();
+      }
+
+      // ---- 盤の判定
+      const DIRS = [[0, 1], [1, 0], [1, 1], [1, -1]];
+      function winner(b) {
+        const n = N(), k = K();
+        for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+          const p = b[r * n + c]; if (!p) continue;
+          for (const [dr, dc] of DIRS) {
+            const er = r + dr * (k - 1), ec = c + dc * (k - 1);
+            if (er < 0 || er >= n || ec < 0 || ec >= n) continue;
+            let ok = true; const cells = [r * n + c];
+            for (let i = 1; i < k; i++) { const j = (r + dr * i) * n + c + dc * i; if (b[j] !== p) { ok = false; break; } cells.push(j); }
+            if (ok) return { p: p, cells: cells };
+          }
+        }
+        return b.every(x => x) ? { p: null, cells: [] } : null;
+      }
+      // ---- CPU
+      function lineScore(b, me) {
+        // すべての「k 個の窓」を見て、相手の石が無い窓は自分の石の数に応じて点を足す（相手の分は引く）
+        const n = N(), k = K(), you = me === 'X' ? 'O' : 'X'; let s = 0;
+        for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) for (const [dr, dc] of DIRS) {
+          const er = r + dr * (k - 1), ec = c + dc * (k - 1);
+          if (er < 0 || er >= n || ec < 0 || ec >= n) continue;
+          let a = 0, o = 0;
+          for (let i = 0; i < k; i++) { const v = b[(r + dr * i) * n + c + dc * i]; if (v === me) a++; else if (v === you) o++; }
+          if (a && !o) s += Math.pow(10, a); else if (o && !a) s -= Math.pow(10, o) * 1.2;
+        }
+        return s;
+      }
+      function minimax(b, p, me, depth, alpha, beta) {
+        const w = winner(b);
+        if (w) return w.p === me ? 1000 - depth : w.p ? depth - 1000 : 0;
+        const you = p === 'X' ? 'O' : 'X';
+        if (depth >= limit) return lineScore(b, me) / 1000;
+        let best = p === me ? -Infinity : Infinity;
+        for (const i of order(b)) {
+          b[i] = p; const v = minimax(b, you, me, depth + 1, alpha, beta); b[i] = null;
+          if (p === me) { best = Math.max(best, v); alpha = Math.max(alpha, v); } else { best = Math.min(best, v); beta = Math.min(beta, v); }
+          if (beta <= alpha) break;
+        }
+        return best;
+      }
+      let limit = 9;
+      // 先に調べる順: 石の近くから（大きい盤で枝を減らす）
+      function order(b) {
+        const n = N(), out = [];
+        const any = b.some(x => x);
+        for (let i = 0; i < b.length; i++) {
+          if (b[i]) continue;
+          if (any && n > 4) { const r = (i / n) | 0, c = i % n; let near = false; for (let dr = -1; dr <= 1 && !near; dr++) for (let dc = -1; dc <= 1; dc++) { const rr = r + dr, cc = c + dc; if (rr >= 0 && rr < n && cc >= 0 && cc < n && b[rr * n + cc]) { near = true; break; } } if (!near) continue; }
+          out.push(i);
+        }
+        const mid = (n - 1) / 2;
+        return out.sort((a, c) => (Math.abs(a / n - mid) + Math.abs(a % n - mid)) - (Math.abs(c / n - mid) + Math.abs(c % n - mid)));
+      }
+      function cpuMove(me) {
+        const b = B.slice(), you = me === 'X' ? 'O' : 'X', empt = b.map((v, i) => v ? -1 : i).filter(i => i >= 0);
+        if (cfg.level === 'easy' && Math.random() < 0.6) return empt[(Math.random() * empt.length) | 0];
+        // 勝てる手・止める手
+        for (const p of [me, you]) for (const i of empt) { b[i] = p; const w = winner(b); b[i] = null; if (w && w.p === p) return i; }
+        if (cfg.level === 'hard') {
+          limit = N() === 3 ? 9 : N() === 4 ? 4 : 2;
+          let best = -Infinity, pick = empt[0];
+          for (const i of order(b)) { b[i] = me; const v = minimax(b, you, me, 1, -Infinity, Infinity); b[i] = null; if (v > best) { best = v; pick = i; } }
+          return pick;
+        }
+        let best = -Infinity, pick = empt[0];
+        for (const i of order(b).length ? order(b) : empt) { b[i] = me; const v = lineScore(b, me) + Math.random() * 3; b[i] = null; if (v > best) { best = v; pick = i; } }
+        return pick;
+      }
+
+      // ---- 進行
+      function newGame() {
+        B = new Array(N() * N()).fill(null); turn = 'X'; over = false; line = null; last = -1;
+        board.style.setProperty('--n', N());
+        board.textContent = '';
+        for (let i = 0; i < B.length; i++) board.append(h('button', { class: 'tt-cell', type: 'button', role: 'gridcell', 'aria-label': (((i / N()) | 0) + 1) + ' 行 ' + (i % N() + 1) + ' 列', onclick: () => play(i, true) }));
+        paint(); next();
+      }
+      function paint() {
+        [...board.children].forEach((el, i) => {
+          el.textContent = ''; el.className = 'tt-cell' + (B[i] ? ' ' + B[i].toLowerCase() : '') + (line && line.includes(i) ? ' win' : '') + (i === last ? ' last' : '');
+          if (B[i]) el.append(h('span', { class: 'tt-mark' }, B[i] === 'X' ? '×' : '○'));
+          el.disabled = !!B[i] || over;
+        });
+        scoreEl.textContent = '';
+        scoreEl.append(h('span', { class: 'tt-sx' }, '× ' + score.X), h('span', null, '引き分け ' + score.draw), h('span', { class: 'tt-so' }, '○ ' + score.O));
+        if (!over) status.textContent = nameOf(turn) + ' の番です' + (busy ? '（考え中…）' : '') + ' ・ ' + N() + '×' + N() + '、' + K() + ' 個並べたら勝ち';
+      }
+      function play(i, byHand) {
+        if (over || B[i] || (byHand && (busy || !human(turn)))) return;
+        B[i] = turn; last = i;
+        const w = winner(B);
+        if (w) {
+          over = true; line = w.cells;
+          if (w.p) { score[w.p]++; status.textContent = nameOf(w.p) + ' の勝ちです！'; } else { score.draw++; status.textContent = '引き分けです'; }
+          paint(); return;
+        }
+        turn = turn === 'X' ? 'O' : 'X';
+        paint(); next();
+      }
+      function next() {
+        if (over || human(turn)) return;
+        busy = true; paint();
+        setTimeout(() => { if (win.closed) return; const i = cpuMove(turn); busy = false; play(i, false); }, 280);
+      }
+      board.addEventListener('keydown', e => {
+        const cells = [...board.children], i = cells.indexOf(document.activeElement); if (i < 0) return;
+        const n = N(), mv = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -n, ArrowDown: n }[e.key];
+        if (mv) { e.preventDefault(); const j = i + mv; if (j >= 0 && j < cells.length && !(Math.abs(mv) === 1 && ((j / n) | 0) !== ((i / n) | 0))) cells[j].focus(); }
+      });
+      paintBar(); newGame();
+      return win;
+    }
+  });
+})();
+</script>
 <script type="text/x-htmlos" data-path="/sys/apps/76-hstore.js">
 /* hStore — パッケージマネージャ
    パッケージ = OS.registerApp(...) を呼ぶ 1 個の .js ファイル。/apps に置かれ、起動のたびに読み込まれる。
@@ -2759,6 +2928,158 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       }
       win.onFocus = () => { if (tab === 'list') render(); };
       render();
+      return win;
+    }
+  });
+})();
+</script>
+<script type="text/x-htmlos" data-path="/sys/apps/77-hreversi.js">
+/* hReversi — リバーシ。CPU と対戦・二人で対戦
+   CPU: やさしい（ほぼ適当）・ふつう（場所の価値）・つよい（場所の価値・打てる手の数・確定しやすい石を見て 4 手先まで読む） */
+(function () {
+  const OS = window.OS, h = OS.h, ui = OS.ui;
+  const CFG = '/.config/hreversi.json';
+  const N = 8, DIRS = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
+  // 場所の価値（角は高く、角の隣は低い）
+  const W = [
+    120, -20, 20, 5, 5, 20, -20, 120,
+    -20, -40, -5, -5, -5, -5, -40, -20,
+    20, -5, 15, 3, 3, 15, -5, 20,
+    5, -5, 3, 3, 3, 3, -5, 5,
+    5, -5, 3, 3, 3, 3, -5, 5,
+    20, -5, 15, 3, 3, 15, -5, 20,
+    -20, -40, -5, -5, -5, -5, -40, -20,
+    120, -20, 20, 5, 5, 20, -20, 120];
+  function flips(b, i, p) {
+    if (b[i]) return [];
+    const r = (i / N) | 0, c = i % N, o = -p, out = [];
+    for (const [dr, dc] of DIRS) {
+      let rr = r + dr, cc = c + dc; const run = [];
+      while (rr >= 0 && rr < N && cc >= 0 && cc < N && b[rr * N + cc] === o) { run.push(rr * N + cc); rr += dr; cc += dc; }
+      if (run.length && rr >= 0 && rr < N && cc >= 0 && cc < N && b[rr * N + cc] === p) out.push(...run);
+    }
+    return out;
+  }
+  const moves = (b, p) => { const m = []; for (let i = 0; i < 64; i++) if (!b[i] && flips(b, i, p).length) m.push(i); return m; };
+  const apply = (b, i, p) => { const f = flips(b, i, p), nb = b.slice(); nb[i] = p; f.forEach(j => { nb[j] = p; }); return nb; };
+  const count = (b, p) => b.reduce((s, v) => s + (v === p ? 1 : 0), 0);
+  function evalBoard(b, me) {
+    const empty = b.filter(v => !v).length;
+    if (empty === 0) return (count(b, me) - count(b, -me)) * 1000;
+    let pos = 0;
+    for (let i = 0; i < 64; i++) if (b[i]) pos += b[i] === me ? W[i] : -W[i];
+    const mob = moves(b, me).length - moves(b, -me).length;
+    const disc = count(b, me) - count(b, -me);
+    return pos + mob * 8 + (empty < 14 ? disc * 6 : 0);
+  }
+  function search(b, p, me, depth, alpha, beta) {
+    const ms = moves(b, p);
+    if (depth === 0) return evalBoard(b, me);
+    if (!ms.length) {
+      if (!moves(b, -p).length) return evalBoard(b.map(v => v), me) + (count(b, me) - count(b, -me)) * 1000;
+      return search(b, -p, me, depth - 1, alpha, beta);
+    }
+    ms.sort((a, c) => W[c] - W[a]);
+    if (p === me) { let v = -Infinity; for (const i of ms) { v = Math.max(v, search(apply(b, i, p), -p, me, depth - 1, alpha, beta)); alpha = Math.max(alpha, v); if (beta <= alpha) break; } return v; }
+    let v = Infinity; for (const i of ms) { v = Math.min(v, search(apply(b, i, p), -p, me, depth - 1, alpha, beta)); beta = Math.min(beta, v); if (beta <= alpha) break; } return v;
+  }
+
+  OS.registerApp({
+    id: 'hreversi', name: 'hReversi', icon: 'reversi', color: '#26a269', desc: 'リバーシ（CPU・二人で対戦）',
+    launch() {
+      const fsx = OS.htui.fs, home = OS.users.home(OS.htui.user);
+      let cfg = { mode: 'cpu2', level: 'normal', hints: true }; // cpu2 = 自分が黒（先手）、cpu1 = 自分が白、pvp = 二人
+      try { cfg = Object.assign(cfg, JSON.parse(fsx.read(home + CFG))); } catch (e) { /* 初回 */ }
+      const save = () => { try { fsx.mkdir(home + '/.config', { parents: true }); fsx.write(home + CFG, JSON.stringify(cfg)); } catch (e) { /* 続ける */ } };
+      const win = OS.htui.open({ title: 'hReversi', icon: 'reversi', w: 560, h: 660, app: 'hreversi', buttons: [
+        { icon: 'reload', label: '新しいゲーム', onclick: () => newGame() },
+        { icon: 'back', title: '一手戻す', onclick: () => undo() },
+        { icon: 'info', title: '打てる場所を表示', toggle: true, on: cfg.hints, onclick: (e, on) => { cfg.hints = on; save(); paint(); } }
+      ] });
+      const bar = h('div', { class: 'toolbar' });
+      const sel = (id, label, opts, val, on) => { const s = h('select', { class: 'sel', id: id + win.pid, 'aria-label': label, onchange: () => on(s.value) }, opts.map(o => h('option', { value: o[0], selected: o[0] === val }, o[1]))); return s; };
+      const board = h('div', { class: 'rv-board', role: 'grid', 'aria-label': '盤' });
+      const sB = h('div', { class: 'rv-side b' }), sW = h('div', { class: 'rv-side w' }), status = h('div', { class: 'rv-status', role: 'status' });
+      win.body.classList.add('rv-root');
+      win.body.append(bar, h('div', { class: 'rv-main' }, h('div', { class: 'rv-score' }, sB, status, sW), h('div', { class: 'rv-wrap' }, board)));
+      const cells = [];
+      for (let i = 0; i < 64; i++) {
+        const c = h('button', { class: 'rv-cell', type: 'button', role: 'gridcell', 'aria-label': 'ABCDEFGH'[i % 8] + (((i / 8) | 0) + 1), onclick: () => play(i, true) }, h('span', { class: 'rv-disc' }));
+        cells.push(c); board.append(c);
+      }
+      let B, turn, hist, over, last, busy = false, flipped = [];
+      const human = p => cfg.mode === 'pvp' || (cfg.mode === 'cpu2' ? p === 1 : p === -1);
+      const nm = p => (p === 1 ? '黒' : '白') + (cfg.mode === 'pvp' ? '' : human(p) ? '（あなた）' : '（CPU）');
+
+      function paintBar() {
+        bar.textContent = '';
+        bar.append(sel('rv-mode-', '対戦相手', [['cpu2', 'CPU と（自分が黒・先手）'], ['cpu1', 'CPU と（自分が白・後手）'], ['pvp', '二人で']], cfg.mode, v => { cfg.mode = v; save(); paintBar(); newGame(); }),
+          sel('rv-lv-', 'CPU の強さ', [['easy', 'やさしい'], ['normal', 'ふつう'], ['hard', 'つよい']], cfg.level, v => { cfg.level = v; save(); }));
+        bar.lastChild.disabled = cfg.mode === 'pvp';
+      }
+      function newGame() {
+        B = new Array(64).fill(0); B[27] = B[36] = -1; B[28] = B[35] = 1;
+        turn = 1; hist = []; over = false; last = -1; flipped = []; busy = false;
+        paint(); next();
+      }
+      function paint() {
+        const ms = over ? [] : moves(B, turn);
+        cells.forEach((c, i) => {
+          const v = B[i];
+          c.className = 'rv-cell' + (v === 1 ? ' b' : v === -1 ? ' w' : '') + (i === last ? ' last' : '') + (flipped.includes(i) ? ' flip' : '') + (cfg.hints && human(turn) && ms.includes(i) ? ' can' : '');
+          c.disabled = over || !!v || !ms.includes(i) || busy || !human(turn);
+        });
+        sB.textContent = ''; sW.textContent = '';
+        sB.append(h('span', { class: 'rv-dot b' }), h('b', null, count(B, 1)), h('small', null, nm(1)));
+        sW.append(h('span', { class: 'rv-dot w' }), h('b', null, count(B, -1)), h('small', null, nm(-1)));
+        sB.classList.toggle('turn', !over && turn === 1); sW.classList.toggle('turn', !over && turn === -1);
+        if (!over) status.textContent = nm(turn) + ' の番' + (busy ? '…' : '');
+        win.captionButtons[1].disabled = !hist.length || busy;
+      }
+      function finish() {
+        over = true;
+        const b = count(B, 1), w = count(B, -1);
+        status.textContent = b === w ? '引き分け（' + b + ' 対 ' + w + '）' : (b > w ? nm(1) : nm(-1)) + ' の勝ち（' + Math.max(b, w) + ' 対 ' + Math.min(b, w) + '）';
+        paint();
+      }
+      function play(i, byHand) {
+        if (over || (byHand && (busy || !human(turn)))) return;
+        const f = flips(B, i, turn); if (!f.length) return;
+        hist.push({ B: B.slice(), turn: turn, last: last });
+        B = apply(B, i, turn); last = i; flipped = f;
+        turn = -turn;
+        if (!moves(B, turn).length) {
+          if (!moves(B, -turn).length) { finish(); return; }
+          ui.toast(nm(turn) + ' は打てる場所がないのでパスです');
+          turn = -turn;
+        }
+        paint(); next();
+      }
+      function undo() {
+        if (!hist.length || busy) return;
+        // CPU と対戦中なら、自分の手番まで戻す
+        do { const s = hist.pop(); B = s.B; turn = s.turn; last = s.last; } while (hist.length && !human(turn));
+        over = false; flipped = []; paint(); next();
+      }
+      function next() {
+        if (over || human(turn)) return;
+        busy = true; paint();
+        setTimeout(() => {
+          if (win.closed) return;
+          const ms = moves(B, turn); let pick = ms[0];
+          if (cfg.level === 'easy') pick = Math.random() < 0.7 ? ms[(Math.random() * ms.length) | 0] : ms.slice().sort((a, c) => W[c] - W[a])[0];
+          else if (cfg.level === 'normal') { let best = -Infinity; for (const i of ms) { const v = W[i] + flips(B, i, turn).length * 2 + Math.random() * 4; if (v > best) { best = v; pick = i; } } }
+          else { const empty = B.filter(v => !v).length, d = empty <= 10 ? 8 : 4; let best = -Infinity; for (const i of ms.slice().sort((a, c) => W[c] - W[a])) { const v = search(apply(B, i, turn), -turn, turn, d - 1, -Infinity, Infinity); if (v > best) { best = v; pick = i; } } }
+          busy = false; play(pick, false);
+        }, 420);
+      }
+      board.addEventListener('keydown', e => {
+        const i = cells.indexOf(document.activeElement); if (i < 0) return;
+        const mv = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -8, ArrowDown: 8 }[e.key]; if (!mv) return;
+        e.preventDefault(); let j = i + mv;
+        if (j >= 0 && j < 64 && !(Math.abs(mv) === 1 && ((j / 8) | 0) !== ((i / 8) | 0))) { cells[j].disabled = false; cells[j].focus(); }
+      });
+      paintBar(); newGame();
       return win;
     }
   });
@@ -3111,8 +3432,22 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
           const input = h('input', { type: 'password', class: o.inputClass || 'inp', id: 'gr-pw', placeholder: o.placeholder || 'パスワード', 'aria-label': 'パスワード', autocomplete: 'off' });
           const submit = h('button', { class: o.submitClass || 'btn primary', type: 'submit', 'aria-label': 'ログイン', title: 'ログイン' }, o.submitLabel || OS.icon('fwd', 18));
           const msg = h('div', { class: 'gr-msg ' + (o.msgClass || ''), role: 'alert' }, st.msg);
-          const form = h('form', { class: o.formClass || '', onsubmit: async e => {
-            e.preventDefault();
+          // Enter でのログインは、フォームの送信（submit）だけに頼らず、欄のキーでも受け取る
+          //   （送信ボタンを置かないテーマや、ブラウザーによって Enter で submit が起きない場合があるため）。busy で二重のログインを防ぐ
+          let busy = false;
+          const login = async () => {
+            if (busy) return;
+            busy = true;
+            try { await doLogin(); } finally { busy = false; }
+          };
+          // keydown で受け取れなかった Enter（日本語入力の状態などで isComposing が付いたまま来る場合）は、keyup で拾う
+          let downDone = false;
+          const onKey = e => { if (e.key !== 'Enter' || e.shiftKey || e.altKey) return; if (e.isComposing || e.keyCode === 229) { downDone = false; return; } e.preventDefault(); e.stopPropagation(); downDone = true; login(); };
+          input.addEventListener('keydown', onKey);
+          input.addEventListener('keyup', e => { if (e.key !== 'Enter' || e.isComposing) return; if (!downDone && input.value) login(); downDone = false; });
+          if (o.nameInput) o.nameInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); if (!input.value) input.focus(); else login(); } });
+          const form = h('form', { class: o.formClass || '', onsubmit: e => { e.preventDefault(); login(); } });
+          async function doLogin() {
             const u = o.nameInput ? users.get(o.nameInput.value.trim()) : st.user;
             if (u && !u.root && await users.verify(u.name, input.value)) {
               const cf = hdm.conf(); cf.lastUser = u.name; cf.users = cf.users || {}; cf.users[u.name] = st.sid; hdm.save(cf);
@@ -3123,7 +3458,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
               msg.textContent = st.msg; input.value = ''; input.focus();
               const box = form.closest('[data-shake]') || form; box.classList.remove('shake'); void box.offsetWidth; box.classList.add('shake');
             }
-          } });
+          }
           return { input: input, submit: submit, msg: msg, form: form };
         },
         userButtons(cls, size, square) {
@@ -4098,7 +4433,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   // 子ウインドウ（ダイアログなど）がアクティブなときは、その親（いちばん上の親）を返す
   const hasActive = w => w.el.classList.contains('active') || w.children.some(hasActive);
   // 描画エンジンの名前と版
-  htui.sdk = { name: 'HTUi SDK', version: '3.0', codename: 'Venus', full: 'HTUi SDK 3.0 (Venus)' };
+  htui.sdk = { name: 'HTUi SDK', version: '3.0.1', codename: 'Venus', full: 'HTUi SDK 3.0.1 (Venus)' };
   // Venus のスライダー: 値までを色で塗るために --v-p を入れる
   const rangeFill = r => { const mn = +r.min || 0, mx = r.max === '' ? 100 : +r.max, v = +r.value; r.style.setProperty('--v-p', (mx > mn ? (v - mn) / (mx - mn) * 100 : 0) + '%'); };
   htui.syncRanges = root => (root || document).querySelectorAll('input[type=range]').forEach(rangeFill);
@@ -5324,6 +5659,9 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       def('hserial', 'hserial', 'シリアルモニター', () => { OS.launch('hserial'); });
       def('hmd', 'hmd [ファイル]', 'Markdown エディター（コードとプレビュー）', p => { OS.launch('hmd', p == null ? null : A(p)); });
       def('hmines', 'hmines', 'マインスイーパー風のゲーム', () => { OS.launch('hmines'); });
+      def('htictactoe', 'htictactoe', '三目並べ（CPU・二人で対戦、マスの数を変えられる）', () => { OS.launch('htictactoe'); });
+      alias('ttt', 'htictactoe');
+      def('hreversi', 'hreversi', 'リバーシ（CPU・二人で対戦）', () => { OS.launch('hreversi'); });
       // ---- HTUi Studio の TUI（矢印キー・Enter・Esc で操作する CLI 版）
       async function studioTui(S, startDir) {
         const scr = tty.screen();
@@ -5987,7 +6325,9 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     stop: '<rect x="6" y="6" width="12" height="12" rx="1.5"/>',
     layers: '<path d="M12 3l9 5-9 5-9-5zM3 12.5l9 5 9-5M3 16.5l9 5 9-5"/>',
     studio: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 8h18M9 12l-2.5 2.5L9 17M15 12l2.5 2.5L15 17M13 11.5l-2 6"/>',
-    script: '<path d="M6 3h8l4 4v14H6zM14 3v4h4M9 12l2 2-2 2M13 16h3"/>'
+    script: '<path d="M6 3h8l4 4v14H6zM14 3v4h4M9 12l2 2-2 2M13 16h3"/>',
+    ttt: '<path d="M9 3v18M15 3v18M3 9h18M3 15h18"/>',
+    reversi: '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 0 0 17z" fill="currentColor"/>'
   };
   OS.iconNames = Object.keys(ICONS).filter(n => n !== 'win');
   OS.icon = function (name, size) {
@@ -9520,8 +9860,9 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 #os-root :where(input[type=checkbox],input[type=radio]):focus-visible{outline:0!important;box-shadow:var(--v-ring)}
 #os-root :where(input[type=checkbox],input[type=radio]):disabled{opacity:.45;cursor:default}
 /* スイッチ: <input type="checkbox" class="switch"> */
-#os-root input[type=checkbox].switch{display:inline-flex;align-items:center;width:38px;height:22px;padding:0 3px;border:0;border-radius:11px;background:var(--v-track)}
-#os-root input[type=checkbox].switch::before{width:16px;height:16px;border-radius:50%;clip-path:none;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transform:none;transition:transform .16s}
+/* 3.0.1: つまみは左端からの位置で置く（中央寄せの指定が残ってズレていたのを直した） */
+#os-root input[type=checkbox].switch{display:inline-block;position:relative;width:38px;height:22px;padding:0;border:0;border-radius:11px;background:var(--v-track);place-content:normal;vertical-align:middle;overflow:hidden}
+#os-root input[type=checkbox].switch::before{content:'';position:absolute;left:3px;top:3px;width:16px;height:16px;border-radius:50%;clip-path:none;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transform:none;transition:transform .16s}
 #os-root input[type=checkbox].switch:checked{background:var(--accent)}
 #os-root input[type=checkbox].switch:checked::before{transform:translateX(16px)}
 /* スライダー（--v-p は HTUi が値に合わせて入れる） */
@@ -9612,6 +9953,50 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 .t-head{color:#fff;font-weight:700}
 .tty-tuikeys{display:none}
 .touch .tty-tuikeys{display:flex}
+/* ---- hTic-tac-toe */
+.tt-root{background:linear-gradient(160deg,#fff7ef,#fde7d3)}
+.tt-main{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;gap:8px;padding:10px 12px 14px}
+.tt-score{display:flex;gap:18px;font:600 15px var(--ui);color:var(--ink-2)}
+.tt-sx{color:#e0452b}.tt-so{color:#2a6ae0}
+.tt-status{font-size:13.5px;color:var(--ink-2);text-align:center;min-height:1.5em}
+.tt-wrap{flex:1;min-height:0;width:100%;display:flex;align-items:center;justify-content:center;container-type:size}
+.tt-board{--n:3;display:grid;grid-template-columns:repeat(var(--n),1fr);grid-template-rows:repeat(var(--n),1fr);gap:clamp(3px,1.2cqmin,8px);width:min(100cqw,100cqh);aspect-ratio:1;padding:clamp(4px,1.5cqmin,12px);border-radius:16px;background:#f3d2b3;box-shadow:inset 0 2px 6px rgba(120,60,10,.18),0 8px 24px rgba(160,80,20,.18)}
+.tt-cell{position:relative;display:flex;align-items:center;justify-content:center;min-width:0;min-height:0;padding:0;border:0;border-radius:calc(30cqmin / var(--n));background:#fffaf5;box-shadow:0 2px 0 #e8bf98;cursor:pointer;font:700 calc(62cqmin / var(--n))/1 var(--ui);transition:background-color .12s,transform .12s}
+.tt-cell:not(:disabled):hover{background:#fff;transform:translateY(-1px)}
+.tt-cell:disabled{cursor:default;opacity:1}
+.tt-cell.x .tt-mark{color:#e0452b}.tt-cell.o .tt-mark{color:#2a6ae0}
+.tt-cell.last{box-shadow:0 2px 0 #e8bf98,inset 0 0 0 2px rgba(0,0,0,.12)}
+.tt-cell.win{background:#ffe08a;box-shadow:0 0 0 3px #f5b400,0 2px 0 #e8bf98}
+.tt-mark{display:block;font:700 calc(62cqmin / var(--n))/1 var(--ui);animation:tt-pop .22s cubic-bezier(.2,1.6,.4,1)}
+@keyframes tt-pop{from{transform:scale(.2);opacity:0}to{transform:none;opacity:1}}
+.tt-set{display:flex;flex-direction:column;gap:6px}
+.tt-set label{display:flex;justify-content:space-between}
+/* ---- hReversi */
+.rv-root{background:linear-gradient(160deg,#1f3a2c,#10231a);color:#e8f2ec}
+.rv-root .toolbar{background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.1)}
+.rv-main{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;gap:10px;padding:10px 12px 14px}
+.rv-score{display:flex;align-items:center;gap:12px;width:100%;max-width:520px}
+.rv-side{flex:none;display:flex;align-items:center;gap:7px;padding:5px 12px;border-radius:999px;background:rgba(255,255,255,.07);border:1.5px solid transparent;transition:border-color .2s,background-color .2s}
+.rv-side b{font:700 18px var(--mono)}
+.rv-side small{color:#a9c4b4}
+.rv-side.turn{border-color:#7ee2a8;background:rgba(126,226,168,.14)}
+.rv-status{flex:1;text-align:center;font-size:13.5px;color:#cfe3d7}
+.rv-dot{width:16px;height:16px;border-radius:50%}
+.rv-dot.b,.rv-cell.b .rv-disc{background:radial-gradient(circle at 35% 30%,#5b5f66,#141518 60%)}
+.rv-dot.w,.rv-cell.w .rv-disc{background:radial-gradient(circle at 35% 30%,#fff,#d6d8dc 70%)}
+.rv-wrap{flex:1;min-height:0;width:100%;display:flex;align-items:center;justify-content:center;container-type:size}
+.rv-board{display:grid;grid-template-columns:repeat(8,1fr);gap:2px;width:min(100cqw,100cqh);aspect-ratio:1;padding:8px;border-radius:14px;background:#0b3d22;box-shadow:0 10px 30px rgba(0,0,0,.45),inset 0 0 0 2px #2c6b45}
+.rv-cell{position:relative;display:flex;align-items:center;justify-content:center;min-width:0;min-height:0;padding:0;border:0;border-radius:4px;background:#1f8a4c;cursor:default;perspective:300px}
+.rv-cell:nth-child(odd){background:#1d8448}
+.rv-cell:disabled{opacity:1}
+.rv-disc{width:80%;height:80%;border-radius:50%;transform:scale(0);box-shadow:0 2px 4px rgba(0,0,0,.45);transition:transform .25s cubic-bezier(.2,1.4,.4,1)}
+.rv-cell.b .rv-disc,.rv-cell.w .rv-disc{transform:none}
+.rv-cell.flip .rv-disc{animation:rv-flip .4s ease}
+@keyframes rv-flip{0%{transform:rotateY(0)}50%{transform:rotateY(90deg)}100%{transform:rotateY(0)}}
+.rv-cell.can{cursor:pointer}
+.rv-cell.can::after{content:'';position:absolute;width:24%;height:24%;border-radius:50%;background:rgba(255,255,255,.28)}
+.rv-cell.can:hover::after{background:rgba(255,255,255,.55)}
+.rv-cell.last::before{content:'';position:absolute;z-index:1;width:12%;height:12%;border-radius:50%;background:#ff5a5a}
 </script>
 <script>
 /* ============================================================
@@ -9623,7 +10008,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 (function () {
   'use strict';
   // コードネーム: htmlOS は恒星の名前（3.2 = Sirius、4.0 = Vega）、描画エンジン HTUi SDK は惑星の名前（2 = Jupiter、3.0 = Venus）
-  var MEDIA_VERSION = '4.0.1', MEDIA_BUILD = '26', MEDIA_CODENAME = 'Vega';
+  var MEDIA_VERSION = '4.1.0', MEDIA_BUILD = '27', MEDIA_CODENAME = 'Vega';
   var BOOT = window.BOOT = {};
   var P = 'htmlos:';
 

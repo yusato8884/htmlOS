@@ -609,6 +609,9 @@
       def('hserial', 'hserial', 'シリアルモニター', () => { OS.launch('hserial'); });
       def('hmd', 'hmd [ファイル]', 'Markdown エディター（コードとプレビュー）', p => { OS.launch('hmd', p == null ? null : A(p)); });
       def('hmines', 'hmines', 'マインスイーパー風のゲーム', () => { OS.launch('hmines'); });
+      def('htictactoe', 'htictactoe', '三目並べ（CPU・二人で対戦、マスの数を変えられる）', () => { OS.launch('htictactoe'); });
+      alias('ttt', 'htictactoe');
+      def('hreversi', 'hreversi', 'リバーシ（CPU・二人で対戦）', () => { OS.launch('hreversi'); });
       // ---- HTUi Studio の TUI（矢印キー・Enter・Esc で操作する CLI 版）
       async function studioTui(S, startDir) {
         const scr = tty.screen();
