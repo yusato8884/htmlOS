@@ -325,20 +325,32 @@
     // やわらかいベルのような音（基音に倍音を少し重ねる）
     function note(c, out, t, f, d, v) {
       tone(c, out, t, f, d, { v: v, a: 0.012 });
-      tone(c, out, t, f * 2, d * 0.55, { v: v * 0.22, a: 0.008 });
-      tone(c, out, t, f * 3.01, d * 0.3, { v: v * 0.07, a: 0.005 });
+      tone(c, out, t, f * 1.004, d * 0.9, { v: v * 0.3, a: 0.02 }); // 少しずらして重ね、厚みを出す
+      tone(c, out, t, f / 2, d * 1.15, { type: 'triangle', v: v * 0.32, a: 0.03 }); // 1 オクターブ下の柔らかい支え
+      tone(c, out, t, f * 2, d * 0.5, { v: v * 0.16, a: 0.008 });
+      tone(c, out, t, f * 3.01, d * 0.25, { v: v * 0.05, a: 0.005 });
+    }
+    // 残響（短いホールの響き）。雑音を減衰させた応答をその場で作る。AudioContext ごとに 1 回
+    function reverb(c) {
+      if (c._htmlosRev) return c._htmlosRev;
+      const len = Math.floor(c.sampleRate * 1.8), buf = c.createBuffer(2, len, c.sampleRate);
+      for (let ch = 0; ch < 2; ch++) { const d = buf.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3.2); }
+      const conv = c.createConvolver(); conv.buffer = buf;
+      const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 4200; // 響きの高音を丸くする
+      conv.connect(lp);
+      return (c._htmlosRev = { input: conv, output: lp });
     }
     const M = n => 440 * Math.pow(2, (n - 69) / 12); // MIDI の音番号 → Hz（60 = ド）
     const seq = (c, o, t, list, d, v) => list.forEach((m, i) => note(c, o, t + i * 0.12, M(m), d, v));
     const SOUNDS = {
-      boot: (c, o, t) => { seq(c, o, t, [60, 67, 72, 76, 79], 1.7, 0.42); tone(c, o, t + 0.45, M(48), 2.2, { type: 'triangle', v: 0.22, a: 0.25 }); tone(c, o, t + 0.45, M(55), 2.0, { type: 'triangle', v: 0.12, a: 0.3 }); },
+      boot: (c, o, t) => { seq(c, o, t, [60, 67, 72, 76, 79], 1.8, 0.4); tone(c, o, t, M(36), 2.6, { type: 'triangle', v: 0.2, a: 0.35 }); tone(c, o, t + 0.45, M(48), 2.4, { type: 'triangle', v: 0.22, a: 0.25 }); tone(c, o, t + 0.45, M(55), 2.2, { type: 'triangle', v: 0.13, a: 0.3 }); },
       login: (c, o, t) => { note(c, o, t, M(72), 0.6, 0.5); note(c, o, t + 0.1, M(79), 0.7, 0.5); note(c, o, t + 0.2, M(84), 1.0, 0.45); },
       logout: (c, o, t) => { note(c, o, t, M(84), 0.5, 0.45); note(c, o, t + 0.11, M(79), 0.6, 0.45); note(c, o, t + 0.22, M(72), 0.9, 0.45); },
-      shutdown: (c, o, t) => { seq(c, o, t, [79, 76, 72, 67, 60], 1.3, 0.4); tone(c, o, t + 0.5, M(43), 1.8, { type: 'triangle', v: 0.2, a: 0.2 }); },
+      shutdown: (c, o, t) => { seq(c, o, t, [79, 76, 72, 67, 60], 1.4, 0.38); tone(c, o, t + 0.5, M(43), 2.0, { type: 'triangle', v: 0.2, a: 0.2 }); tone(c, o, t + 0.5, M(36), 2.2, { type: 'triangle', v: 0.16, a: 0.3 }); },
       reboot: (c, o, t) => { note(c, o, t, M(79), 0.4, 0.42); note(c, o, t + 0.11, M(72), 0.5, 0.42); note(c, o, t + 0.34, M(72), 0.4, 0.42); note(c, o, t + 0.45, M(79), 0.9, 0.45); },
-      bell: (c, o, t) => { tone(c, o, t, M(81), 0.15, { type: 'triangle', v: 0.6, a: 0.004 }); tone(c, o, t, M(93), 0.08, { v: 0.15, a: 0.003 }); },
+      bell: (c, o, t) => { tone(c, o, t, M(81), 0.18, { type: 'triangle', v: 0.55, a: 0.004 }); tone(c, o, t, M(69), 0.22, { type: 'triangle', v: 0.25, a: 0.006 }); tone(c, o, t, M(93), 0.08, { v: 0.12, a: 0.003 }); },
       confirm: (c, o, t) => { note(c, o, t, M(74), 0.3, 0.4); note(c, o, t + 0.075, M(81), 0.45, 0.38); },
-      error: (c, o, t) => { tone(c, o, t, M(64), 0.2, { type: 'square', v: 0.12, a: 0.005 }); tone(c, o, t + 0.16, M(58), 0.32, { type: 'square', v: 0.12, a: 0.005 }); },
+      error: (c, o, t) => { tone(c, o, t, M(64), 0.22, { type: 'square', v: 0.1, a: 0.005 }); tone(c, o, t, M(52), 0.24, { type: 'triangle', v: 0.22, a: 0.008 }); tone(c, o, t + 0.16, M(58), 0.34, { type: 'square', v: 0.1, a: 0.005 }); tone(c, o, t + 0.16, M(46), 0.38, { type: 'triangle', v: 0.22, a: 0.008 }); },
       notify: (c, o, t) => { note(c, o, t, M(84), 0.35, 0.35); note(c, o, t + 0.09, M(88), 0.6, 0.35); }
     };
     const last = {};
@@ -348,7 +360,11 @@
       const c = ctx(); if (!c) return false;
       const now = Date.now(); if (last[name] && now - last[name] < 90) return false; last[name] = now; // 連続で重ならないように
       const go = () => {
-        const out = c.createGain(), lim = c.createDynamicsCompressor(); out.gain.value = p.vol * 0.5; lim.threshold.value = -6; lim.ratio.value = 12; out.connect(lim); lim.connect(c.destination); // 重なっても音が割れないように
+        const out = c.createGain(), lim = c.createDynamicsCompressor(), rv = reverb(c), wet = c.createGain();
+        out.gain.value = p.vol * 0.5; lim.threshold.value = -6; lim.ratio.value = 12; // 重なっても音が割れないように
+        wet.gain.value = name === 'bell' ? 0.12 : 0.28; // ベルは響きを少なめに
+        out.connect(lim); out.connect(rv.input); rv.output.connect(wet); wet.connect(lim); lim.connect(c.destination);
+        setTimeout(() => { try { rv.output.disconnect(wet); } catch (e) { /* もう外れている */ } }, 5000);
         try { SOUNDS[name](c, out, c.currentTime + 0.02); } catch (e) { /* 鳴らせなくても続ける */ }
       };
       if (c.state === 'running') go();
