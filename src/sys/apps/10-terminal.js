@@ -6,9 +6,9 @@
     launch(arg) {
       const win = OS.htui.open({ title: 'Terminal', icon: 'terminal', w: 660, h: 400, app: 'terminal' });
       const tty = new OS.Tty(win.body);
-      const sh = new OS.Jsh(tty, OS.htui.user, { cmd: arg && arg.cmd });
+      const sh = new OS.Jsh(tty, OS.htui.user, { cmd: arg && arg.cmd, ppid: win.pid, onsignal: sig => win.close(sig === 'KILL') });
       win.onFocus = () => tty.focus();
-      win.onDispose = () => { sh.exited = true; tty.dispose(); };
+      win.onDispose = () => { sh.exited = true; if (sh.proc) OS.proc.exit(sh.proc.pid); tty.dispose(); };
       tty.focus();
       sh.loop().then(() => win.close(true));
       return win;

@@ -357,6 +357,7 @@
     function play(name, force) {
       const p = prefs();
       if (!SOUNDS[name] || (!p.on && !force) || p.vol <= 0) return false;
+      if (OS.init && OS.init.has('soundd.service') && !OS.init.isActive('soundd.service') && !OS._down) return false; // 効果音のサービスが止まっている
       const c = ctx(); if (!c) return false;
       const now = Date.now(); if (last[name] && now - last[name] < 90) return false; last[name] = now; // 連続で重ならないように
       const go = () => {
@@ -828,9 +829,11 @@
     tty.println(); tty.println(label);
     await nap(280);
     if (gui) OS.htui.stop();
+    let stopped = [];
+    if (OS.init) { try { stopped = await OS.init.shutdown(); } catch (e) { /* 止められなくても電源は切る */ } }
     // PC のフォルダ（HDD1）への書き出しが残っていれば、終わるまで待つ
     try { await Promise.all([hdd.flush(), BOOT.flushAll ? BOOT.flushAll() : null]); } catch (e) { /* 書けなかった分は通知済み */ }
-    const steps = (gui ? ['HTUi を停止しました'] : []).concat(['アプリを終了しました', 'ユーザーセッションを閉じました', (base.disk ? 'HDD1' : 'LocalStorage') + ' ファイルシステムを同期しました'].concat(hdd.mounted ? ['HDD1 を切り離しました'] : []), [reboot ? '再起動します' : '電源を切ります']);
+    const steps = (gui ? ['HTUi を停止しました'] : []).concat(stopped.map(d => d + 'を停止しました')).concat(['アプリを終了しました', 'ユーザーセッションを閉じました', (base.disk ? 'HDD1' : 'LocalStorage') + ' ファイルシステムを同期しました'].concat(hdd.mounted ? ['HDD1 を切り離しました'] : []), [reboot ? '再起動します' : '電源を切ります']);
     for (let i = 0; i < steps.length; i++) {
       tty.print('['); tty.print('  OK  ', 'ok'); tty.println('] ' + steps[i]);
       msg.textContent = steps[i]; bar.style.width = (100 - (i + 1) / steps.length * 100) + '%';
@@ -863,6 +866,7 @@
       const sh = new OS.Jsh(tty, user, { login: true });
       OS.tty1sh = sh;
       await sh.loop();
+      if (sh.proc) OS.proc.exit(sh.proc.pid);
       OS.tty1sh = null;
       tty.clear();
     }
@@ -940,9 +944,10 @@
     if (OS.imode) apps = apps.filter(n => I_APPS.includes(n));
     const pkgs = OS.safe || OS.imode ? [] : OS.pkg.list();
     try { OS.build = (JSON.parse(store.get('meta')) || {}).build || BOOT.build || '?'; } catch (e) { OS.build = BOOT.build || '?'; }
-    const core = ['/sys/cursor.js', '/sys/jsh.js', '/sys/htui.js', '/sys/hdm.js', '/sys/shells.js'];
+    const core = ['/sys/init.js', '/sys/cursor.js', '/sys/jsh.js', '/sys/htui.js', '/sys/hdm.js', '/sys/shells.js'];
     const total = 2 + core.length + apps.length + pkgs.length; let done = 0;
     const step = async (s, failed) => {
+      if (OS.klog) OS.klog(s, failed ? 3 : 6); else (OS._klog = OS._klog || []).push({ t: Date.now(), msg: s, prio: failed ? 3 : 6 });
       tty.print('['); tty.print(failed ? 'FAILED' : '  OK  ', failed ? 'err' : 'ok'); tty.println('] ' + s);
       done++; bar.style.width = Math.min(100, done / total * 100) + '%'; msg.textContent = s;
       await sleep(85);
@@ -968,6 +973,11 @@
       catch (e) { await step('HDD1: ' + e.message, true); }
     }
     OS.mode = mode;
+    // init（PID 1）: マルチユーザーのターゲットまでサービスを順に起動する（GUI のサービスは HTUi を出したあと）
+    if (OS.init) {
+      try { await OS.init.boot('multi-user.target', async (u, ok) => { await step(u.desc + '（' + u.name + '）' + (ok ? 'を起動しました' : 'を起動できませんでした'), !ok); }); }
+      catch (e) { await step('init: ' + e.message, true); }
+    }
     await step(mode === 'gui' ? (OS.htui && OS.htui.sdk ? OS.htui.sdk.full : 'HTUi') + ' を起動します' : 'tty1 を起動します');
     const rest = 1200 - (Date.now() - t0);
     if (rest > 0) await sleep(rest);
@@ -977,6 +987,7 @@
       // htmlOS i はシングルユーザーモード: root で自動ログインし、hwm の上で Welcome を開く
       if (OS.imode) { OS.htui.start('root', 'hwm'); setTimeout(() => { try { OS.launch('welcome'); } catch (e) { /* 開けなくても hwm は使える */ } }, 350); }
       else OS.htui.start();
+      if (OS.init) OS.init.reach('graphical.target').catch(e => OS.klog && OS.klog('graphical.target: ' + e.message, 3));
       splash.classList.add('out');
       setTimeout(() => splash.remove(), 450);
     }

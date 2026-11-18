@@ -141,6 +141,8 @@
 
   const htui = OS.htui = { running: false, user: null, fs: null, wins: [], z: 10, pid: 100, wallpapers: WALLPAPERS, wallCss: wallCss, accents: ACCENTS, el: null, prefs: {}, shell: null, sessionId: null };
   let clockTimer = null, ticks = [];
+  // 時計などの表示を新しくする（clock.service が 1 秒ごとに呼ぶ）
+  htui.tick = () => { const d = new Date(); ticks.forEach(f => { try { f(d); } catch (e) { /* 無視 */ } }); };
 
   // ---------- セッション（デスクトップ環境）の登録。パッケージからも OS.registerSession で追加できる
   OS.sessions = {};
@@ -165,6 +167,7 @@
   };
   function clearShell() {
     clearInterval(clockTimer); ticks = [];
+    if (htui.sessionProc && OS.proc) { OS.proc.exit(htui.sessionProc.pid); htui.sessionProc = null; }
     if (htui.shell && htui.shell.onStop) { try { htui.shell.onStop(); } catch (e) { /* 無視 */ } }
     htui.shell = null; htui.sessionId = null;
     if (unwatchDesk) { unwatchDesk(); unwatchDesk = null; }
@@ -256,7 +259,13 @@
     htui.notices = [];
     OS.notify({ app: 'htmlOS', icon: 'user', title: 'ようこそ、' + user + ' さん', body: sh.name + ' にログインしました', silent: true });
     const tick = () => ticks.forEach(f => { try { f(new Date()); } catch (e) { /* 無視 */ } });
-    tick(); clockTimer = setInterval(tick, 5000);
+    tick(); if (!(OS.init && OS.init.has('clock.service'))) clockTimer = setInterval(tick, 5000);
+    // ログインセッションのプロセス（アプリのウインドウはこの子になる）
+    if (OS.proc) {
+      const hs = OS.init && OS.init.state('htui.service');
+      htui.sessionProc = OS.proc.spawn({ name: 'htui-session', cmd: 'htui-session ' + sh.id + '（' + user + '）', user: user, kind: 'session', ppid: (hs && hs.pid) || 1,
+        onsignal: sig => { if (sig === 'KILL') { htui.wins.slice().forEach(w => w.close(true)); toLogin(); } else htui.logout(); return true; } });
+    }
     htui.refreshApps(); htui.refreshUser(); htui.syncMode(); htui.syncTitle(); watchDesk();
     if (sh.onStart) sh.onStart(kit);
     // セーフモードの印と、新しいバージョンのお知らせ
@@ -325,8 +334,10 @@
   OS.notify = function (n) {
     n = typeof n === 'string' ? { title: n } : Object.assign({}, n);
     n.id = ++noticeSeq; n.time = Date.now(); n.unread = !n.silent;
+    if (OS.journal) OS.journal.log('notifyd', (n.app ? n.app + ': ' : '') + n.title + (n.body ? ' — ' + n.body : ''), { prio: 6 });
     if (!htui.running || !htui.user) return n;
     htui.notices.unshift(n); htui.notices.length = Math.min(htui.notices.length, 50);
+    if (OS.init && OS.init.has('notifyd.service') && !OS.init.isActive('notifyd.service')) return n; // 通知のサービスが止まっている: ため込むだけで出さない
     if (htui.shell && htui.shell.onNotify) htui.shell.onNotify(n);
     else if (!n.silent && !htui.prefs.dnd) ui.toast(n.title + (n.body ? '：' + n.body : ''));
     if (!n.silent && !htui.prefs.dnd) OS.sound.play('notify');
@@ -942,7 +953,10 @@
     const desk = htui.desk, dw = desk.clientWidth, dh = desk.clientHeight;
     const parent = o.parent && !o.parent.closed ? o.parent : null;
     if (parent && !o.silent) OS.sound.play(o.sound || 'confirm');
-    const win = { pid: ++htui.pid, title: o.title, app: o.app || (parent && parent.app), zone: null, rect: null, onClose: null, onDispose: null, onFocus: null, parent: parent, children: [], dialog: !!o.dialog };
+    const win = { pid: OS.proc ? OS.proc.alloc() : ++htui.pid, title: o.title, app: o.app || (parent && parent.app), zone: null, rect: null, onClose: null, onDispose: null, onFocus: null, parent: parent, children: [], dialog: !!o.dialog };
+    // 親のないウインドウは 1 つのプロセス（子ウインドウは親のプロセスのもの）
+    if (OS.proc && !parent) OS.proc.spawn({ pid: win.pid, name: win.app || 'window', cmd: (win.app || 'window') + ' — ' + o.title, user: htui.user || 'root', kind: 'app', win: win,
+      ppid: htui.sessionProc ? htui.sessionProc.pid : 1, onsignal: async sig => { const ok = await win.close(sig === 'KILL'); if (ok === false) throw new Error('(' + win.pid + '): ' + o.title + ' が終了を取りやめました（保存していない変更など。強制するなら kill -KILL）'); return true; } });
     const titleEl = h('span', { class: 'win-title' }, o.title);
     const bMin = h('button', { class: 'win-btn', type: 'button', title: '最小化', 'aria-label': '最小化' }, OS.icon('min', 14));
     const bMax = h('button', { class: 'win-btn', type: 'button', title: '最大化（右クリックでスナップ配置を選ぶ）', 'aria-label': '最大化' }, OS.icon('max', 14));
@@ -1018,6 +1032,7 @@
       if (!force && win.onClose && (await win.onClose()) === false) return false;
       if (win.closed) return true;
       win.closed = true;
+      if (OS.proc && !parent) OS.proc.exit(win.pid, 0);
       win.children.slice().forEach(c => c.close(true));
       try { if (win.onDispose) win.onDispose(); } catch (e) { /* 後始末の失敗は無視 */ }
       task.remove();

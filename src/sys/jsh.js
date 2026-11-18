@@ -94,6 +94,12 @@
       this.stdin = null; this.status = 0; this.pos = null; this.depth = 0; this.extCmds = {};
       this.env = this.buildEnv();
       Object.keys(this.aliases).forEach(n => this.cmds.add(n));
+      if (OS.proc && !this.opt.service) {
+        const self = this;
+        this.proc = OS.proc.spawn({ name: 'jsh', cmd: (this.opt.login ? '-jsh' : 'jsh') + (tty === OS.tty1 ? '（tty1）' : ''), kind: 'shell', ppid: this.opt.ppid || 1,
+          onsignal: sig => { if (self.opt.onsignal) return self.opt.onsignal(sig); throw new Error('ログインシェルは kill では終了できません（exit で抜けてください）'); } });
+        Object.defineProperty(this.proc, 'user', { get: () => self.user }); // su で変わる
+      }
     }
     get home() { return users.home(this.user); }
     get admin() { const u = users.get(this.user); return !!(u && u.admin); }
@@ -604,8 +610,6 @@
       def('htui', 'htui start [環境]|stop|status|sessions|session [環境]|mode', 'HTUiの起動・終了、デスクトップ環境と画面モードの切替', htui);
       def('startx', 'startx [環境]', 'htui start と同じ', s => htui('start', s));
       def('hdm', 'hdm', 'ログイン画面（hdm）を出して HTUi を起動', () => { if (!OS.htui.start()) throw new Error('HTUi はすでに起動しています'); });
-      def('ps', 'ps', 'HTUi上のウィンドウ一覧', () => !OS.htui.running ? 'HTUi は起動していません' : ['  PID  APP        TITLE'].concat(OS.htui.wins.map(w => String(w.pid).padStart(5) + '  ' + String(w.app || '-').padEnd(9) + '  ' + w.title)).join('\n'));
-      def('kill', 'kill PID', 'ウィンドウを強制終了', pid => { const w = OS.htui.wins.find(x => x.pid === Number(pid)); if (!w) throw new Error(pid + ': そのようなPIDはありません'); w.close(true); });
       def('open', 'open パス', '関連付けられたアプリで開く（HTUiが必要）', p => { const q = A(p); if (fs.isDir(q)) OS.launch('hfile', q); else { fs.read(q); OS.openFile(q); } });
       def('hedit', 'hedit [ファイル]', 'テキストエディター', p => { OS.launch('hedit', p == null ? null : A(p)); });
       alias('edit', 'hedit');
@@ -1158,23 +1162,6 @@
         if (ex && ex.d) { tty.println('\n説明', 'accent'); ex.d.split('\n').forEach(l => tty.println('    ' + l)); }
         if (ex && ex.e) { tty.println('\n例', 'accent'); ex.e.forEach(l => tty.println('    ' + l)); }
         tty.println('\nほかの使い方: JavaScript からは ' + name + '(...) のように関数として呼べます。', 'dim');
-      });
-      def('top', 'top', '動いているウィンドウとメモリ・ストレージを 1 秒ごとに表示（Enter か Ctrl+C で終了）', async () => {
-        let done = false; const stop = tty.read('').then(() => { done = true; });
-        while (!done) {
-          tty.clear();
-          const n = new Date(), z = x => String(x).padStart(2, '0'), u = fs.usage(), pm = performance.memory;
-          tty.println('top - ' + z(n.getHours()) + ':' + z(n.getMinutes()) + ':' + z(n.getSeconds()) + '  起動から ' + since(Date.now() - (OS.bootTime || Date.now())) + '  ウィンドウ ' + (OS.htui.running ? OS.htui.wins.length : 0) + ' 個', 'accent');
-          tty.println('ストレージ: ' + fmtSize(u.used) + (u.disk && !u.total ? '' : ' / ' + fmtSize(u.total)) + (pm ? '   JS ヒープ: ' + fmtSize(pm.usedJSHeapSize) + ' / ' + fmtSize(pm.jsHeapSizeLimit) : '') + '   CPU: ' + (navigator.hardwareConcurrency || '?') + ' コア');
-          tty.println('');
-          tty.println('  PID  ユーザー    状態    アプリ       タイトル', 'dim');
-          const wins = OS.htui.running ? OS.htui.wins : [];
-          if (!wins.length) tty.println('  （HTUi のウィンドウはありません）', 'dim');
-          wins.forEach(w => tty.println(String(w.pid).padStart(5) + '  ' + String(OS.htui.user || '-').padEnd(10) + '  ' + (w.el.classList.contains('hidden') ? '最小化' : w.el.classList.contains('active') ? '前面  ' : '      ') + '  ' + String(w.app || '-').padEnd(11) + '  ' + w.title));
-          tty.println('\nEnter か Ctrl+C で終了', 'dim');
-          await Promise.race([stop, new Promise(r => setTimeout(r, 1000))]);
-        }
-        tty.clear();
       });
       return env;
     }

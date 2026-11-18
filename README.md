@@ -4,6 +4,31 @@
 
 **▶ 使ってみる: GitHub Pages で公開中**（このリポジトリの Pages の URL を開くと htmlOS i が起動し、「htmlOSを試す」か「インストール」を選べます）
 
+## htmlOS 5.0 Altair の新しいところ
+
+ブラウザーはキーボード・画面・マウスとストレージを渡すだけの「脊髄」と考え、OS の仕組みを htmlOS の中に持つための土台です。
+
+- **hinit（PID 1）とサービス管理**（`/sys/init.js`、systemd にあたる）
+  - unit（サービス・ターゲット）の依存関係（`Requires=` `Wants=`）・起動順（`After=` `Before=`）・自動再起動（`Restart=no|on-failure|always` `RestartSec=`。10 秒に 5 回まで）・有効/無効
+  - ターゲット: `basic.target` → `multi-user.target`（CUI）→ `graphical.target`（HTUi）。起動ログに「〜を起動しました」、終了時に「〜を停止しました」が出ます
+  - **systemctl**: `list-units [--all]` / `list-unit-files` / `status [unit]` / `start` `stop` `restart` `reload` / `enable` `disable [--now]` / `is-active` `is-enabled` `is-failed` / `list-dependencies` / `cat` / `daemon-reload` / `reset-failed` / `poweroff` `reboot`
+  - 自分で作る: `/etc/hinit/名前.service` に書いて `systemctl daemon-reload`（`ExecStart=` は jsh のコマンド。出力はジャーナルへ）
+
+    ```ini
+    [Unit]
+    Description=あいさつ
+    After=multi-user.target
+    [Service]
+    ExecStart=echo こんにちは
+    Restart=on-failure
+    [Install]
+    WantedBy=multi-user.target
+    ```
+  - JS からは `OS.init.register({ name, desc, after, requires, wantedBy, restart, start(ctx) })`
+- **プロセス管理**（`OS.proc`）: init・カーネル・サービス・ログインセッション・アプリのウインドウ・シェルに PID。`ps` / `kill [-TERM|-KILL|-HUP|-INT] PID` / `kill -l` / `pkill` `killall` / `pidof` / `top`。サービスを KILL すると失敗として扱い、`Restart=on-failure` なら起動し直します
+- **ログ**（`OS.journal`、journald にあたる）: **hjournal** `[-n 件数] [-u unit] [-p err] [-k] [-b -1] [-r] [-f] [--since HH:MM]`、`dmesg`。前の起動のログは `/var/log/journal/prev.json`
+- **サービスに載せ替え**: 時計（clock.service）・通知（notifyd.service）・効果音（soundd.service）・ネットワークの監視（netmon.service。オンライン/オフラインを通知）・HTUi（htui.service）・ジャーナルの保存（hjournald.service）。止めるとその機能が止まります（例: `systemctl stop clock` で時計が止まる）
+
 ## htmlOS 4.2 の新しいところ
 
 - **効果音**: 起動・ログイン・ログオフ・シャットダウン・再起動・Terminal のベル・確認のダイアログ（子ウインドウ）・エラー・通知で音が鳴ります。音のファイルは使わず、Web Audio でその場で合成したオリジナルの音です
