@@ -11366,7 +11366,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 (function () {
   'use strict';
   // コードネーム: htmlOS は恒星の名前（3.2 = Sirius、4.0 = Vega）、描画エンジン HTUi SDK は惑星の名前（2 = Jupiter、3.0 = Venus）
-  var MEDIA_VERSION = '5.1.0', MEDIA_BUILD = '36', MEDIA_CODENAME = 'Altair';
+  var MEDIA_VERSION = '5.1.1', MEDIA_BUILD = '37', MEDIA_CODENAME = 'Altair';
   var BOOT = window.BOOT = {};
   var P = 'htmlos:';
 
@@ -11488,19 +11488,19 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     catch (e) { /* まだない */ }
     var st = { ram: false, disk: true, handle: root, name: root.name, skipped: [], errors: [], onerror: null };
     // パーミッション（5.1）: モードとグループは .htmlos.json に覚えておく
-    function ext(node, r) { if (meta.p[r] != null) node.p = meta.p[r]; if (meta.g[r]) node.g = meta.g[r]; return node; }
-    map.set(K(''), JSON.stringify(ext({ t: 'd', m: Date.now(), o: meta.o[''] || 'root' }, '')));
+    function withMeta(node, r) { if (meta.p[r] != null) node.p = meta.p[r]; if (meta.g[r]) node.g = meta.g[r]; return node; }
+    map.set(K(''), JSON.stringify(withMeta({ t: 'd', m: Date.now(), o: meta.o[''] || 'root' }, '')));
     async function walk(dh, rel) {
       for await (var e of dh.values()) {
         var r = rel + '/' + e.name;
         if (!rel && e.name === HDD_META) continue;
-        if (e.kind === 'directory') { map.set(K(r), JSON.stringify(ext({ t: 'd', m: Date.now(), o: meta.o[r] || 'root' }, r))); await walk(e, r); continue; }
+        if (e.kind === 'directory') { map.set(K(r), JSON.stringify(withMeta({ t: 'd', m: Date.now(), o: meta.o[r] || 'root' }, r))); await walk(e, r); continue; }
         var f = await e.getFile();
         if (f.size > HDD_MAX) { st.skipped.push(r); continue; }
         var u = new Uint8Array(await f.arrayBuffer()), ext = e.name.lastIndexOf('.') > 0 ? e.name.slice(e.name.lastIndexOf('.') + 1).toLowerCase() : '', node = null;
         if (!HDD_BIN.test(ext)) { try { var t = new TextDecoder('utf-8', { fatal: true }).decode(u); if (t.indexOf('\u0000') < 0) node = { t: 'f', c: t }; } catch (e2) { /* バイナリ */ } }
         if (!node) node = { t: 'f', c: 'data:' + (HDD_MIME[ext] || 'application/octet-stream') + ';base64,' + b64(u), b: 1 };
-        node.m = f.lastModified || Date.now(); node.o = meta.o[r] || 'root'; ext(node, r);
+        node.m = f.lastModified || Date.now(); node.o = meta.o[r] || 'root'; withMeta(node, r);
         map.set(K(r), JSON.stringify(node)); sizes.set(r, u.length); used += u.length;
         if (++count % 40 === 0 && progress) progress(count, r);
       }
@@ -11509,13 +11509,13 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     // シンボリックリンクは PC のフォルダには作らず、.htmlos.json に覚えておく
     Object.keys(meta.l).forEach(function (r) {
       var parent = r.slice(0, r.lastIndexOf('/'));
-      if (!map.has(K(r)) && map.has(K(parent))) map.set(K(r), JSON.stringify(ext({ t: 'l', c: meta.l[r], m: Date.now(), o: meta.o[r] || 'root' }, r)));
+      if (!map.has(K(r)) && map.has(K(parent))) map.set(K(r), JSON.stringify(withMeta({ t: 'l', c: meta.l[r], m: Date.now(), o: meta.o[r] || 'root' }, r)));
       else delete meta.l[r];
     });
     // 名前付きパイプも PC のフォルダには作らない
     Object.keys(meta.f).forEach(function (r) {
       var parent = r.slice(0, r.lastIndexOf('/'));
-      if (!map.has(K(r)) && map.has(K(parent))) map.set(K(r), JSON.stringify(ext({ t: 'p', m: Date.now(), o: meta.o[r] || 'root' }, r)));
+      if (!map.has(K(r)) && map.has(K(parent))) map.set(K(r), JSON.stringify(withMeta({ t: 'p', m: Date.now(), o: meta.o[r] || 'root' }, r)));
       else delete meta.f[r];
     });
     if (progress) progress(count, '');
