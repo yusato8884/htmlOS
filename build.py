@@ -2,12 +2,12 @@
 """src/ 以下を1枚の index.html（インストールメディア兼ブートローダ）にまとめる。"""
 import pathlib, sys
 
-VERSION = '4.1.2'
+VERSION = '4.1.3'
 # コードネーム: htmlOS は恒星の名前（3.2 = Sirius、4.0 = Vega）。描画エンジン HTUi SDK は惑星の名前（/sys/htui.js の htui.sdk）
 CODENAME = 'Vega'
 # ビルド番号: リリースごとに 1 つずつ増やす（3.1.0 = 22、3.2.0 = 23〜24、4.0.0 = 25、4.0.1 = 26、4.1.0 = 27）。
 # 3.1・3.2 はこのリポジトリの外で配ったので、コミット数ではなくここに書く
-BUILD = '29'
+BUILD = '30'
 root = pathlib.Path(__file__).parent
 src = root / 'src'
 blocks = []
