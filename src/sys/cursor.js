@@ -2,7 +2,7 @@
      HTUi … 紺に白いふち（独自）   hWin … 白に黒いふち（Windows 風）   hAqua … 黒に白いふちと影（macOS 風）
      hShell … 濃い灰色に白いふち（GNOME 風）   hwc … 小さめの白に黒いふち（シンプル）
    形は場所で変わる: 矢印・リンク（指）・文字入力（I）・リサイズ（↔ ↕ ⤡ ⤢）・移動・十字（hPaint）・使えない（無効なボタン）。
-   カーソルのロック中（ブートローダの仮想カーソル）も、ここで決めた CSS の cursor をそのまま読んで同じ絵を出す。 */
+   どれも CSS の cursor で指定する（カーソルはロックしない。右クリックは contextmenu イベントで受ける）。 */
 (function () {
   const OS = window.OS;
   const P = {

@@ -74,13 +74,6 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 .panic b{color:#ff6b6b}
 #kb-notice{position:fixed;left:50%;bottom:24px;z-index:2147483647;max-width:calc(100% - 24px);transform:translate(-50%,16px);padding:10px 18px;border-radius:12px;background:rgba(20,22,26,.94);color:#f4f4f5;font:14px/1.5 system-ui,-apple-system,"Segoe UI","Hiragino Sans","Noto Sans JP",sans-serif;box-shadow:0 8px 28px rgba(0,0,0,.45);text-align:center;opacity:0;pointer-events:none;transition:opacity .25s,transform .25s}
 #kb-notice.on{opacity:1;transform:translate(-50%,0)}
-/* カーソルのロック中: 仮想カーソルと、<select> の代わりの一覧 */
-#vc-cursor{position:fixed;left:0;top:0;z-index:2147483646;pointer-events:none;will-change:transform}
-#vc-cursor img{display:block}
-#vc-cursor.cross::after{content:"クリックでこのページを操作";position:absolute;left:26px;top:20px;white-space:nowrap;padding:3px 8px;border-radius:6px;background:rgba(20,22,26,.9);color:#fff;font:12px system-ui,sans-serif}
-#vc-select{position:fixed;z-index:2147483645;max-height:60vh;overflow:auto;display:flex;flex-direction:column;padding:4px;border-radius:8px;background:#fff;color:#111;box-shadow:0 8px 24px rgba(0,0,0,.3);font:14px system-ui,sans-serif}
-#vc-select button{border:0;background:none;text-align:left;padding:6px 10px;border-radius:5px;font:inherit;color:inherit}
-#vc-select button.vh,#vc-select button.on{background:#3584e4;color:#fff}
 </style>
 </head>
 <body>
@@ -3301,7 +3294,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
      HTUi … 紺に白いふち（独自）   hWin … 白に黒いふち（Windows 風）   hAqua … 黒に白いふちと影（macOS 風）
      hShell … 濃い灰色に白いふち（GNOME 風）   hwc … 小さめの白に黒いふち（シンプル）
    形は場所で変わる: 矢印・リンク（指）・文字入力（I）・リサイズ（↔ ↕ ⤡ ⤢）・移動・十字（hPaint）・使えない（無効なボタン）。
-   カーソルのロック中（ブートローダの仮想カーソル）も、ここで決めた CSS の cursor をそのまま読んで同じ絵を出す。 */
+   どれも CSS の cursor で指定する（カーソルはロックしない。右クリックは contextmenu イベントで受ける）。 */
 (function () {
   const OS = window.OS;
   const P = {
@@ -10015,7 +10008,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 (function () {
   'use strict';
   // コードネーム: htmlOS は恒星の名前（3.2 = Sirius、4.0 = Vega）、描画エンジン HTUi SDK は惑星の名前（2 = Jupiter、3.0 = Venus）
-  var MEDIA_VERSION = '4.1.1', MEDIA_BUILD = '28', MEDIA_CODENAME = 'Vega';
+  var MEDIA_VERSION = '4.1.2', MEDIA_BUILD = '29', MEDIA_CODENAME = 'Vega';
   var BOOT = window.BOOT = {};
   var P = 'htmlos:';
 
@@ -10483,272 +10476,23 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     n.textContent = text; n.offsetWidth; n.className = 'on';
     clearTimeout(n._t); n._t = setTimeout(function () { n.className = ''; }, 4000);
   }
-  // ---- カーソルのロック（Pointer Lock）。キーボードの捕捉と一緒に始める。
-  //   ロック中は本物のカーソルが消えて画面の外に出なくなるので、htmlOS が描いた「仮想カーソル」を動かし、
-  //   その位置にある要素へマウス・ポインターのイベントを作って送る（エミュレーターと同じしくみ）。
-  //   ・カーソルの絵は、その場所の CSS の cursor（htmlOS のテーマの SVG）をそのまま読んで出す
-  //   ・:hover / :active の見た目は、同じ規則を .vh / .va のクラスで写したスタイルを作って再現する
-  //   ・ホイールのスクロール、<select> の選択、スライダー、文字のドラッグ選択も、ここで代わりに行う
-  //   ・同じ出どころの iframe（hBrowser のプロキシ表示など）の中にもイベントを送る。
-  //     別の出どころの iframe の上でクリックしたら、ロックを外してそのページを直接操作できるようにする
-  var VC = BOOT.vc = { capture: null, on: false, x: 0, y: 0, rx: innerWidth / 2, ry: innerHeight / 2, el: null, img: null, hover: [], active: [], down: null, clicks: { n: 0, t: 0, x: 0, y: 0 }, sel: null, range: null, last: null };
-  function vcSvg(body, hx, hy) { return ['data:image/svg+xml,' + encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'>" + body + '</svg>'), hx, hy]; }
-  var VC_FALLBACK = {
-    default: vcSvg("<path d='M5 2.5v16.8l4.3-4.1 2.9 6.6 2.7-1.2-2.9-6.5h6.2z' fill='#fff' stroke='#000' stroke-width='1.2'/>", 5, 3),
-    pointer: vcSvg("<path d='M9.5 3.6a1.5 1.5 0 0 1 3 0V10h.4V8.8a1.5 1.5 0 0 1 3 0V10h.4V9.8a1.5 1.5 0 0 1 3 0v6c0 3.4-2.2 5.7-5.6 5.7h-1.3c-1.9 0-3.4-.8-4.6-2.3L4.6 15a1.45 1.45 0 0 1 2.3-1.8L9.5 15.6z' fill='#fff' stroke='#000' stroke-width='1.2'/>", 11, 3),
-    text: vcSvg("<path d='M8.6 4h6.8M12 4v16M8.6 20h6.8' fill='none' stroke='#fff' stroke-width='4' stroke-linecap='round'/><path d='M8.6 4h6.8M12 4v16M8.6 20h6.8' fill='none' stroke='#000' stroke-width='1.8' stroke-linecap='round'/>", 12, 12)
-  };
-  function vcShape(t) {
-    var c = ''; try { c = getComputedStyle(t).cursor; } catch (e) { /* 読めなければ矢印 */ }
-    var m = c.match(/url\("((?:[^"\\]|\\.)*)"\)\s*(-?\d+(?:\.\d+)?)?\s*(-?\d+(?:\.\d+)?)?/) || c.match(/url\(([^)"\s]+)\)\s*(-?\d+(?:\.\d+)?)?\s*(-?\d+(?:\.\d+)?)?/);
-    if (m) return [m[1], Number(m[2]) || 0, Number(m[3]) || 0];
-    var kw = c.split(',').pop().trim();
-    if (kw === 'auto') kw = t && /^(INPUT|TEXTAREA)$/.test(t.tagName) || (t && t.isContentEditable) ? 'text' : 'default';
-    return VC_FALLBACK[kw] || VC_FALLBACK.default;
-  }
-  // 位置 (x, y) にある要素。同じ出どころの iframe なら、その中の要素まで降りる
-  function vcTarget(x, y) {
-    var doc = document, ox = 0, oy = 0, el = null, view = window;
-    for (var depth = 0; depth < 4; depth++) {
-      el = doc.elementFromPoint(x - ox, y - oy);
-      if (!el || el.tagName !== 'IFRAME') break;
-      var inner = null; try { inner = el.contentDocument; } catch (e) { inner = null; }
-      if (!inner || !inner.documentElement) return { el: el, cross: true, view: view, ox: ox, oy: oy };
-      var r = el.getBoundingClientRect(); ox += r.left + el.clientLeft; oy += r.top + el.clientTop;
-      doc = inner; view = el.contentWindow;
-    }
-    return { el: el || doc.documentElement, view: view, ox: ox, oy: oy, doc: doc };
-  }
-  function vcFire(type, t, src, extra) {
-    if (!t.el) return true;
-    // 本物のブラウザと同じく、使えない（disabled）ボタンなどには click を出さない（合成のイベントだと Chrome は出してしまう）
-    if (/^(click|dblclick|auxclick)$/.test(type) && t.el.closest && t.el.closest(':disabled')) return false;
-    var V = t.view || window, x = VC.x - t.ox, y = VC.y - t.oy;
-    var init = { bubbles: !/enter$|leave$/.test(type), cancelable: !/enter$|leave$/.test(type), composed: true, view: V,
-      clientX: x, clientY: y, screenX: VC.x, screenY: VC.y, button: src ? src.button : 0, buttons: src ? src.buttons : 0,
-      ctrlKey: !!(src && src.ctrlKey), shiftKey: !!(src && src.shiftKey), altKey: !!(src && src.altKey), metaKey: !!(src && src.metaKey),
-      movementX: src ? src.movementX || 0 : 0, movementY: src ? src.movementY || 0 : 0, detail: 0, pointerId: 1, pointerType: 'mouse', isPrimary: true, width: 1, height: 1, pressure: src && src.buttons ? .5 : 0 };
-    for (var k in extra) init[k] = extra[k];
-    var C = type.indexOf('pointer') === 0 ? (V.PointerEvent || PointerEvent) : type === 'wheel' ? (V.WheelEvent || WheelEvent) : (V.MouseEvent || MouseEvent);
-    return t.el.dispatchEvent(new C(type, init));
-  }
-  // :hover / :active を .vh / .va に写したスタイルを作る（文書ごとに 1 回。スタイルが増えたら作り直す）
-  function vcHoverCss(doc) {
-    var out = [];
-    function walk(rules, wrapPre, wrapPost) {
-      for (var i = 0; i < rules.length; i++) {
-        var r = rules[i];
-        if (r.selectorText && /:hover|:active/.test(r.selectorText)) out.push(wrapPre + r.selectorText.replace(/:hover/g, '.vh').replace(/:active/g, '.va') + '{' + r.style.cssText + '}' + wrapPost);
-        else if (r.cssRules && r.media) walk(r.cssRules, wrapPre + '@media ' + r.media.mediaText + '{', '}' + wrapPost);
-        else if (r.cssRules && r.conditionText) walk(r.cssRules, wrapPre + '@supports ' + r.conditionText + '{', '}' + wrapPost);
-      }
-    }
-    for (var i = 0; i < doc.styleSheets.length; i++) { var sh = doc.styleSheets[i]; if (sh.ownerNode && sh.ownerNode.id === 'vc-hover') continue; try { walk(sh.cssRules, '', ''); } catch (e) { /* 読めないシートは飛ばす */ } }
-    var st = doc.getElementById('vc-hover');
-    if (!st) { st = doc.createElement('style'); st.id = 'vc-hover'; (doc.head || doc.documentElement).appendChild(st); }
-    st.textContent = out.join('\n');
-    doc._vcSheets = doc.styleSheets.length;
-  }
-  function chainOf(el) { var l = []; for (var n = el; n && n.nodeType === 1; n = n.parentElement) l.push(n); return l; }
-  function vcSetClass(list, next, cls) {
-    list.forEach(function (n) { if (next.indexOf(n) < 0) n.classList.remove(cls); });
-    next.forEach(function (n) { n.classList.add(cls); });
-    return next;
-  }
-  function vcDraw(t) {
-    var s = vcShape(t.cross ? null : t.el);
-    if (t.cross) s = VC_FALLBACK.pointer;
-    if (VC.img.getAttribute('src') !== s[0]) VC.img.setAttribute('src', s[0]);
-    VC.el.style.transform = 'translate(' + Math.round(VC.x - s[1]) + 'px,' + Math.round(VC.y - s[2]) + 'px)';
-    VC.el.classList.toggle('cross', !!t.cross);
-  }
-  function vcMove(src) {
-    var t = vcTarget(VC.x, VC.y);
-    if (t.doc && t.doc._vcSheets !== t.doc.styleSheets.length) vcHoverCss(t.doc);
-    var prev = VC.last;
-    if (!prev || prev.el !== t.el) {
-      if (prev && prev.el) { vcFire('pointerout', prev, src); vcFire('mouseout', prev, src); }
-      var oldC = VC.hover, newC = t.cross ? [] : chainOf(t.el);
-      oldC.forEach(function (n) { if (newC.indexOf(n) < 0) { vcFire('pointerleave', { el: n, view: prev.view, ox: prev.ox, oy: prev.oy }, src); vcFire('mouseleave', { el: n, view: prev.view, ox: prev.ox, oy: prev.oy }, src); } });
-      if (t.el) { vcFire('pointerover', t, src); vcFire('mouseover', t, src); }
-      newC.slice().reverse().forEach(function (n) { if (oldC.indexOf(n) < 0) { vcFire('pointerenter', { el: n, view: t.view, ox: t.ox, oy: t.oy }, src); vcFire('mouseenter', { el: n, view: t.view, ox: t.ox, oy: t.oy }, src); } });
-      VC.hover = vcSetClass(VC.hover, newC, 'vh');
-    }
-    VC.last = t;
-    vcFire('pointermove', VC.capture ? { el: VC.capture, view: window, ox: 0, oy: 0 } : t, src); vcFire('mousemove', t, src);
-    // ドラッグでの文字選択とスライダー
-    if (VC.down && VC.down.range && src.buttons & 1) {
-      var r = (t.doc || document).caretRangeFromPoint && (t.doc || document).caretRangeFromPoint(VC.x - t.ox, VC.y - t.oy);
-      if (r) { try { (t.view || window).getSelection().setBaseAndExtent(VC.down.range.startContainer, VC.down.range.startOffset, r.startContainer, r.startOffset); } catch (e) { /* 選べない場所 */ } }
-    }
-    if (VC.down && VC.down.slider && src.buttons & 1) vcSlide(VC.down.slider, false);
-    vcDraw(t);
-  }
-  function vcSlide(inp, done) {
-    var r = inp.getBoundingClientRect(), min = Number(inp.min || 0), max = Number(inp.max || 100), step = Number(inp.step || 1) || 1;
-    var x = VC.x - (VC.down ? VC.down.t.ox : 0), v = min + Math.max(0, Math.min(1, (x - r.left) / r.width)) * (max - min);
-    v = Math.round(v / step) * step;
-    if (String(v) !== inp.value) { inp.value = v; inp.dispatchEvent(new Event('input', { bubbles: true })); }
-    if (done) inp.dispatchEvent(new Event('change', { bubbles: true }));
-  }
-  // <select> は本物の一覧が開けないので、カーソルの下に自前の一覧を出す
-  function vcSelect(s, t) {
-    var old = document.getElementById('vc-select'); if (old) old.remove();
-    var box = document.createElement('div'); box.id = 'vc-select';
-    var r = s.getBoundingClientRect();
-    Array.prototype.forEach.call(s.options, function (o) {
-      var b = document.createElement('button'); b.type = 'button'; b.textContent = o.textContent; if (o.selected) b.className = 'on'; b.disabled = o.disabled;
-      b.addEventListener('click', function () { s.value = o.value; s.dispatchEvent(new Event('input', { bubbles: true })); s.dispatchEvent(new Event('change', { bubbles: true })); box.remove(); });
-      box.appendChild(b);
-    });
-    box.style.left = Math.round(r.left + t.ox) + 'px'; box.style.top = Math.round(r.bottom + t.oy + 2) + 'px'; box.style.minWidth = Math.round(r.width) + 'px';
-    document.body.appendChild(box);
-    var br = box.getBoundingClientRect();
-    if (br.bottom > innerHeight - 4) box.style.top = Math.max(4, r.top + t.oy - br.height - 2) + 'px';
-    if (br.right > innerWidth - 4) box.style.left = Math.max(4, innerWidth - br.width - 4) + 'px';
-  }
-  function vcDown(src) {
-    var t = vcTarget(VC.x, VC.y);
-    var sel = document.getElementById('vc-select'); if (sel && !sel.contains(t.el)) sel.remove();
-    if (t.cross) {
-      // 別の出どころのページ: 中にはイベントを送れないので、ロックを外して直接操作してもらう
-      document.exitPointerLock();
-      kbNotice('このページを操作できるように、カーソルのロックを外しました。htmlOS のほかの場所をクリックすると、またロックします');
-      return;
-    }
-    VC.down = { t: t, button: src.button, x: VC.x, y: VC.y, range: null, slider: null };
-    VC.active = vcSetClass(VC.active, chainOf(t.el), 'va');
-    vcFire('pointerdown', t, src);
-    var ok = vcFire('mousedown', t, src);
-    if (ok && src.button === 0) {
-      var el = t.el, f = el.closest && el.closest('input,textarea,select,button,a[href],[tabindex],[contenteditable=""],[contenteditable="true"]');
-      var d = t.doc || document, act = d.activeElement;
-      if (f) { try { f.focus({ preventScroll: true }); } catch (e) { /* フォーカスできない */ } }
-      else if (act && act !== d.body && act.blur) act.blur();
-      if (f && f.tagName === 'INPUT' && f.type === 'range' && !f.disabled) { VC.down.slider = f; vcSlide(f, false); }
-      else if (!f && getComputedStyle(el).userSelect !== 'none' && d.caretRangeFromPoint) {
-        var r = d.caretRangeFromPoint(VC.x - t.ox, VC.y - t.oy);
-        if (r) { VC.down.range = r; try { (t.view || window).getSelection().collapse(r.startContainer, r.startOffset); } catch (e) { /* 選べない */ } }
-      }
-    }
-    if (src.button === 2) vcFire('contextmenu', t, src);
-  }
-  function vcUp(src) {
-    var d = VC.down; VC.down = null;
-    VC.active = vcSetClass(VC.active, [], 'va');
-    var t = vcTarget(VC.x, VC.y), cap = VC.capture;
-    if (cap) { VC.capture = null; vcFire('pointerup', { el: cap, view: window, ox: 0, oy: 0 }, src); vcFire('lostpointercapture', { el: cap, view: window, ox: 0, oy: 0 }, src); }
-    if (t.cross) return;
-    if (!cap) vcFire('pointerup', t, src);
-    vcFire('mouseup', t, src);
-    if (!d) return;
-    if (d.slider) { vcSlide(d.slider, true); return; }
-    // click は押した要素と離した要素の共通の祖先に出す
-    var a = chainOf(d.t.el), b = t.el, common = null;
-    for (var n = b; n; n = n.parentElement) if (a.indexOf(n) >= 0) { common = n; break; }
-    if (!common) return;
-    var now = Date.now(), c = VC.clicks;
-    c.n = now - c.t < 450 && Math.abs(VC.x - c.x) < 6 && Math.abs(VC.y - c.y) < 6 && c.b === src.button ? c.n + 1 : 1; c.t = now; c.x = VC.x; c.y = VC.y; c.b = src.button;
-    var tc = { el: common, view: t.view, ox: t.ox, oy: t.oy };
-    if (src.button === 0) {
-      var ok = vcFire('click', tc, src, { detail: c.n });
-      if (c.n === 2) vcFire('dblclick', tc, src, { detail: 2 });
-      var s = common.closest && common.closest('select');
-      if (ok && s && !s.disabled) vcSelect(s, t);
-    } else vcFire('auxclick', tc, src, { detail: c.n });
-  }
-  function vcWheel(src) {
-    var t = vcTarget(VC.x, VC.y); if (t.cross) return;
-    var ok = vcFire('wheel', t, src, { deltaX: src.deltaX, deltaY: src.deltaY, deltaZ: src.deltaZ, deltaMode: src.deltaMode });
-    if (!ok || src.ctrlKey) return;
-    var k = src.deltaMode === 1 ? 16 : src.deltaMode === 2 ? innerHeight : 1, dx = src.deltaX * k, dy = src.deltaY * k;
-    for (var n = t.el; n && n.nodeType === 1; n = n.parentElement) {
-      var cs = getComputedStyle(n);
-      var canY = dy && /(auto|scroll)/.test(cs.overflowY) && n.scrollHeight > n.clientHeight + 1 && (dy > 0 ? n.scrollTop + n.clientHeight < n.scrollHeight - 1 : n.scrollTop > 0);
-      var canX = dx && /(auto|scroll)/.test(cs.overflowX) && n.scrollWidth > n.clientWidth + 1;
-      if (canY || canX) { n.scrollBy({ left: dx, top: dy }); return; }
-    }
-    var se = (t.doc || document).scrollingElement; if (se) se.scrollBy({ left: dx, top: dy });
-  }
-  function vcStart() {
-    if (!VC.el) {
-      VC.el = el('div'); VC.el.id = 'vc-cursor'; VC.img = document.createElement('img'); VC.img.alt = ''; VC.el.appendChild(VC.img);
-      // 一部のアプリは setPointerCapture を呼ぶ。作ったイベントの pointerId では失敗するので、ロック中は失敗を無視する
-      // ロック中はポインターのキャプチャも代わりに覚えて、そのあいだのポインターのイベントはキャプチャした要素へ送る
-      var orig = Element.prototype.setPointerCapture;
-      Element.prototype.setPointerCapture = function (id) { if (VC.on) { VC.capture = this; return; } return orig.call(this, id); };
-      var origR = Element.prototype.releasePointerCapture;
-      Element.prototype.releasePointerCapture = function (id) { if (VC.on) { if (VC.capture === this) VC.capture = null; return; } try { return origR.call(this, id); } catch (e) { /* もう外れている */ } };
-      var origH = Element.prototype.hasPointerCapture;
-      Element.prototype.hasPointerCapture = function (id) { return VC.on ? VC.capture === this : origH.call(this, id); };
-    }
-    document.body.appendChild(VC.el);
-    VC.on = true; VC.x = VC.rx; VC.y = VC.ry; VC.last = null;
-    document.documentElement.classList.add('vc-on');
-    vcHoverCss(document);
-    vcMove({ buttons: 0, button: 0 });
-  }
-  function vcStop() {
-    VC.on = false; VC.down = null; VC.capture = null;
-    VC.hover = vcSetClass(VC.hover, [], 'vh'); VC.active = vcSetClass(VC.active, [], 'va');
-    if (VC.el) VC.el.remove();
-    var s = document.getElementById('vc-select'); if (s) s.remove();
-    document.documentElement.classList.remove('vc-on');
-  }
-  BOOT.vcStart = vcStart; BOOT.vcStop = vcStop; // テスト用
-  function lockPointer() { try { var p = document.documentElement.requestPointerLock(); if (p && p.catch) p.catch(function () { /* 許可されなければ何もしない */ }); } catch (e) { /* 使えない */ } }
-  document.addEventListener('pointerlockchange', function () { if (document.pointerLockElement) vcStart(); else vcStop(); });
-  // タッチ・ペンのイベントか（タッチから作られた互換の mouse / click も含む）
-  function vcTouchy(e) {
-    if (e.pointerType && e.pointerType !== 'mouse') return true;
-    if (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) return true;
-    return !!(e.touches || e.changedTouches);
-  }
-  function vcTouchOut(e) {
-    var p = (e.changedTouches && e.changedTouches[0]) || e;
-    if (p && typeof p.clientX === 'number') { VC.rx = p.clientX; VC.ry = p.clientY; }
-    vcStop();
-    if (document.pointerLockElement) { try { document.exitPointerLock(); } catch (err) { /* 外せない */ } }
-  }
-  BOOT.vcTouchy = vcTouchy;
-  ['touchstart', 'pointerdown'].forEach(function (type) {
-    window.addEventListener(type, function (e) { if (e.isTrusted && VC.on && vcTouchy(e)) vcTouchOut(e); }, { capture: true, passive: true });
-  });
-  // ロック中の本物のマウスのイベントは、ここで止めて（アプリには届けない）、仮想カーソルの位置へ作り直して送る
-  ['pointerdown', 'pointerup', 'pointermove', 'mousedown', 'mouseup', 'mousemove', 'click', 'dblclick', 'auxclick', 'contextmenu', 'wheel'].forEach(function (type) {
-    window.addEventListener(type, function (e) {
-      if (!e.isTrusted || vcTouchy(e)) return;
-      if (!VC.on) { if (type === 'pointermove' || type === 'mousemove') { VC.rx = e.clientX; VC.ry = e.clientY; } return; }
-      e.stopImmediatePropagation(); if (type !== 'pointermove' && type !== 'mousemove') e.preventDefault();
-      if (type === 'pointermove') { VC.x = Math.max(0, Math.min(innerWidth - 1, VC.x + e.movementX)); VC.y = Math.max(0, Math.min(innerHeight - 1, VC.y + e.movementY)); vcMove(e); }
-      else if (type === 'pointerdown') vcDown(e);
-      else if (type === 'pointerup') vcUp(e);
-      else if (type === 'wheel') vcWheel(e);
-    }, { capture: true, passive: false });
-  });
-  addEventListener('resize', function () { if (VC.on) { VC.x = Math.min(VC.x, innerWidth - 1); VC.y = Math.min(VC.y, innerHeight - 1); } });
   var kbLocked = false, kbWarned = false;
   document.addEventListener('pointerdown', function (e) {
     if (e.pointerType !== 'mouse' || e.button !== 0 || (navigator.webdriver && !window.__kblockTest)) return;
-    if (VC.on) return;
-    // 全画面でキーボードを捕捉しているのにカーソルのロックだけ外れている（別のページを操作したあとなど）: クリックでまたロック
-    if (document.fullscreenElement) { if (kbLocked) lockPointer(); return; }
+    if (document.fullscreenElement) return;
     if (!navigator.keyboard || !navigator.keyboard.lock || !document.documentElement.requestFullscreen) {
       if (!kbWarned) { kbWarned = true; kbNotice('このブラウザはキーボードの捕捉（Keyboard Lock）に対応していません。Chrome か Edge で使えます'); }
       return;
     }
-    VC.rx = e.clientX; VC.ry = e.clientY;
-    lockPointer();
     document.documentElement.requestFullscreen({ navigationUI: 'hide' })
       .then(function () { return navigator.keyboard.lock(LOCK_KEYS); })
-      .then(function () { kbLocked = true; kbNotice('⌨ キーボードとカーソルを捕捉しました。Alt+Tab や Super キーも htmlOS に届きます（Esc 長押しで解除）'); })
+      .then(function () { kbLocked = true; kbNotice('⌨ キーボードを捕捉しました。Alt+Tab や Super キーも htmlOS に届きます（Esc 長押しで解除）'); })
       .catch(function (err) { kbNotice('キーボードを捕捉できませんでした: ' + ((err && err.message) || err)); });
   }, true);
   document.addEventListener('fullscreenchange', function () {
     if (document.fullscreenElement || !kbLocked) return;
     kbLocked = false;
-    if (document.pointerLockElement) document.exitPointerLock();
-    kbNotice('キーボードとカーソルの捕捉を解除しました。クリックするとまた捕捉します');
+    kbNotice('キーボードの捕捉を解除しました。クリックするとまた捕捉します');
   });
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
   function show(node, cls) { scr.style.display = 'flex'; scr.className = cls || ''; scr.textContent = ''; scr.appendChild(node); }
