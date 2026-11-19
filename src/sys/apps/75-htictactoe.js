@@ -5,7 +5,7 @@
   const CFG = '/.config/htictactoe.json';
   OS.registerApp({
     id: 'htictactoe', name: 'hTic-tac-toe', icon: 'ttt', color: '#e66100', desc: '三目並べ（CPU・二人で対戦、マスの数を変えられる）',
-    launch() {
+    launch(arg) {
       const fsx = OS.htui.fs, home = OS.users.home(OS.htui.user);
       let cfg = { n: 3, k: 3, mode: 'cpu2', level: 'normal' }; // mode: cpu2 = 自分が先手（×）、cpu1 = CPU が先手、pvp = 二人
       try { cfg = Object.assign(cfg, JSON.parse(fsx.read(home + CFG))); } catch (e) { /* 初回 */ }
@@ -160,7 +160,16 @@
         const n = N(), mv = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -n, ArrowDown: n }[e.key];
         if (mv) { e.preventDefault(); const j = i + mv; if (j >= 0 && j < cells.length && !(Math.abs(mv) === 1 && ((j / n) | 0) !== ((i / n) | 0))) cells[j].focus(); }
       });
-      paintBar(); newGame();
+      win.onHibernate = () => ({ n: N(), B: B, turn: turn, over: over, line: line, last: last, score: score, msg: over ? status.textContent : '' });
+      const rs = arg && arg.resume;
+      paintBar();
+      if (rs && rs.n === N() && Array.isArray(rs.B) && rs.B.length === N() * N()) {
+        Object.assign(score, rs.score || {});
+        B = rs.B; turn = rs.turn === 'O' ? 'O' : 'X'; over = !!rs.over; line = rs.line || null; last = rs.last == null ? -1 : rs.last;
+        board.style.setProperty('--n', N()); board.textContent = '';
+        for (let i = 0; i < B.length; i++) board.append(h('button', { class: 'tt-cell', type: 'button', role: 'gridcell', 'aria-label': (((i / N()) | 0) + 1) + ' 行 ' + (i % N() + 1) + ' 列', onclick: () => play(i, true) }));
+        paint(); if (over) status.textContent = rs.msg || ''; else next();
+      } else newGame();
       return win;
     }
   });

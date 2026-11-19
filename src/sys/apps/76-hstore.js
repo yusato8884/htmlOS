@@ -57,7 +57,7 @@
 
   OS.registerApp({
     id: 'hstore', name: 'hStore', icon: 'box', color: '#ed5b00', desc: 'パッケージマネージャ',
-    launch() {
+    launch(arg) {
       const fsx = OS.htui.fs, home = OS.users.home(OS.htui.user);
       const admin = () => true; // 追加・削除は誰でも始められるが、実行の直前に root のパスワードを確認する
       const win = OS.htui.open({ title: 'hStore', icon: 'box', w: 640, h: 460, app: 'hstore' });

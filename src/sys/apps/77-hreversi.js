@@ -50,7 +50,7 @@
 
   OS.registerApp({
     id: 'hreversi', name: 'hReversi', icon: 'reversi', color: '#26a269', desc: 'リバーシ（CPU・二人で対戦）',
-    launch() {
+    launch(arg) {
       const fsx = OS.htui.fs, home = OS.users.home(OS.htui.user);
       let cfg = { mode: 'cpu2', level: 'normal', hints: true }; // cpu2 = 自分が黒（先手）、cpu1 = 自分が白、pvp = 二人
       try { cfg = Object.assign(cfg, JSON.parse(fsx.read(home + CFG))); } catch (e) { /* 初回 */ }
@@ -143,7 +143,13 @@
         e.preventDefault(); let j = i + mv;
         if (j >= 0 && j < 64 && !(Math.abs(mv) === 1 && ((j / 8) | 0) !== ((i / 8) | 0))) { cells[j].disabled = false; cells[j].focus(); }
       });
-      paintBar(); newGame();
+      win.onHibernate = () => ({ B: B, turn: turn, hist: hist.slice(-60), over: over, last: last });
+      const rs = arg && arg.resume;
+      paintBar();
+      if (rs && Array.isArray(rs.B) && rs.B.length === 64) {
+        B = rs.B; turn = rs.turn === -1 ? -1 : 1; hist = rs.hist || []; over = false; last = rs.last == null ? -1 : rs.last; flipped = []; busy = false;
+        if (rs.over) finish(); else { paint(); next(); }
+      } else newGame();
       return win;
     }
   });

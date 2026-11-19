@@ -4,7 +4,7 @@
   const OS = window.OS, h = OS.h, path = OS.path, ui = OS.ui;
   OS.registerApp({
     id: 'hserial', name: 'hSerial', icon: 'plug', color: '#3a944a', desc: 'シリアルモニター',
-    launch() {
+    launch(arg) {
       const fsx = OS.htui.fs, home = OS.users.home(OS.htui.user);
       const win = OS.htui.open({ title: 'hSerial', icon: 'plug', w: 680, h: 440, app: 'hserial' });
       let port = null, reader = null, writer = null, text = '', pendingEsc = '';

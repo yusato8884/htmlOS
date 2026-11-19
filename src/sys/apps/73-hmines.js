@@ -11,7 +11,7 @@
   };
   OS.registerApp({
     id: 'hmines', name: 'hMines', icon: 'mine', color: '#5a7d2a', desc: '地雷を避けてマスを開けるパズル',
-    launch() {
+    launch(arg) {
       const cfgPath = OS.users.home(OS.htui.user) + '/.config/hmines.json';
       const loadCfg = () => { try { return JSON.parse(OS.htui.fs.read(cfgPath)); } catch (e) { return {}; } };
       const saveCfg = c => { try { OS.htui.fs.write(cfgPath, JSON.stringify(c, null, 1)); } catch (e) { /* 保存できなくても遊べる */ } };
@@ -178,7 +178,16 @@
       win.el.addEventListener('keydown', e => { if (e.key === 'F2') { e.preventDefault(); newGame(); } });
       win.onFocus = () => { if (cells && cells[cursor]) cells[cursor].el.focus({ preventScroll: true }); };
 
+      win.onHibernate = () => (state === 'ready' || state === 'play') ? { level: level, cells: cells.map(c => (c.mine ? 1 : 0) | (c.open ? 2 : 0) | (c.flag ? 4 : 0) | (c.n << 3)), opened: opened, flags: flags, state: state, sec: state === 'play' ? (Date.now() - t0) / 1000 : 0, cursor: cursor } : null;
+      const rs = arg && arg.resume;
+      if (rs && LEVELS[rs.level]) { level = rs.level; sel.value = level; }
       newGame();
+      if (rs && LEVELS[rs.level] && Array.isArray(rs.cells) && rs.cells.length === cells.length) {
+        rs.cells.forEach((v, i) => { const c = cells[i]; c.mine = !!(v & 1); c.open = !!(v & 2); c.flag = !!(v & 4); c.n = v >> 3; paint(i); });
+        opened = rs.opened | 0; flags = rs.flags | 0; state = rs.state === 'play' ? 'play' : 'ready';
+        if (state === 'play') { t0 = Date.now() - (+rs.sec || 0) * 1000; tick = setInterval(paintStat, 250); }
+        paintStat();
+      }
       setTimeout(fit, 0);
       return win;
     }

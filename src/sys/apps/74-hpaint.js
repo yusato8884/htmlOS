@@ -190,8 +190,19 @@
         else if (k === '+' || k === '=' || k === ';') { e.preventDefault(); step(1); } else if (k === '-') { e.preventDefault(); step(-1); } else if (k === '0') { e.preventDefault(); setZoom(1); }
       });
       win.onClose = discardOk;
+      // ハイバーネート: 絵そのものを書き出す（元に戻す履歴は残さない）
+      win.onHibernate = () => ({ img: cv.toDataURL('image/png'), w: cv.width, h: cv.height, file: file, dirty: dirty, tool: tool, color: color, size: size, zoom: zoom, fit: fitMode });
       blank(); setTool('pen'); setColor(color); status(); requestAnimationFrame(fit);
       if (typeof arg === 'string' && arg && fsx.exists(arg)) load(arg);
+      else if (arg && arg.resume) {
+        const r = arg.resume;
+        file = r.file || null; setTool(r.tool || 'pen'); setColor(r.color || color);
+        size = r.size || 4; sizeInp.value = String(size);
+        cv.width = r.w || 640; cv.height = r.h || 400; blank(); setDirty(!!r.dirty);
+        const img = new Image();
+        img.onload = () => { ctx.drawImage(img, 0, 0); if (r.fit === false) { zoom = r.zoom || 1; fitMode = false; applySize(); status(); } else fit(); };
+        img.src = r.img;
+      }
       return win;
     }
   });

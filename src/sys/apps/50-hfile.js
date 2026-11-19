@@ -177,8 +177,11 @@
       win.onDispose = unwatch;
       win.body.addEventListener('keydown', e => { if (e.target.closest('input')) return; if (e.key === 'Delete' && sel) { e.preventDefault(); del(e.shiftKey); } else if (e.key === 'F2' && sel && !trash.inside(dir)) { e.preventDefault(); rename(); } });
       win.onFocus = () => { let sig = null; try { sig = fsx.list(dir).join('|'); } catch (e) { /* 消えた */ } if (sig !== lastSig) render(); else status(); };
-      const start = typeof arg === 'string' && arg && OS.fs.isDir(arg) ? arg : home;
-      dir = start; render();
+      win.onHibernate = () => ({ dir: dir, sel: sel, back: back.slice(-30), hidden: showHidden });
+      const rs = arg && arg.resume;
+      if (rs) { showHidden = !!rs.hidden; bHidden.classList.toggle('on', showHidden); back.push.apply(back, (rs.back || []).filter(p => OS.fs.isDir(p))); }
+      const start = rs && OS.fs.isDir(rs.dir) ? rs.dir : typeof arg === 'string' && arg && OS.fs.isDir(arg) ? arg : home;
+      dir = start; if (rs && rs.sel && OS.fs.exists(rs.sel)) sel = rs.sel; render();
       if (typeof arg === 'string' && arg && !OS.fs.isDir(arg) && OS.fs.exists(arg)) { dir = path.dir(arg); sel = arg; render(); }
       return win;
     }

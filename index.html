@@ -1662,7 +1662,10 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         } catch (e) { status.textContent = ''; ui.alert('ダウンロードできませんでした。\n' + e.message); }
       }
 
-      go(typeof arg === 'string' && arg ? arg : 'about:home');
+      win.onHibernate = () => ({ cur: cur, hist: hist.slice(-50), hi: Math.min(hi, 49) - Math.max(0, hist.length - 50) });
+      const rs = arg && arg.resume;
+      if (rs && Array.isArray(rs.hist) && rs.hist.length) { hist.push.apply(hist, rs.hist); hi = Math.max(0, Math.min(rs.hi | 0, hist.length - 1)); go(rs.cur || hist[hi], false); }
+      else go(typeof arg === 'string' && arg ? arg : 'about:home');
       return win;
     }
   });
@@ -1723,7 +1726,12 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         pc.value = '';
       });
       win.onDispose = release;
-      if (typeof arg === 'string' && arg) openPath(arg);
+      win.onHibernate = () => { const m = stage.querySelector('audio,video'); return cur ? { cur: cur, t: m ? m.currentTime : 0 } : null; };
+      if (arg && arg.resume && arg.resume.cur && fsx.exists(arg.resume.cur)) {
+        openPath(arg.resume.cur);
+        const m = stage.querySelector('audio,video'), t = +arg.resume.t || 0;
+        if (m && t) m.addEventListener('loadedmetadata', () => { try { m.currentTime = t; } catch (e) { /* 戻せなくてもよい */ } }, { once: true });
+      } else if (typeof arg === 'string' && arg) openPath(arg);
       else { stage.append(h('p', { class: 'hp-note' }, '「開く」で hFS 内のファイルを、「PCから」「URL」で保存せずに再生できます。大きな動画は LocalStorage に入らないので「PCから」がおすすめです。')); bPrev.disabled = bNext.disabled = true; }
       return win;
     }
@@ -1910,8 +1918,11 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       win.onDispose = unwatch;
       win.body.addEventListener('keydown', e => { if (e.target.closest('input')) return; if (e.key === 'Delete' && sel) { e.preventDefault(); del(e.shiftKey); } else if (e.key === 'F2' && sel && !trash.inside(dir)) { e.preventDefault(); rename(); } });
       win.onFocus = () => { let sig = null; try { sig = fsx.list(dir).join('|'); } catch (e) { /* 消えた */ } if (sig !== lastSig) render(); else status(); };
-      const start = typeof arg === 'string' && arg && OS.fs.isDir(arg) ? arg : home;
-      dir = start; render();
+      win.onHibernate = () => ({ dir: dir, sel: sel, back: back.slice(-30), hidden: showHidden });
+      const rs = arg && arg.resume;
+      if (rs) { showHidden = !!rs.hidden; bHidden.classList.toggle('on', showHidden); back.push.apply(back, (rs.back || []).filter(p => OS.fs.isDir(p))); }
+      const start = rs && OS.fs.isDir(rs.dir) ? rs.dir : typeof arg === 'string' && arg && OS.fs.isDir(arg) ? arg : home;
+      dir = start; if (rs && rs.sel && OS.fs.exists(rs.sel)) sel = rs.sel; render();
       if (typeof arg === 'string' && arg && !OS.fs.isDir(arg) && OS.fs.exists(arg)) { dir = path.dir(arg); sel = arg; render(); }
       return win;
     }
@@ -2277,7 +2288,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   }
   OS.registerApp({
     id: 'hcalc', name: 'hCalc', icon: 'calc', color: '#2190a4', desc: '電卓',
-    launch() {
+    launch(arg) {
       const win = OS.htui.open({ title: 'hCalc', icon: 'calc', w: 330, h: 500, app: 'hcalc' });
       const expr = h('input', { class: 'inp hc-expr', id: 'hc-expr-' + win.pid, spellcheck: 'false', autocomplete: 'off', placeholder: '式を入力', 'aria-label': '式' });
       const res = h('div', { class: 'hc-res', role: 'status' }, '0'), alt = h('dl', { class: 'hc-alt' }), hist = h('div', { class: 'hc-hist' });
@@ -2314,6 +2325,15 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       expr.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); run(); } });
       win.body.append(h('div', { class: 'hc' }, expr, res, alt, keys, hist));
       win.onFocus = () => expr.focus();
+      // ハイバーネート: 式・結果・履歴
+      const histBtn = (e, t) => h('button', { type: 'button', title: 'この式をもう一度使う', onclick: () => { expr.value = e; expr.focus(); } }, t);
+      win.onHibernate = () => ({ expr: expr.value, res: res.textContent, err: res.classList.contains('err'), hist: [...hist.children].map(b => b.textContent) });
+      const rs = arg && arg.resume;
+      if (rs) {
+        expr.value = rs.expr || '';
+        if (rs.err) { res.classList.add('err'); res.textContent = rs.res; } else if (rs.res && isFinite(+rs.res)) show(+rs.res);
+        (rs.hist || []).forEach(t => { const i = t.lastIndexOf(' = '); hist.append(histBtn(i > 0 ? t.slice(0, i) : t, t)); });
+      }
       expr.focus();
       return win;
     }
@@ -2334,7 +2354,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   };
   OS.registerApp({
     id: 'hmines', name: 'hMines', icon: 'mine', color: '#5a7d2a', desc: '地雷を避けてマスを開けるパズル',
-    launch() {
+    launch(arg) {
       const cfgPath = OS.users.home(OS.htui.user) + '/.config/hmines.json';
       const loadCfg = () => { try { return JSON.parse(OS.htui.fs.read(cfgPath)); } catch (e) { return {}; } };
       const saveCfg = c => { try { OS.htui.fs.write(cfgPath, JSON.stringify(c, null, 1)); } catch (e) { /* 保存できなくても遊べる */ } };
@@ -2501,7 +2521,16 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       win.el.addEventListener('keydown', e => { if (e.key === 'F2') { e.preventDefault(); newGame(); } });
       win.onFocus = () => { if (cells && cells[cursor]) cells[cursor].el.focus({ preventScroll: true }); };
 
+      win.onHibernate = () => (state === 'ready' || state === 'play') ? { level: level, cells: cells.map(c => (c.mine ? 1 : 0) | (c.open ? 2 : 0) | (c.flag ? 4 : 0) | (c.n << 3)), opened: opened, flags: flags, state: state, sec: state === 'play' ? (Date.now() - t0) / 1000 : 0, cursor: cursor } : null;
+      const rs = arg && arg.resume;
+      if (rs && LEVELS[rs.level]) { level = rs.level; sel.value = level; }
       newGame();
+      if (rs && LEVELS[rs.level] && Array.isArray(rs.cells) && rs.cells.length === cells.length) {
+        rs.cells.forEach((v, i) => { const c = cells[i]; c.mine = !!(v & 1); c.open = !!(v & 2); c.flag = !!(v & 4); c.n = v >> 3; paint(i); });
+        opened = rs.opened | 0; flags = rs.flags | 0; state = rs.state === 'play' ? 'play' : 'ready';
+        if (state === 'play') { t0 = Date.now() - (+rs.sec || 0) * 1000; tick = setInterval(paintStat, 250); }
+        paintStat();
+      }
       setTimeout(fit, 0);
       return win;
     }
@@ -2701,8 +2730,19 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         else if (k === '+' || k === '=' || k === ';') { e.preventDefault(); step(1); } else if (k === '-') { e.preventDefault(); step(-1); } else if (k === '0') { e.preventDefault(); setZoom(1); }
       });
       win.onClose = discardOk;
+      // ハイバーネート: 絵そのものを書き出す（元に戻す履歴は残さない）
+      win.onHibernate = () => ({ img: cv.toDataURL('image/png'), w: cv.width, h: cv.height, file: file, dirty: dirty, tool: tool, color: color, size: size, zoom: zoom, fit: fitMode });
       blank(); setTool('pen'); setColor(color); status(); requestAnimationFrame(fit);
       if (typeof arg === 'string' && arg && fsx.exists(arg)) load(arg);
+      else if (arg && arg.resume) {
+        const r = arg.resume;
+        file = r.file || null; setTool(r.tool || 'pen'); setColor(r.color || color);
+        size = r.size || 4; sizeInp.value = String(size);
+        cv.width = r.w || 640; cv.height = r.h || 400; blank(); setDirty(!!r.dirty);
+        const img = new Image();
+        img.onload = () => { ctx.drawImage(img, 0, 0); if (r.fit === false) { zoom = r.zoom || 1; fitMode = false; applySize(); status(); } else fit(); };
+        img.src = r.img;
+      }
       return win;
     }
   });
@@ -2716,7 +2756,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   const CFG = '/.config/htictactoe.json';
   OS.registerApp({
     id: 'htictactoe', name: 'hTic-tac-toe', icon: 'ttt', color: '#e66100', desc: '三目並べ（CPU・二人で対戦、マスの数を変えられる）',
-    launch() {
+    launch(arg) {
       const fsx = OS.htui.fs, home = OS.users.home(OS.htui.user);
       let cfg = { n: 3, k: 3, mode: 'cpu2', level: 'normal' }; // mode: cpu2 = 自分が先手（×）、cpu1 = CPU が先手、pvp = 二人
       try { cfg = Object.assign(cfg, JSON.parse(fsx.read(home + CFG))); } catch (e) { /* 初回 */ }
@@ -2871,7 +2911,16 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         const n = N(), mv = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -n, ArrowDown: n }[e.key];
         if (mv) { e.preventDefault(); const j = i + mv; if (j >= 0 && j < cells.length && !(Math.abs(mv) === 1 && ((j / n) | 0) !== ((i / n) | 0))) cells[j].focus(); }
       });
-      paintBar(); newGame();
+      win.onHibernate = () => ({ n: N(), B: B, turn: turn, over: over, line: line, last: last, score: score, msg: over ? status.textContent : '' });
+      const rs = arg && arg.resume;
+      paintBar();
+      if (rs && rs.n === N() && Array.isArray(rs.B) && rs.B.length === N() * N()) {
+        Object.assign(score, rs.score || {});
+        B = rs.B; turn = rs.turn === 'O' ? 'O' : 'X'; over = !!rs.over; line = rs.line || null; last = rs.last == null ? -1 : rs.last;
+        board.style.setProperty('--n', N()); board.textContent = '';
+        for (let i = 0; i < B.length; i++) board.append(h('button', { class: 'tt-cell', type: 'button', role: 'gridcell', 'aria-label': (((i / N()) | 0) + 1) + ' 行 ' + (i % N() + 1) + ' 列', onclick: () => play(i, true) }));
+        paint(); if (over) status.textContent = rs.msg || ''; else next();
+      } else newGame();
       return win;
     }
   });
@@ -2937,7 +2986,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 
   OS.registerApp({
     id: 'hstore', name: 'hStore', icon: 'box', color: '#ed5b00', desc: 'パッケージマネージャ',
-    launch() {
+    launch(arg) {
       const fsx = OS.htui.fs, home = OS.users.home(OS.htui.user);
       const admin = () => true; // 追加・削除は誰でも始められるが、実行の直前に root のパスワードを確認する
       const win = OS.htui.open({ title: 'hStore', icon: 'box', w: 640, h: 460, app: 'hstore' });
@@ -3068,7 +3117,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 
   OS.registerApp({
     id: 'hreversi', name: 'hReversi', icon: 'reversi', color: '#26a269', desc: 'リバーシ（CPU・二人で対戦）',
-    launch() {
+    launch(arg) {
       const fsx = OS.htui.fs, home = OS.users.home(OS.htui.user);
       let cfg = { mode: 'cpu2', level: 'normal', hints: true }; // cpu2 = 自分が黒（先手）、cpu1 = 自分が白、pvp = 二人
       try { cfg = Object.assign(cfg, JSON.parse(fsx.read(home + CFG))); } catch (e) { /* 初回 */ }
@@ -3161,7 +3210,13 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         e.preventDefault(); let j = i + mv;
         if (j >= 0 && j < 64 && !(Math.abs(mv) === 1 && ((j / 8) | 0) !== ((i / 8) | 0))) { cells[j].disabled = false; cells[j].focus(); }
       });
-      paintBar(); newGame();
+      win.onHibernate = () => ({ B: B, turn: turn, hist: hist.slice(-60), over: over, last: last });
+      const rs = arg && arg.resume;
+      paintBar();
+      if (rs && Array.isArray(rs.B) && rs.B.length === 64) {
+        B = rs.B; turn = rs.turn === -1 ? -1 : 1; hist = rs.hist || []; over = false; last = rs.last == null ? -1 : rs.last; flipped = []; busy = false;
+        if (rs.over) finish(); else { paint(); next(); }
+      } else newGame();
       return win;
     }
   });
@@ -3261,7 +3316,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   const OS = window.OS, h = OS.h, path = OS.path, ui = OS.ui;
   OS.registerApp({
     id: 'hserial', name: 'hSerial', icon: 'plug', color: '#3a944a', desc: 'シリアルモニター',
-    launch() {
+    launch(arg) {
       const fsx = OS.htui.fs, home = OS.users.home(OS.htui.user);
       const win = OS.htui.open({ title: 'hSerial', icon: 'plug', w: 680, h: 440, app: 'hserial' });
       let port = null, reader = null, writer = null, text = '', pendingEsc = '';
@@ -12963,7 +13018,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 (function () {
   'use strict';
   // コードネーム: htmlOS は恒星の名前（3.2 = Sirius、4.0 = Vega）、描画エンジン HTUi SDK は惑星の名前（2 = Jupiter、3.0 = Venus）
-  var MEDIA_VERSION = '6.0.4', MEDIA_BUILD = '51', MEDIA_CODENAME = 'Deneb';
+  var MEDIA_VERSION = '6.0.5', MEDIA_BUILD = '52', MEDIA_CODENAME = 'Deneb';
   var BOOT = window.BOOT = {};
   var P = 'htmlos:';
 

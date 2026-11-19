@@ -126,7 +126,10 @@
         } catch (e) { status.textContent = ''; ui.alert('ダウンロードできませんでした。\n' + e.message); }
       }
 
-      go(typeof arg === 'string' && arg ? arg : 'about:home');
+      win.onHibernate = () => ({ cur: cur, hist: hist.slice(-50), hi: Math.min(hi, 49) - Math.max(0, hist.length - 50) });
+      const rs = arg && arg.resume;
+      if (rs && Array.isArray(rs.hist) && rs.hist.length) { hist.push.apply(hist, rs.hist); hi = Math.max(0, Math.min(rs.hi | 0, hist.length - 1)); go(rs.cur || hist[hi], false); }
+      else go(typeof arg === 'string' && arg ? arg : 'about:home');
       return win;
     }
   });

@@ -52,7 +52,12 @@
         pc.value = '';
       });
       win.onDispose = release;
-      if (typeof arg === 'string' && arg) openPath(arg);
+      win.onHibernate = () => { const m = stage.querySelector('audio,video'); return cur ? { cur: cur, t: m ? m.currentTime : 0 } : null; };
+      if (arg && arg.resume && arg.resume.cur && fsx.exists(arg.resume.cur)) {
+        openPath(arg.resume.cur);
+        const m = stage.querySelector('audio,video'), t = +arg.resume.t || 0;
+        if (m && t) m.addEventListener('loadedmetadata', () => { try { m.currentTime = t; } catch (e) { /* 戻せなくてもよい */ } }, { once: true });
+      } else if (typeof arg === 'string' && arg) openPath(arg);
       else { stage.append(h('p', { class: 'hp-note' }, '「開く」で hFS 内のファイルを、「PCから」「URL」で保存せずに再生できます。大きな動画は LocalStorage に入らないので「PCから」がおすすめです。')); bPrev.disabled = bNext.disabled = true; }
       return win;
     }

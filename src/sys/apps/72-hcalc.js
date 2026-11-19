@@ -19,7 +19,7 @@
   }
   OS.registerApp({
     id: 'hcalc', name: 'hCalc', icon: 'calc', color: '#2190a4', desc: '電卓',
-    launch() {
+    launch(arg) {
       const win = OS.htui.open({ title: 'hCalc', icon: 'calc', w: 330, h: 500, app: 'hcalc' });
       const expr = h('input', { class: 'inp hc-expr', id: 'hc-expr-' + win.pid, spellcheck: 'false', autocomplete: 'off', placeholder: '式を入力', 'aria-label': '式' });
       const res = h('div', { class: 'hc-res', role: 'status' }, '0'), alt = h('dl', { class: 'hc-alt' }), hist = h('div', { class: 'hc-hist' });
@@ -56,6 +56,15 @@
       expr.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); run(); } });
       win.body.append(h('div', { class: 'hc' }, expr, res, alt, keys, hist));
       win.onFocus = () => expr.focus();
+      // ハイバーネート: 式・結果・履歴
+      const histBtn = (e, t) => h('button', { type: 'button', title: 'この式をもう一度使う', onclick: () => { expr.value = e; expr.focus(); } }, t);
+      win.onHibernate = () => ({ expr: expr.value, res: res.textContent, err: res.classList.contains('err'), hist: [...hist.children].map(b => b.textContent) });
+      const rs = arg && arg.resume;
+      if (rs) {
+        expr.value = rs.expr || '';
+        if (rs.err) { res.classList.add('err'); res.textContent = rs.res; } else if (rs.res && isFinite(+rs.res)) show(+rs.res);
+        (rs.hist || []).forEach(t => { const i = t.lastIndexOf(' = '); hist.append(histBtn(i > 0 ? t.slice(0, i) : t, t)); });
+      }
       expr.focus();
       return win;
     }
