@@ -442,9 +442,9 @@
   register({
     name: 'soundd.service', desc: '効果音', wantedBy: 'basic.target', restart: 'on-failure',
     start(ctx) {
-      const a = BOOT.audio; if (a && a.state === 'suspended' && navigator.userActivation && navigator.userActivation.hasBeenActive) a.resume().catch(() => { /* まだ鳴らせない */ });
+      if (OS.sound.hold) OS.sound.hold(false);
       ctx.log('効果音を使えるようにしました');
-      return () => { const b = BOOT.audio; if (b && b.state === 'running') b.suspend().catch(() => { /* 無視 */ }); };
+      return () => { if (OS.sound.hold) OS.sound.hold(true); };
     }
   });
   register({

@@ -6351,9 +6351,9 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   register({
     name: 'soundd.service', desc: '効果音', wantedBy: 'basic.target', restart: 'on-failure',
     start(ctx) {
-      const a = BOOT.audio; if (a && a.state === 'suspended' && navigator.userActivation && navigator.userActivation.hasBeenActive) a.resume().catch(() => { /* まだ鳴らせない */ });
+      if (OS.sound.hold) OS.sound.hold(false);
       ctx.log('効果音を使えるようにしました');
-      return () => { const b = BOOT.audio; if (b && b.state === 'running') b.suspend().catch(() => { /* 無視 */ }); };
+      return () => { if (OS.sound.hold) OS.sound.hold(true); };
     }
   });
   register({
@@ -8584,8 +8584,39 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       if (!BOOT.audio || BOOT.audio.state === 'closed') { if (!active()) return null; try { BOOT.audio = new AC(); } catch (e) { return null; } }
       return BOOT.audio;
     }
-    const unlock = () => { const c = ctx(); if (c && c.state === 'suspended') c.resume().catch(() => { /* まだ鳴らせない */ }); };
+    // 6.0.6: 音が止まったままにならないように見張る。
+    //   ・soundd.service が止めた（held）とき以外に suspended / interrupted になったら、起こし直す
+    //   ・state が running なのに時間（currentTime）が進まない（音の処理が固まった）ときは、AudioContext を作り直す
+    let held = false;
+    function wake(c) {
+      if (!c || held || !active()) return;
+      if (c.state === 'suspended' || c.state === 'interrupted') c.resume().catch(() => { /* まだ鳴らせない */ });
+    }
+    function watch(c) {
+      if (!c || c._htmlosWatch) return;
+      c._htmlosWatch = true;
+      c.addEventListener('statechange', () => { if (c === BOOT.audio && (c.state === 'suspended' || c.state === 'interrupted')) setTimeout(() => wake(c), 300); });
+    }
+    // 作り直す。鳴っていた BGM は新しい AudioContext で鳴らし直す
+    function reset(why) {
+      const old = BOOT.audio; BOOT.audio = null;
+      try { if (old && old.state !== 'closed') old.close(); } catch (e) { /* 無視 */ }
+      if (OS.journal) { try { OS.journal.log('soundd', '音の処理を作り直しました（' + (why || '') + '）'); } catch (e) { /* 無視 */ } }
+      const c = ctx(); if (c) watch(c);
+      if (OS.bgm && OS.bgm._restart) OS.bgm._restart();
+      return c;
+    }
+    const unlock = () => { const c = ctx(); if (c) { watch(c); wake(c); } };
     ['pointerdown', 'keydown'].forEach(t => window.addEventListener(t, unlock, { capture: true, passive: true }));
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && BOOT.audio) wake(BOOT.audio); });
+    // 固まりの見張り（2 秒ごと。running で 4 秒以上時間が進まなければ作り直す）
+    let lastT = -1, lastW = 0, resets = [];
+    setInterval(() => {
+      const c = BOOT.audio; if (!c || held || c.state !== 'running') { lastT = -1; return; }
+      const now = performance.now();
+      if (c.currentTime !== lastT) { lastT = c.currentTime; lastW = now; return; }
+      if (now - lastW > 4000) { lastT = -1; resets = resets.filter(x => now - x < 300000); if (resets.length < 3) { resets.push(now); reset('時間が進まなくなったため'); } } // 作り直しは 5 分に 3 回まで
+    }, 2000);
     function prefs() {
       let sys = {}; try { sys = config.get('sound', {}) || {}; } catch (e) { /* 読めなければ既定 */ }
       const p = { on: sys.on !== false, vol: typeof sys.vol === 'number' ? sys.vol : 0.6 };
@@ -8612,14 +8643,25 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       tone(c, out, t, f * 3.01, d * 0.25, { v: v * 0.05, a: 0.005 });
     }
     // 残響（短いホールの響き）。雑音を減衰させた応答をその場で作る。AudioContext ごとに 1 回
-    function reverb(c) {
-      if (c._htmlosRev) return c._htmlosRev;
-      const len = Math.floor(c.sampleRate * 1.8), buf = c.createBuffer(2, len, c.sampleRate);
+    function reverb(c, key) {
+      key = '_htmlosRev' + (key || '');
+      if (c[key]) return c[key];
+      const len = Math.floor(c.sampleRate * 1.6), buf = c.createBuffer(2, len, c.sampleRate);
       for (let ch = 0; ch < 2; ch++) { const d = buf.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3.2); }
       const conv = c.createConvolver(); conv.buffer = buf;
       const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 4200; // 響きの高音を丸くする
       conv.connect(lp);
-      return (c._htmlosRev = { input: conv, output: lp });
+      return (c[key] = { input: conv, output: lp });
+    }
+    // 効果音の出口（AudioContext ごとに 1 つ）。前は鳴らすたびにリミッターなどを作ってつなぎっぱなしにしていたため、
+    //   鳴らすほど処理が重くなり、BGM がプツプツ途切れたり、音が止まったりしていた（6.0.6 で直した）
+    function sfxBus(c) {
+      if (c._htmlosSfx) return c._htmlosSfx;
+      const dry = c.createGain(), lim = c.createDynamicsCompressor(), rv = reverb(c, 'sfx'), wet = c.createGain();
+      lim.threshold.value = -6; lim.ratio.value = 12; // 重なっても音が割れないように
+      wet.gain.value = 1;
+      dry.connect(lim); rv.output.connect(wet); wet.connect(lim); lim.connect(c.destination);
+      return (c._htmlosSfx = { dry: dry, rev: rv.input });
     }
     const M = n => 440 * Math.pow(2, (n - 69) / 12); // MIDI の音番号 → Hz（60 = ド）
     const seq = (c, o, t, list, d, v) => list.forEach((m, i) => note(c, o, t + i * 0.12, M(m), d, v));
@@ -8634,26 +8676,34 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       error: (c, o, t) => { tone(c, o, t, M(64), 0.22, { type: 'square', v: 0.1, a: 0.005 }); tone(c, o, t, M(52), 0.24, { type: 'triangle', v: 0.22, a: 0.008 }); tone(c, o, t + 0.16, M(58), 0.34, { type: 'square', v: 0.1, a: 0.005 }); tone(c, o, t + 0.16, M(46), 0.38, { type: 'triangle', v: 0.22, a: 0.008 }); },
       notify: (c, o, t) => { note(c, o, t, M(84), 0.35, 0.35); note(c, o, t + 0.09, M(88), 0.6, 0.35); }
     };
-    const last = {};
+    const last = {}, LEN = { boot: 3.4, shutdown: 2.8, error: 0.7, bell: 0.4 };
+    const MAX_VOICES = 8; let voices = 0;
     function play(name, force) {
       const p = prefs();
       if (!SOUNDS[name] || (!p.on && !force) || p.vol <= 0) return false;
       if (OS.init && OS.init.has('soundd.service') && !OS.init.isActive('soundd.service') && !OS._down) return false; // 効果音のサービスが止まっている
       const c = ctx(); if (!c) return false;
       const now = Date.now(); if (last[name] && now - last[name] < 90) return false; last[name] = now; // 連続で重ならないように
+      if (voices >= MAX_VOICES) return false; // 一度にたくさん鳴らしすぎない（処理が追いつかなくなるため）
+      watch(c);
       const go = () => {
-        const out = c.createGain(), lim = c.createDynamicsCompressor(), rv = reverb(c), wet = c.createGain();
-        out.gain.value = p.vol * 0.5; lim.threshold.value = -6; lim.ratio.value = 12; // 重なっても音が割れないように
-        wet.gain.value = name === 'bell' ? 0.12 : 0.28; // ベルは響きを少なめに
-        out.connect(lim); out.connect(rv.input); rv.output.connect(wet); wet.connect(lim); lim.connect(c.destination);
-        setTimeout(() => { try { rv.output.disconnect(wet); } catch (e) { /* もう外れている */ } }, 5000);
+        const bus = sfxBus(c), out = c.createGain(), send = c.createGain();
+        out.gain.value = p.vol * 0.5;
+        send.gain.value = name === 'bell' ? 0.12 : 0.28; // ベルは響きを少なめに
+        out.connect(bus.dry); out.connect(send); send.connect(bus.rev);
+        voices++;
         try { SOUNDS[name](c, out, c.currentTime + 0.02); } catch (e) { /* 鳴らせなくても続ける */ }
+        // 鳴り終わったら外す（響きの残りは共通の残響が鳴らす）
+        setTimeout(() => { voices = Math.max(0, voices - 1); try { out.disconnect(); send.disconnect(); } catch (e) { /* もう外れている */ } }, ((LEN[name] || 1.6) + 0.4) * 1000);
       };
       if (c.state === 'running') go();
-      else c.resume().then(() => { if (Date.now() - now < 400 && c.state === 'running') go(); }).catch(() => { /* まだ鳴らせない */ });
+      else if (!held) c.resume().then(() => { if (Date.now() - now < 400 && c.state === 'running') go(); }).catch(() => { /* まだ鳴らせない */ });
       return true;
     }
-    return { play: play, prefs: prefs, names: NAMES, list: () => Object.keys(SOUNDS), _ctx: ctx, _reverb: reverb, _note: note, _tone: tone, M: M };
+    return { play: play, prefs: prefs, names: NAMES, list: () => Object.keys(SOUNDS), _ctx: () => { const c = ctx(); watch(c); return c; }, _reverb: reverb, _note: note, _tone: tone, M: M,
+      reset: reset, get voices() { return voices; },
+      // soundd.service が止める・動かす（止めているあいだは起こし直さない）
+      hold(v) { held = !!v; const c = BOOT.audio; if (!c) return; if (held) { if (c.state === 'running') c.suspend().catch(() => { /* 無視 */ }); } else wake(c); } };
   })();
 
   // ---------- アンビエントサウンド（BGM。5.2 から）。効果音と同じく、音のファイルを使わずにその場で合成する
@@ -8677,43 +8727,66 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       return p;
     }
     const serviceOk = () => !(OS.init && OS.init.has('bgm.service') && !OS.init.isActive('bgm.service'));
-    // パッドの 1 音: 少しずらした 2 つの波形を、ゆっくり開くローパスに通す
-    function pad(c, out, t, f, dur, v, cut) {
+    // パッド: 和音の音をまとめて、ゆっくり開く 1 つのローパスに通す（音ごとに少しずらした 2 つの波形）。
+    //   6.0.6: 音ごとにフィルターを作っていたのをまとめ、波形も 3 つから 2 つにして軽くした
+    function pad(c, out, t, freqs, dur, v, cut, stagger) {
       const g = c.createGain(), lp = c.createBiquadFilter();
       lp.type = 'lowpass'; lp.Q.value = 0.4;
       lp.frequency.setValueAtTime(cut * 0.6, t); lp.frequency.linearRampToValueAtTime(cut * 1.3, t + dur * 0.5); lp.frequency.linearRampToValueAtTime(cut * 0.7, t + dur);
       g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(v, t + Math.min(3.5, dur * 0.35)); g.gain.setValueAtTime(v, t + dur * 0.6); g.gain.linearRampToValueAtTime(0.0001, t + dur);
-      [['triangle', 0], ['sawtooth', 7], ['sine', -5]].forEach(([type, cents], i) => {
-        const o = c.createOscillator(); o.type = type; o.frequency.value = f; o.detune.value = cents;
-        const og = c.createGain(); og.gain.value = i === 1 ? 0.18 : 0.5;
-        o.connect(og); og.connect(lp); o.start(t); o.stop(t + dur + 0.1);
+      freqs.forEach((f, k) => {
+        const t0 = t + k * (stagger || 0);
+        [['triangle', 0, 0.55], ['sawtooth', 7, 0.16]].forEach(([type, cents, gv]) => {
+          const o = c.createOscillator(); o.type = type; o.frequency.value = f; o.detune.value = cents;
+          const og = c.createGain(); og.gain.value = gv;
+          o.connect(og); og.connect(lp); o.start(t0); o.stop(t + dur + 0.1);
+          o.onended = () => { try { og.disconnect(); } catch (e) { /* 外れている */ } };
+        });
       });
       lp.connect(g); g.connect(out);
+      setTimeout(() => { try { lp.disconnect(); g.disconnect(); } catch (e) { /* 外れている */ } }, (dur + 1) * 1000);
     }
-    function bar(st) {
-      if (!cur || cur !== st) return;
-      const c = st.c, s = STYLES[st.style], t = c.currentTime + 0.1, dur = s.bar + 5;
+    // BGM のベル（基音と倍音の 2 つだけの軽い音）
+    function bell(c, out, t, f, d, v) {
+      S._tone(c, out, t, f, d, { v: v, a: 0.012 });
+      S._tone(c, out, t, f * 2, d * 0.5, { v: v * 0.18, a: 0.008 });
+    }
+    // 小節を 1 つ、音の時計で t から鳴らす
+    function bar(st, t) {
+      const c = st.c, s = STYLES[st.style], dur = s.bar + 5;
       const ch = s.chords[st.step % s.chords.length]; st.step++;
-      ch.forEach((n, i) => pad(c, st.bus, t + i * 0.25, M(s.root + n), dur, 0.05, s.cut));
-      pad(c, st.bus, t, M(s.root + ch[0] - 12), dur, 0.06, s.cut * 0.6); // 低音
+      pad(c, st.bus, t, ch.map(n => M(s.root + n)), dur, 0.05 * Math.sqrt(ch.length) * 0.9, s.cut, 0.25);
+      pad(c, st.bus, t, [M(s.root + ch[0] - 12)], dur, 0.06, s.cut * 0.6); // 低音
       // ときどき鳴る柔らかいベル（音階から選ぶ。鳴らない小節もある）
       const nb = Math.floor(Math.random() * (s.bells + 1));
       for (let i = 0; i < nb; i++) {
         const deg = s.scale[Math.floor(Math.random() * s.scale.length)], oct = Math.random() < 0.5 ? 24 : 36;
-        S._note(c, st.bells, t + 1 + Math.random() * (s.bar - 2), M(s.root + deg + oct), 2.6 + Math.random() * 2, 0.05 + Math.random() * 0.04);
+        bell(c, st.bells, t + 1 + Math.random() * (s.bar - 2), M(s.root + deg + oct), 2.6 + Math.random() * 2, 0.05 + Math.random() * 0.04);
       }
-      st.timers.push(setTimeout(() => bar(st), s.bar * 1000));
+    }
+    // 予定組み: 0.5 秒ごとに、音の時計で 1.5 秒先までの小節を組む。タイマーが遅れても音は途切れない。
+    //   AudioContext が止まっているあいだは組まない（止まった時間に音がたまって、戻ったときに一度に鳴るのを防ぐ）
+    function tick(st) {
+      if (cur !== st) return;
+      const c = st.c;
+      if (c.state === 'closed') { cur = null; restart(); return; }
+      if (c.state === 'running') {
+        const s = STYLES[st.style], now = c.currentTime;
+        if (st.next < now) st.next = now + 0.1; // 遅れすぎたら、今から組み直す
+        while (st.next < now + 1.5) { bar(st, st.next); st.next += s.bar; }
+      }
+      st.timers = [setTimeout(() => tick(st), 500)];
     }
     function start(p) {
       const c = S._ctx(); if (!c) return false;
       const s = STYLES[p.style];
-      const master = c.createGain(), lim = c.createDynamicsCompressor(), rv = S._reverb(c), wet = c.createGain(), bus = c.createGain(), bells = c.createGain();
+      const master = c.createGain(), lim = c.createDynamicsCompressor(), rv = S._reverb(c, 'bgm'), wet = c.createGain(), bus = c.createGain(), bells = c.createGain();
       master.gain.setValueAtTime(0.0001, c.currentTime); master.gain.linearRampToValueAtTime(p.vol * 0.8, c.currentTime + 4); // ゆっくり入る
       lim.threshold.value = -10; lim.ratio.value = 8;
       wet.gain.value = 0.55; bus.gain.value = 1; bells.gain.value = 0.9;
       bus.connect(master); bells.connect(master); bus.connect(rv.input); bells.connect(rv.input); rv.output.connect(wet); wet.connect(master);
       master.connect(lim); lim.connect(c.destination);
-      const st = cur = { c: c, master: master, lim: lim, wet: wet, rv: rv, bus: bus, bells: bells, style: p.style, vol: p.vol, timers: [], nodes: [], step: Math.floor(Math.random() * 4) };
+      const st = cur = { c: c, master: master, lim: lim, wet: wet, rv: rv, bus: bus, bells: bells, style: p.style, vol: p.vol, timers: [], nodes: [], step: Math.floor(Math.random() * 4), next: c.currentTime + 0.1 };
       if (s.drone) {
         [0, 7].forEach((n, i) => { const o = c.createOscillator(), g = c.createGain(), lfo = c.createOscillator(), lg = c.createGain(); o.type = 'sine'; o.frequency.value = M(s.root - 12 + n); g.gain.value = i ? 0.025 : 0.05; lfo.frequency.value = 0.05 + i * 0.03; lg.gain.value = 0.02; lfo.connect(lg); lg.connect(g.gain); o.connect(g); g.connect(bus); o.start(); lfo.start(); st.nodes.push(o, lfo); });
       }
@@ -8724,15 +8797,21 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         src.buffer = buf; src.loop = true; bp.type = 'highpass'; bp.frequency.value = 900; lp.type = 'lowpass'; lp.frequency.value = 5200; g.gain.value = 0.035;
         src.connect(bp); bp.connect(lp); lp.connect(g); g.connect(master); src.start(); st.nodes.push(src);
       }
-      bar(st);
+      tick(st);
       return true;
+    }
+    // AudioContext を作り直したあと: 今の設定で鳴らし直す
+    function restart() {
+      const st = cur; cur = null;
+      if (st) { st.timers.forEach(clearTimeout); st.nodes.forEach(n => { try { n.stop(); } catch (e) { /* 止まっている */ } }); }
+      setTimeout(apply, 50);
     }
     function stop(fade) {
       const st = cur; if (!st) return; cur = null;
       st.timers.forEach(clearTimeout);
       const c = st.c, t = c.currentTime, f = fade == null ? 1.5 : fade;
       try { st.master.gain.cancelScheduledValues(t); st.master.gain.setValueAtTime(st.master.gain.value, t); st.master.gain.linearRampToValueAtTime(0.0001, t + f); } catch (e) { /* 無視 */ }
-      setTimeout(() => { st.nodes.forEach(n => { try { n.stop(); } catch (e) { /* 止まっている */ } }); try { st.rv.output.disconnect(st.wet); } catch (e) { /* 外れている */ } try { st.master.disconnect(); st.lim.disconnect(); } catch (e) { /* 外れている */ } }, f * 1000 + 200);
+      setTimeout(() => { st.nodes.forEach(n => { try { n.stop(); } catch (e) { /* 止まっている */ } }); [st.bus, st.bells, st.wet, st.master, st.lim].forEach(n => { try { n.disconnect(); } catch (e) { /* 外れている */ } }); try { st.rv.output.disconnect(st.wet); } catch (e) { /* 外れている */ } }, f * 1000 + 200);
     }
     // 設定どおりにする。鳴らすのは、ログインしていて（またはログイン前でシステムの設定がオン）、bgm.service が動いているとき
     function apply() {
@@ -8750,7 +8829,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     }
     // まだ音を出す許可がなかったとき: 最初のクリック・キーで鳴らし始める
     ['pointerdown', 'keydown'].forEach(t => window.addEventListener(t, () => { if (!cur && OS.htui && OS.htui.running && OS.htui.user) { const p = prefs(); if (p.on) apply(); } }, { capture: true, passive: true }));
-    return { apply: apply, stop: stop, prefs: prefs, styles: STYLES, get playing() { return !!cur; }, get style() { return cur ? cur.style : null; } };
+    return { apply: apply, stop: stop, prefs: prefs, styles: STYLES, _restart: restart, get playing() { return !!cur; }, get style() { return cur ? cur.style : null; } };
   })();
 
   // ---------- 電源管理（5.3 から）。設定は、ログイン中のユーザーの htui.prefs.power
@@ -13018,7 +13097,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 (function () {
   'use strict';
   // コードネーム: htmlOS は恒星の名前（3.2 = Sirius、4.0 = Vega）、描画エンジン HTUi SDK は惑星の名前（2 = Jupiter、3.0 = Venus）
-  var MEDIA_VERSION = '6.0.5', MEDIA_BUILD = '52', MEDIA_CODENAME = 'Deneb';
+  var MEDIA_VERSION = '6.0.6', MEDIA_BUILD = '53', MEDIA_CODENAME = 'Deneb';
   var BOOT = window.BOOT = {};
   var P = 'htmlos:';
 
