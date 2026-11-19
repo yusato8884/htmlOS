@@ -25,6 +25,11 @@
   - **名前付きパイプ**: `mkfifo /tmp/p` → `cat /tmp/p` で待ち、ほかのシェルから `echo hi > /tmp/p`
 - **Tab 補完**: systemctl・ps・hjournal など、あとから登録されたコマンドと `~/bin` `/bin` のスクリプトも、ターミナルを開いた直後から補完できるようにしました。`sudo` や `|` のあとでもコマンド名を補完します
 
+### 5.1.3
+
+- **hBrowser でスクリプト主体のページ**: プロキシモードで表示したページの中に互換レイヤーを入れました。ページのスクリプトの `fetch` / `XMLHttpRequest` / `sendBeacon` を hBrowser が代わりに（直接かプロキシ経由で）取りに行き、`localStorage`・`sessionStorage`・`document.cookie` はメモリ上のもの（同じウインドウでは同じサイトのものを覚えておく）に、`history.pushState` は例外にならないようにしました。ES モジュール（`<script type="module">`）は `{rawurl}` 形式のプロキシを通して読み込み、`integrity` / `crossorigin` は外します。POST のフォームも送れます。URL で画面を切り替えるサイトやログインが必要なサイトは、まだ正しく動かないことがあります
+- **プロキシの順番を起動時に決める**: 新しいサービス `proxyrank.service`（起動時に init が起動）が、各プロキシで example.com を取ってみて、届いたものを速い順に並べます。オンラインに戻ったときと、設定 → ネットワーク の「接続テスト」でも測り直します（`systemctl reload proxyrank`、結果は `hjournal -u proxyrank`）
+
 ### 5.1.2
 
 - **Tab 補完でサブコマンド・オプションも**: `systemctl st` → start / status / stop、`systemctl stop cl` → clock、`ipc call htmlos.So` → htmlos.Sound → Play / List、`hjournal -u ` → unit 名、`kill -K` → -KILL、`su ` → ユーザー名、`chmod ` → 755・u+x など、`cd` はディレクトリだけ。ほかのコマンドも使い方に書いたオプション（`-l` など）を補完します。`OS.registerCommand({ …, complete(args, tok, sh) { return [候補] } })` で自分のコマンドにも付けられます

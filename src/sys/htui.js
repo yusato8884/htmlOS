@@ -781,6 +781,152 @@
   const WV_DL = /\.(zip|gz|tgz|7z|rar|pdf|mp3|wav|flac|m4a|mp4|webm|mov|uf2|bin|hex|iso|deb|exe|apk)$/i;
   const wvEsc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   // プロキシ表示・HTML 表示したページの中で動かす小さなスクリプト（リンクとフォームとタイトルを親に伝える）
+  // プロキシで表示したページの中で、いちばん最初に動く互換レイヤー（5.1.3）。
+  //   ページは安全のため「どこのものでもない」オリジンで動くので、そのままだと localStorage・cookie・history.pushState が例外になり、
+  //   fetch / XMLHttpRequest もほかのサイトには届かない（CORS）。そこで:
+  //   ・localStorage / sessionStorage / document.cookie をメモリ上のものに差し替える（同じウインドウでは同じサイトのものを覚えておく）
+  //   ・history.pushState / replaceState は例外にせず、<base> を新しい URL にする（相対 URL が正しくなる）
+  //   ・fetch / XMLHttpRequest / sendBeacon は親（hBrowser）に頼んで、直接かプロキシ経由で取ってくる
+  function wvCompat(C) {
+    var send = function (m) { m.hbrowser = 1; try { parent.postMessage(m, '*'); } catch (e) { /* 親がいない */ } };
+    var has = function (o, k) { return Object.prototype.hasOwnProperty.call(o, k); };
+    // ---- localStorage / sessionStorage
+    function mkStorage(kind, init) {
+      var data = {}, timer = 0;
+      Object.keys(init || {}).forEach(function (k) { data[k] = String(init[k]); });
+      var save = function () { if (kind !== 'local') return; clearTimeout(timer); timer = setTimeout(function () { send({ store: 'local', data: data }); }, 300); };
+      var api = {
+        getItem: function (k) { k = String(k); return has(data, k) ? data[k] : null; },
+        setItem: function (k, v) { data[String(k)] = String(v); save(); },
+        removeItem: function (k) { delete data[String(k)]; save(); },
+        clear: function () { data = {}; save(); },
+        key: function (i) { var l = Object.keys(data); return i >= 0 && i < l.length ? l[i] : null; }
+      };
+      return new Proxy(api, {
+        get: function (t, k) { if (k === 'length') return Object.keys(data).length; if (has(t, k)) return t[k]; if (typeof k === 'string' && has(data, k)) return data[k]; return undefined; },
+        set: function (t, k, v) { if (has(t, k) || k === 'length') return true; t.setItem(k, v); return true; },
+        deleteProperty: function (t, k) { t.removeItem(k); return true; },
+        has: function (t, k) { return has(t, k) || has(data, k); },
+        ownKeys: function () { return Object.keys(data); },
+        getOwnPropertyDescriptor: function (t, k) { return has(data, k) ? { value: data[k], writable: true, enumerable: true, configurable: true } : undefined; }
+      });
+    }
+    ['localStorage', 'sessionStorage'].forEach(function (n) {
+      var ok = true; try { window[n].getItem('x'); } catch (e) { ok = false; }
+      if (!ok) { try { Object.defineProperty(window, n, { configurable: true, enumerable: true, value: mkStorage(n === 'localStorage' ? 'local' : 'session', n === 'localStorage' ? C.local : null) }); } catch (e) { /* 差し替えられない */ } }
+    });
+    // ---- document.cookie
+    var jar = {}; Object.keys(C.cookies || {}).forEach(function (k) { jar[k] = String(C.cookies[k]); });
+    var cookieOk = true; try { void document.cookie; } catch (e) { cookieOk = false; }
+    if (!cookieOk) {
+      try {
+        Object.defineProperty(document, 'cookie', { configurable: true, get: function () { return Object.keys(jar).map(function (k) { return k + '=' + jar[k]; }).join('; '); }, set: function (v) {
+          v = String(v); var p = v.split(';')[0], i = p.indexOf('='); if (i < 0) return;
+          var k = p.slice(0, i).trim(), val = p.slice(i + 1).trim();
+          if (/;\s*max-age\s*=\s*(0|-)/i.test(v) || /;\s*expires\s*=[^;]*1970/i.test(v)) delete jar[k]; else jar[k] = val;
+          send({ store: 'cookie', data: jar });
+        } });
+      } catch (e) { /* 差し替えられない */ }
+    }
+    // ---- history（URL は変えられないので、<base> と内部の URL だけ変える）
+    var vurl = C.url || document.baseURI;
+    var setBase = function () { var b = document.querySelector('base'); if (b) b.setAttribute('href', vurl); };
+    ['pushState', 'replaceState'].forEach(function (n) {
+      var orig = history[n];
+      history[n] = function (st, t, u) {
+        if (u != null) { try { vurl = new URL(String(u), vurl).href; setBase(); send({ vurl: vurl }); } catch (e) { /* 変な URL */ } }
+        try { return orig.call(history, st, t); } catch (e) { /* 何もしない */ }
+      };
+    });
+    // ---- fetch（親に頼む）
+    var origFetch = window.fetch ? window.fetch.bind(window) : null, fseq = 0, waits = {};
+    window.addEventListener('message', function (e) {
+      var d = e.data; if (!d || d.hbrowserFetch == null || e.source !== parent) return;
+      var w = waits[d.hbrowserFetch]; if (!w) return; delete waits[d.hbrowserFetch];
+      if (d.error) { w.rej(new TypeError('Failed to fetch（' + d.error + '）')); return; }
+      var st = d.status >= 200 && d.status <= 599 ? d.status : 200, nobody = st === 204 || st === 205 || st === 304;
+      var r = new Response(nobody ? null : d.body, { status: st, statusText: d.statusText || '', headers: d.headers || {} });
+      try { Object.defineProperty(r, 'url', { value: w.url }); } catch (e2) { /* 無視 */ }
+      w.res(r);
+    });
+    var viaParent = function (url, method, headers, body) {
+      return new Promise(function (res, rej) { var id = ++fseq; waits[id] = { res: res, rej: rej, url: url }; send({ fetch: { id: id, url: url, method: method, headers: headers, body: body } }); });
+    };
+    var remote = function (u) { return /^https?:/i.test(u); };
+    if (origFetch) window.fetch = function (input, init) {
+      init = init || {};
+      var req = typeof Request !== 'undefined' && input instanceof Request ? input : null, url;
+      try { url = new URL(req ? req.url : String(input), vurl).href; } catch (e) { return origFetch(input, init); }
+      if (!remote(url)) return origFetch(input, init);
+      var method = String(init.method || (req && req.method) || 'GET').toUpperCase(), hd = {};
+      try { new Headers(init.headers || (req && req.headers) || {}).forEach(function (v, k) { hd[k] = v; }); } catch (e) { /* 無視 */ }
+      var bodyP = Promise.resolve(null);
+      if (method !== 'GET' && method !== 'HEAD') {
+        if (init.body != null) {
+          try { var tmp = new Request('https://x.invalid/', { method: 'POST', body: init.body }); var ct = tmp.headers.get('content-type'); if (ct && !hd['content-type']) hd['content-type'] = ct; bodyP = tmp.arrayBuffer(); } catch (e) { bodyP = Promise.resolve(null); }
+        } else if (req) bodyP = req.arrayBuffer();
+      }
+      if (init.signal && init.signal.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
+      var p = bodyP.then(function (b) { return viaParent(url, method, hd, b); });
+      if (init.signal) p = Promise.race([p, new Promise(function (r, j) { init.signal.addEventListener('abort', function () { j(new DOMException('Aborted', 'AbortError')); }); })]);
+      return p;
+    };
+    // ---- XMLHttpRequest（fetch の上に作り直す。同期の XHR には対応しない）
+    function XHR() {
+      this.readyState = 0; this.status = 0; this.statusText = ''; this.response = ''; this.responseText = ''; this.responseType = ''; this.responseURL = ''; this.responseXML = null;
+      this.timeout = 0; this.withCredentials = false; this._h = {}; this._l = {}; this._aborted = false;
+      this.upload = { addEventListener: function () {}, removeEventListener: function () {} };
+    }
+    XHR.UNSENT = 0; XHR.OPENED = 1; XHR.HEADERS_RECEIVED = 2; XHR.LOADING = 3; XHR.DONE = 4;
+    XHR.prototype = {
+      constructor: XHR, UNSENT: 0, OPENED: 1, HEADERS_RECEIVED: 2, LOADING: 3, DONE: 4,
+      open: function (m, u) { this._m = String(m || 'GET').toUpperCase(); this._u = String(u); this._aborted = false; this.readyState = 1; this._fire('readystatechange'); },
+      setRequestHeader: function (k, v) { this._h[String(k).toLowerCase()] = String(v); },
+      overrideMimeType: function () {},
+      getResponseHeader: function (k) { return this._rh ? this._rh.get(k) : null; },
+      getAllResponseHeaders: function () { var s = ''; if (this._rh) this._rh.forEach(function (v, k) { s += k + ': ' + v + '\r\n'; }); return s; },
+      abort: function () { if (this.readyState === 0 || this.readyState === 4) return; this._aborted = true; this.readyState = 4; this.status = 0; this._fire('readystatechange'); this._fire('abort'); this._fire('loadend'); this.readyState = 0; },
+      addEventListener: function (t, f) { if (typeof f === 'function') (this._l[t] = this._l[t] || []).push(f); },
+      removeEventListener: function (t, f) { var l = this._l[t]; if (l) { var i = l.indexOf(f); if (i >= 0) l.splice(i, 1); } },
+      dispatchEvent: function (ev) { this._fire(ev.type); return true; },
+      _fire: function (t) {
+        var x = this, ev = { type: t, target: x, currentTarget: x, loaded: 0, total: 0, lengthComputable: false, preventDefault: function () {}, stopPropagation: function () {} };
+        var call = function (f) { try { f.call(x, ev); } catch (e) { setTimeout(function () { throw e; }); } };
+        if (typeof x['on' + t] === 'function') call(x['on' + t]);
+        (x._l[t] || []).slice().forEach(call);
+      },
+      send: function (body) {
+        var x = this, tm = 0;
+        x._fire('loadstart');
+        if (x.timeout > 0) tm = setTimeout(function () { if (x.readyState === 4) return; x._aborted = true; x.readyState = 4; x._fire('readystatechange'); x._fire('timeout'); x._fire('loadend'); }, x.timeout);
+        window.fetch(x._u, { method: x._m, headers: x._h, body: body == null || x._m === 'GET' || x._m === 'HEAD' ? undefined : body }).then(function (r) {
+          if (x._aborted) return;
+          x.status = r.status; x.statusText = r.statusText; x.responseURL = r.url || ''; x._rh = r.headers;
+          x.readyState = 2; x._fire('readystatechange');
+          return r.arrayBuffer().then(function (buf) {
+            if (x._aborted) return;
+            clearTimeout(tm);
+            x.readyState = 3; x._fire('readystatechange');
+            var t = x.responseType, text = function () { return new TextDecoder().decode(buf); };
+            if (t === '' || t === 'text') { x.responseText = text(); x.response = x.responseText; }
+            else if (t === 'json') { try { x.response = JSON.parse(text()); } catch (e) { x.response = null; } }
+            else if (t === 'arraybuffer') x.response = buf;
+            else if (t === 'blob') x.response = new Blob([buf], { type: r.headers.get('content-type') || '' });
+            else if (t === 'document') { x.response = x.responseXML = new DOMParser().parseFromString(text(), /xml/.test(r.headers.get('content-type') || '') ? 'text/xml' : 'text/html'); }
+            x.readyState = 4; x._fire('readystatechange'); x._fire('load'); x._fire('loadend');
+          });
+        }).catch(function () {
+          if (x._aborted) return;
+          clearTimeout(tm);
+          x.readyState = 4; x.status = 0; x._fire('readystatechange'); x._fire('error'); x._fire('loadend');
+        });
+      }
+    };
+    window.XMLHttpRequest = XHR;
+    if (navigator.sendBeacon) { try { navigator.sendBeacon = function (u, d) { try { window.fetch(u, { method: 'POST', body: d }).catch(function () {}); } catch (e) { /* 無視 */ } return true; }; } catch (e) { /* 無視 */ } }
+    // ページから外へのリンク（window.open）は hBrowser で開く
+    window.open = function (u) { if (u) { try { send({ nav: new URL(String(u), vurl).href }); } catch (e) { /* 無視 */ } } return null; };
+  }
   function wvAgent() {
     var send = function (m) { m.hbrowser = 1; try { parent.postMessage(m, '*'); } catch (e) { /* 親がいない */ } };
     document.addEventListener('click', function (e) {
@@ -801,6 +947,12 @@
     }, true);
     document.addEventListener('submit', function (e) {
       var f = e.target; e.preventDefault();
+      if ((f.getAttribute('method') || 'get').toLowerCase() === 'post') {
+        var pu = new URL(f.getAttribute('action') || '', document.baseURI), body = new URLSearchParams();
+        new FormData(f).forEach(function (v, k) { if (typeof v === 'string') body.append(k, v); });
+        send({ nav: pu.href, post: body.toString() });
+        return;
+      }
       if ((f.getAttribute('method') || 'get').toLowerCase() !== 'get') { send({ note: 'post' }); return; }
       var u = new URL(f.getAttribute('action') || '', document.baseURI);
       u.search = '';
@@ -839,16 +991,31 @@
       wv.frame = null; el.textContent = '';
       el.append(h('div', { class: 'hb-page' }, h('h1', null, title), (lines || []).map(l => h('p', null, l)), h('div', { class: 'hb-marks' }, actions || [])));
     };
+    // サイトごとの localStorage と cookie（このウインドウを閉じるまで覚えておく）
+    const stores = {};
+    const originOf = u => { try { return new URL(u).origin; } catch (e) { return ''; } };
     const inject = (doc, base) => {
-      const inj = (base ? '<base href="' + wvEsc(base) + '">' : '') + '<scr' + 'ipt>(' + String(wvAgent) + ')();</scr' + 'ipt>';
-      doc = String(doc).replace(/<meta[^>]+http-equiv\s*=\s*["']?(content-security-policy|x-frame-options|refresh)[^>]*>/gi, '');
+      const og = base ? originOf(base) : '', st = stores[og] || (stores[og] = { local: {}, cookies: {} });
+      const C = { url: base || '', local: st.local, cookies: st.cookies };
+      const js = s => '<scr' + 'ipt>' + s.replace(/<\//g, '<\\/') + '</scr' + 'ipt>';
+      let pre = '';
+      doc = String(doc).replace(/<(script|link)\b[^>]*>/gi, tag => tag.replace(/\s(integrity|crossorigin)(\s*=\s*("[^"]*"|'[^']*'|[^\s>]*))?/gi, ''));
+      // ES モジュールは CORS が要るので、パスにそのまま URL を付けるプロキシ（{rawurl}）があればそれを通す（相対 import もそのまま解決できる）
+      const rawTpl = base && OS.net.list ? OS.net.list().find(t => /\{rawurl\}\s*$/.test(t)) : null;
+      if (rawTpl && /^https?:/i.test(base)) {
+        const px = rawTpl.replace(/\{rawurl\}\s*$/, '').trim();
+        doc = doc.replace(/<script\b[^>]*\btype\s*=\s*["']?module["']?[^>]*>/gi, tag => tag.replace(/\bsrc\s*=\s*(["'])(.*?)\1/i, (x, q, src) => { try { return 'src=' + q + px + new URL(src.replace(/&amp;/g, '&'), base).href + q; } catch (e) { return x; } }));
+        if (!/<script[^>]*type\s*=\s*["']?importmap/i.test(doc)) pre = '<script type="importmap">' + JSON.stringify({ imports: { [og + '/']: px + og + '/' } }).replace(/</g, '\\u003c') + '</scr' + 'ipt>';
+      }
+      const inj = (base ? '<base href="' + wvEsc(base) + '">' : '') + pre + js('(' + String(wvCompat) + ')(' + JSON.stringify(C).replace(/</g, '\\u003c') + ');') + js('(' + String(wvAgent) + ')();');
+      doc = doc.replace(/<meta[^>]+http-equiv\s*=\s*["']?(content-security-policy|x-frame-options|refresh)[^>]*>/gi, '');
       return /<head[^>]*>/i.test(doc) ? doc.replace(/<head[^>]*>/i, x => x + inj) : inj + doc;
     };
     // 中身を直接見せる（アプリが作った要素）。HTML の文字列は html() で
     wv.show = function (...nodes) { seq++; wv.frame = null; el.textContent = ''; el.append(...nodes); };
     wv.html = function (doc, base) { seq++; wv.lastHtml = String(doc); mkFrame('allow-scripts allow-forms').srcdoc = inject(doc, base); setTitle(''); };
     wv.post = function (data) { if (wv.frame && wv.frame.contentWindow) wv.frame.contentWindow.postMessage(data, '*'); };
-    wv.load = async function (u) {
+    wv.load = async function (u, post) {
       u = wv.resolve(u);
       // DuckDuckGo の検索結果リンクは転送URLなので中身を取り出す
       try { const U = new URL(u); if (/duckduckgo\.com$/.test(U.hostname) && U.pathname === '/l/' && U.searchParams.get('uddg')) u = U.searchParams.get('uddg'); } catch (e) { /* URLでない */ }
@@ -883,7 +1050,7 @@
       page('読み込み中…', [u]);
       status('プロキシ経由で取得しています…');
       try {
-        const r = await OS.net.get(u, { direct: false });
+        const r = post != null ? await OS.net.send(u, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: post }) : await OS.net.get(u, { direct: false });
         const type = (r.headers.get('content-type') || '').toLowerCase();
         const buf = await r.arrayBuffer();
         if (my !== seq || wv.destroyed) return;
@@ -899,7 +1066,7 @@
           else wv.show(h('pre', { class: 'hb-pre' }, text));
           wv.lastHtml = text;
         }
-        status('プロキシモードで表示中（' + Math.round(buf.byteLength / 1024) + ' KB）。ログインが必要なページやスクリプト主体のサイトは正しく動きません。');
+        status('プロキシモードで表示中（' + Math.max(1, Math.round(buf.byteLength / 1024)) + ' KB）。スクリプトの通信もプロキシ経由で取ります。ログインが必要なページや、URL で画面を切り替えるサイトは正しく動かないことがあります。');
         emit('load', u);
       } catch (e) {
         if (my !== seq || wv.destroyed) return;
@@ -923,13 +1090,35 @@
       if (!wv.frame || e.source !== wv.frame.contentWindow || !e.data) return;
       const d = e.data;
       if (d.hbrowser !== 1) { emit('message', d); return; }
+      if (d.fetch && typeof d.fetch === 'object') { proxyFetch(d.fetch, e.source); return; }
+      if (d.store === 'local' || d.store === 'cookie') { const st = stores[originOf(wv.vurl || wv.url)] || (stores[originOf(wv.vurl || wv.url)] = { local: {}, cookies: {} }); if (d.data && typeof d.data === 'object') st[d.store === 'local' ? 'local' : 'cookies'] = d.data; return; }
+      if (typeof d.vurl === 'string') { wv.vurl = d.vurl; return; }
       if (typeof d.title === 'string') { setTitle(d.title); return; }
       if (d.note === 'post') { OS.ui.toast('フォームの送信（POST）はできません'); return; }
       if (typeof d.nav !== 'string') return;
       const u = d.nav;
       if (/^https?:/i.test(u) && (d.dl || WV_DL.test(u.split(/[?#]/)[0]))) { if (emit('download', u) === undefined && !o.ondownload) OS.ui.toast('ダウンロードには対応していません'); return; }
       if (!/^(https?|hfs):/i.test(u)) return;
+      if (typeof d.post === 'string' && /^https?:/i.test(u)) { wv.history.splice(wv.index + 1); wv.history.push(u); wv.index = wv.history.length - 1; emit('navigate-post', u); wv.load(u, d.post); return; }
       if (o.onnavigate) emit('navigate', u); else wv.go(u);
+    };
+    // ページのスクリプトの通信（fetch / XHR）を代わりに行う。http(s) だけ。cookie は送らない
+    const PROXY_FETCH_MAX = 16;
+    let fetching = 0;
+    const proxyFetch = async (f, src) => {
+      const reply = m => { try { src.postMessage(m, '*', m.body ? [m.body] : []); } catch (e) { /* ページが閉じた */ } };
+      if (!f || typeof f.url !== 'string' || !/^https?:/i.test(f.url)) return reply({ hbrowserFetch: f && f.id, error: 'http(s) 以外には接続できません' });
+      while (fetching >= PROXY_FETCH_MAX) await new Promise(r => setTimeout(r, 100));
+      fetching++;
+      try {
+        const m = String(f.method || 'GET').toUpperCase(), hd = {};
+        Object.keys(f.headers || {}).forEach(k => { if (/^(content-type|accept|accept-language)$/i.test(k)) hd[k] = String(f.headers[k]); });
+        const r = m === 'GET' || m === 'HEAD' ? await OS.net.get(f.url, { any: true, timeout: 20000 }) : await OS.net.send(f.url, { method: m, headers: hd, body: f.body });
+        const out = {}; r.headers.forEach((v, k) => { if (!/^(set-cookie|content-encoding|content-length|transfer-encoding)$/i.test(k)) out[k] = v; });
+        const body = m === 'HEAD' ? null : await r.arrayBuffer();
+        reply({ hbrowserFetch: f.id, status: r.status, statusText: r.statusText || '', headers: out, body: body });
+      } catch (e) { reply({ hbrowserFetch: f.id, error: e.message }); }
+      finally { fetching--; }
     };
     window.addEventListener('message', onMsg);
     wv.destroy = () => { wv.destroyed = true; seq++; window.removeEventListener('message', onMsg); el.remove(); };

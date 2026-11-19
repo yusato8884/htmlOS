@@ -441,6 +441,25 @@
     }
   });
   register({
+    name: 'proxyrank.service', desc: 'CORS プロキシの順番決め', after: ['netmon.service'], wantedBy: 'multi-user.target', restart: 'no',
+    reload: () => OS.net.rank(10000), // systemctl reload proxyrank で測り直す
+    start(ctx) {
+      const run = why => {
+        if (!OS.net || !OS.net.rank) return;
+        if (navigator.onLine === false) { ctx.log('オフラインなので、オンラインになってから測ります'); return; }
+        OS.net.rank(10000).then(r => {
+          const ok = r.results.filter(x => x.ok);
+          ctx.log((why || '') + 'プロキシを測りました: ' + r.results.map(x => (x.ok ? x.proxy.replace(/^https?:\/\//, '').replace(/[/?].*$/, '') + ' ' + x.ms + 'ms' : x.proxy.replace(/^https?:\/\//, '').replace(/[/?].*$/, '') + ' ×')).join(', '), ok.length ? 6 : 4);
+          if (!ok.length) ctx.log('使えるプロキシがありません（設定 → ネットワーク）', 4);
+        }).catch(e => ctx.log('測れませんでした: ' + e.message, 4));
+      };
+      const on = () => run('オンラインに戻ったので');
+      window.addEventListener('online', on);
+      run(''); // 起動のときに測り始める（測り終わるのは待たないので、起動は遅くならない）
+      return () => window.removeEventListener('online', on);
+    }
+  });
+  register({
     name: 'notifyd.service', desc: '通知', wantedBy: 'graphical.target', restart: 'on-failure',
     start(ctx) { ctx.log('通知を受け付けています'); }
   });

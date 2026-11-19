@@ -167,14 +167,14 @@
           const ta = h('textarea', { class: 'inp st-area', id: 'st-proxies', spellcheck: 'false', disabled: !admin, 'aria-label': 'CORSプロキシ一覧' }, OS.net.list().join('\n'));
           page.append(h('h2', null, 'ネットワーク'), adminNote(),
             h('h3', null, 'CORSプロキシ'),
-            h('p', null, 'hBrowser のプロキシモードとダウンロード（wget を含む）で使います。上から順に 2 秒ずつずらして同時に試し、最初に返事が来たものを使います（うまくいったものは次から最初に試します）。{url} の部分がエンコードされたURLに、{rawurl} はそのままのURLに置き換わります。JSON で返すプロキシは、後ろに「 json:キー」を付けます（例: … json:contents）。いずれも外部の無料サービスなので、止まったり制限がかかったりすることがあります。'),
+            h('p', null, 'hBrowser のプロキシモードとダウンロード（wget を含む）で使います。起動時に各プロキシの速さを測って順番を決め（proxyrank.service）、その順に 2 秒ずつずらして同時に試し、最初に返事が来たものを使います。{url} の部分がエンコードされたURLに、{rawurl} はそのままのURLに置き換わります。JSON で返すプロキシは、後ろに「 json:キー」を付けます（例: … json:contents）。いずれも外部の無料サービスなので、止まったり制限がかかったりすることがあります。'),
             ta,
             h('div', { class: 'st-row' },
               h('button', { class: 'btn primary', type: 'button', disabled: !admin, onclick: () => { try { const l = ta.value.split('\n').map(s => s.trim()).filter(s => /\{(raw)?url\}/.test(s)); OS.config.set('proxies', l); ta.value = l.join('\n'); ui.toast('プロキシ設定を保存しました'); } catch (e) { err(e); } } }, '保存'),
               h('button', { class: 'btn', type: 'button', disabled: !admin, onclick: () => { ta.value = OS.net.defaults.join('\n'); } }, '初期値に戻す'),
               h('button', { class: 'btn', type: 'button', id: 'st-proxy-test', onclick: async e => {
                 const b = e.currentTarget; b.disabled = true; res.textContent = 'example.com を各プロキシで取得しています…（最大 15 秒）';
-                try { const l = await OS.net.test(); res.textContent = l.map(x => (x.ok ? '✓ ' : '✗ ') + x.proxy.replace(/\?.*$/, '') + '  ' + (x.ok ? (x.ms / 1000).toFixed(1) + ' 秒' : x.error)).join('\n'); }
+                try { const l = (await OS.net.rank(15000)).results; res.textContent = 'この順番で試します:\n' + l.map((x, i) => (i + 1) + '. ' + (x.ok ? '✓ ' : '✗ ') + x.proxy.replace(/\?.*$/, '') + '  ' + (x.ok ? (x.ms / 1000).toFixed(1) + ' 秒' : x.error)).join('\n'); }
                 catch (er) { res.textContent = er.message; } finally { b.disabled = false; }
               } }, '接続テスト')),
             res);

@@ -973,7 +973,9 @@
   //   うまくいったプロキシは覚えておき、次からは最初に試す。
   //   書き方: {url} がエンコードした URL に置き換わる。後ろに「 json:キー」を付けると、JSON で返すプロキシの そのキー を中身として使う
   const OLD_PROXIES = [['https://corsproxy.io/?url={url}', 'https://api.allorigins.win/raw?url={url}', 'https://api.codetabs.com/v1/proxy?quest={url}']]; // 5.1.1 までの既定
-  let goodProxy = null;
+  // 試す順番は起動時に決める（proxyrank.service が各プロキシで example.com を取ってみて、届いたものを速い順に。届かなかったものは最後）
+  let ranked = null;
+  const order = () => { const l = proxyList(); return ranked && ranked.key === JSON.stringify(l) ? ranked.order.slice() : l.slice(); };
   const proxyList = () => {
     let l = config.get('proxies', null);
     // 4.x〜5.1.1 の既定のまま保存されていたら、新しい既定に置き換える
@@ -981,12 +983,13 @@
     return l;
   };
   const hostOf = u => { try { return new URL(u).host; } catch (e) { return u; } };
+  const PROXY_ERR = [401, 403, 407, 408, 429, 451, 500, 502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 530];
   OS.net = {
     defaults: DEFAULT_PROXIES,
     list: proxyList,
     proxied(url) { return proxyList().map(t => t.split(/\s+json:/)[0].trim().replace('{rawurl}', url).replace('{url}', encodeURIComponent(url))); },
     // 1 つの URL を取りに行く。tpl はプロキシの書き方（直接なら null）
-    async _one(url, tpl, signal, timeout) {
+    async _one(url, tpl, signal, timeout, any) {
       const jsonKey = tpl && (tpl.match(/\s+json:([\w.]+)\s*$/) || [])[1];
       const u = tpl ? tpl.split(/\s+json:/)[0].trim().replace('{rawurl}', url).replace('{url}', encodeURIComponent(url)) : url;
       const ac = new AbortController(), stop = () => ac.abort();
@@ -994,7 +997,8 @@
       const tm = setTimeout(() => { ac.timedOut = true; ac.abort(); }, timeout);
       try {
         const r = await fetch(u, { signal: ac.signal, credentials: 'omit' });
-        if (!r.ok) throw new Error('HTTP ' + r.status);
+        // any: サイトの 404 なども返す（ページのスクリプト用）。ただしプロキシ自身のエラーらしいものは次を試す
+        if (!r.ok && !(any && !jsonKey && (!tpl || !PROXY_ERR.includes(r.status)))) throw new Error('HTTP ' + r.status);
         if (!jsonKey) { await r.clone().arrayBuffer(); return r; } // 中身まで届くのを確かめる
         const j = await r.json(), v = jsonKey.split('.').reduce((o, k) => o == null ? o : o[k], j);
         if (typeof v !== 'string') throw new Error('返事の形が違います');
@@ -1005,8 +1009,7 @@
     },
     async get(url, opt) {
       opt = opt || {};
-      let tpls = proxyList().slice();
-      if (goodProxy && tpls.includes(goodProxy)) tpls = [goodProxy].concat(tpls.filter(t => t !== goodProxy));
+      const tpls = order();
       const tries = (opt.direct === false ? [] : [null]).concat(tpls);
       const all = new AbortController(), errs = [], timeout = opt.timeout || 20000, gap = opt.gap == null ? 2000 : opt.gap;
       return new Promise((res, rej) => {
@@ -1014,9 +1017,8 @@
         const next = () => {
           if (done || idx >= tries.length) return;
           const tpl = tries[idx++], name = tpl ? hostOf(tpl.split(/\s+json:/)[0].replace(/\{(raw)?url\}/, '')) : '直接';
-          OS.net._one(url, tpl, all.signal, timeout).then(r => {
+          OS.net._one(url, tpl, all.signal, timeout, opt.any).then(r => {
             if (done) return; done = true; clearTimeout(timer); all.abort();
-            if (tpl) goodProxy = tpl;
             res(r);
           }, e => {
             if (done) return;
@@ -1030,15 +1032,42 @@
         next();
       });
     },
+    // POST など。直接 → プロキシ（JSON で返すものは除く）の順に試す
+    async send(url, opt) {
+      opt = opt || {};
+      const tpls = [null].concat(order().filter(t => !/\sjson:/.test(t)));
+      const errs = [];
+      for (const tpl of tpls) {
+        const u = tpl ? tpl.trim().replace('{rawurl}', url).replace('{url}', encodeURIComponent(url)) : url;
+        const ac = new AbortController(), tm = setTimeout(() => ac.abort(), opt.timeout || 20000);
+        try {
+          const r = await fetch(u, { method: opt.method || 'POST', headers: opt.headers || {}, body: opt.body == null ? undefined : opt.body, signal: ac.signal, credentials: 'omit' });
+          if (tpl && PROXY_ERR.includes(r.status)) throw new Error('HTTP ' + r.status);
+          await r.clone().arrayBuffer();
+          return r;
+        } catch (e) { errs.push((tpl ? hostOf(tpl.replace(/\{(raw)?url\}.*$/, '')) : '直接') + ': ' + (e.name === 'AbortError' ? 'タイムアウト' : e.message)); }
+        finally { clearTimeout(tm); }
+      }
+      throw new Error('送信できませんでした（' + errs.join(' / ') + '）');
+    },
     // 設定のプロキシを 1 つずつ試す（設定 → ネットワーク の「接続テスト」）
-    async test(url) {
+    async test(url, timeout) {
       url = url || 'https://example.com/';
       return Promise.all(proxyList().map(async tpl => {
         const t0 = Date.now();
-        try { const r = await OS.net._one(url, tpl, null, 15000); const n = (await r.text()).length; return { proxy: tpl, ok: true, ms: Date.now() - t0, size: n }; }
+        try { const r = await OS.net._one(url, tpl, null, timeout || 15000); const n = (await r.text()).length; return { proxy: tpl, ok: true, ms: Date.now() - t0, size: n }; }
         catch (e) { return { proxy: tpl, ok: false, ms: Date.now() - t0, error: e.message }; }
       }));
     },
+    // 各プロキシを測って、試す順番を決め直す（起動時と、オンラインに戻ったとき・設定の「接続テスト」で）
+    async rank(timeout) {
+      const key = JSON.stringify(proxyList()), res = await OS.net.test(null, timeout || 10000);
+      const ok = res.filter(x => x.ok).sort((a, b) => a.ms - b.ms), bad = res.filter(x => !x.ok);
+      ranked = { key: key, order: ok.concat(bad).map(x => x.proxy), results: ok.concat(bad), at: Date.now() };
+      return ranked;
+    },
+    get ranking() { return ranked; },
+    order: order,
     // Blob を hFS に保存できる形へ。テキストはそのまま、それ以外は data: URL にする
     blobToContent(blob, name) {
       const k = fs.kind(name);
