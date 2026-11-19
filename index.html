@@ -10765,6 +10765,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 
 /* ---- HTUi */
 #htui{position:absolute;inset:0;display:flex;flex-direction:column;overflow:hidden}
+.p-task[hidden]{display:none!important}
 .wire{position:absolute;z-index:150000;box-sizing:border-box;border:2px solid var(--accent,#3584e4);border-radius:8px;background:rgba(127,127,127,.06);pointer-events:none}
 .lock-wrap{position:absolute;inset:0;z-index:200000}
 .lock-wrap>div{position:absolute;inset:0;display:flex;flex-direction:column;overflow:hidden}
@@ -12380,7 +12381,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 (function () {
   'use strict';
   // コードネーム: htmlOS は恒星の名前（3.2 = Sirius、4.0 = Vega）、描画エンジン HTUi SDK は惑星の名前（2 = Jupiter、3.0 = Venus）
-  var MEDIA_VERSION = '5.3.2', MEDIA_BUILD = '45', MEDIA_CODENAME = 'Altair';
+  var MEDIA_VERSION = '5.3.3', MEDIA_BUILD = '46', MEDIA_CODENAME = 'Altair';
   var BOOT = window.BOOT = {};
   var P = 'htmlos:';
 
