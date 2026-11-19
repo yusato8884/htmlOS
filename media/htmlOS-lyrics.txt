@@ -1,62 +1,47 @@
-[Intro]
-(soft vinyl crackle, mellow keys)
-
-[Verse 1]
 真っ黒な画面に 白いタグが灯る
 ブラウザの中で 小さな宇宙が起動する
-ローカルストレージに刻んだ 僕の記憶
+LocalStorageに刻んだ 僕の記憶
 電源を落としても ここにまだ残ってる
 
-[Pre-Chorus]
-バイオスを抜けて カーネルが目を覚ます
+BIOSを抜けて カーネルが目を覚ます
 一秒だけの静けさのあと
 
-[Chorus]
-Hello, エイチティーエムエル オーエス
+Hello, htmlOS
 タグの海から生まれた世界
-Hello, エイチティーエムエル オーエス
+Hello, htmlOS
 ひとつのファイルに 夢を詰め込んで
 Sirius, Vega, Altair, Deneb
 星の名前で 進化してく
 ブラウザは背骨 あとは全部 僕のもの
 
-[Verse 2]
-ジェイシェルに打ち込む 一行のコマンド
-スードで開く扉 ルートだけの領域
+jshに打ち込む 一行のコマンド
+sudoで開く扉 rootだけの領域
 指先で窓がスナップする
 仮想デスクトップ 八つの空
 
-[Pre-Chorus]
 ログアウトなんて いらない
 ユーザーを切り替えて そのまま続きへ
 
-[Chorus]
-Hello, エイチティーエムエル オーエス
+Hello, htmlOS
 タグの海から生まれた世界
-Hello, エイチティーエムエル オーエス
+Hello, htmlOS
 ひとつのファイルに 夢を詰め込んで
 Sirius, Vega, Altair, Deneb
 星の名前で 進化してく
 ブラウザは背骨 あとは全部 僕のもの
 
-[Bridge]
-(quiet, minimal keys)
 眠りにつくときも 全部そのまま
 ハイバネートの闇の中で
 目覚めたらまた 同じ画面
 ずっと待ってたよ おかえり
 
-[Final Chorus]
-(slightly fuller, warm)
-Hello, エイチティーエムエル オーエス
+Hello, htmlOS
 ここが僕の 動き出す未来
-Hello, エイチティーエムエル オーエス
+Hello, htmlOS
 どこまでも広がる 小さな宇宙
 Sirius, Vega, Altair, Deneb
 星をたどって 次の空へ
 ブラウザの中で 僕らは どこへでも行ける
 
-[Outro]
-(fade out)
-shutdown h now
-...See you, エイチティーエムエル オーエス
+shutdown -h now
+...See you, htmlOS
