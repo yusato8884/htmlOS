@@ -133,7 +133,7 @@
             OS.hdm.sessionFor(OS.htui.user) !== OS.htui.sessionId
               ? h('div', { class: 'st-row' }, h('button', { class: 'btn primary', type: 'button', onclick: () => OS.htui.switchSession(OS.hdm.sessionFor(OS.htui.user)) }, '今すぐ切り替える'), '開いているアプリは閉じます（未保存の確認は出ます）。')
               : h('p', null, '次回ログイン時も、ここで選んだ環境で起動します。ログイン画面（hdm）でも選べます。'),
-            OS.htui.sessionId === 'htui' ? [h('h3', null, 'Dock の位置（HTUi 2）'),
+            OS.htui.sessionId === 'htui' ? [h('h3', null, 'Dock の位置（HTUi 3）'),
               h('div', { class: 'st-row' }, ['left', 'bottom', 'right'].map(d => h('label', null, h('input', { type: 'radio', name: 'st-dock-' + win.pid, id: 'st-dock-' + d, checked: (p.dock || 'left') === d, onchange: () => OS.htui.setPrefs({ dock: d }) }), ' ' + { left: '左（既定）', bottom: '下', right: '右' }[d]))),
               h('p', null, 'Dock のアイコンを右クリックすると、固定/解除・並び替え・Dock の位置を変えられます。')] : null,
             h('h3', null, '画面モード'),

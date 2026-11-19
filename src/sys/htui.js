@@ -127,7 +127,46 @@
       "<path d='M0 500L180 400L330 450L520 330L720 460L900 380L1080 450L1260 360L1440 430L1600 390V500Z' fill='#8ea3c0'/>" +
       "<path d='M0 500L240 440L420 480L640 420L860 490L1100 430L1320 480L1600 440V500Z' fill='#6d84a6'/>" +
       "<g opacity='.35' transform='translate(0 1000) scale(1 -1)'><path d='M0 500L180 400L330 450L520 330L720 460L900 380L1080 450L1260 360L1440 430L1600 390V500Z' fill='#8ea3c0'/></g>" +
-      "<g stroke='#fff' stroke-linecap='round' opacity='.5'><path d='M700 540H900M730 575H870M760 610H840M650 660H950' stroke-width='3'/></g>", '#d3c4c9') }
+      "<g stroke='#fff' stroke-linecap='round' opacity='.5'><path d='M700 540H900M730 575H870M760 610H840M650 660H950' stroke-width='3'/></g>", '#d3c4c9') },
+    // ---- htmlOS 6（Deneb）で追加
+    { name: 'デネブ（はくちょう座）', css: svgWall(
+      "<defs><radialGradient id='g' cx='.4' cy='.25' r='1'><stop offset='0' stop-color='#22285e'/><stop offset='.5' stop-color='#0e1236'/><stop offset='1' stop-color='#04050f'/></radialGradient>" +
+      "<radialGradient id='mw' cx='.5' cy='.5' r='.5'><stop offset='0' stop-color='#c9b8ff' stop-opacity='.32'/><stop offset='.6' stop-color='#8fa8ff' stop-opacity='.12'/><stop offset='1' stop-color='#8fa8ff' stop-opacity='0'/></radialGradient>" +
+      "<radialGradient id='d' cx='.5' cy='.5' r='.5'><stop offset='0' stop-color='#fff'/><stop offset='.12' stop-color='#f3f6ff'/><stop offset='.35' stop-color='#b9c9ff' stop-opacity='.55'/><stop offset='1' stop-color='#7d8dff' stop-opacity='0'/></radialGradient>" +
+      "<filter id='s' x='-50%' y='-50%' width='200%' height='200%'><feGaussianBlur stdDeviation='34'/></filter></defs>" +
+      "<rect width='1600' height='1000' fill='url(#g)'/>" +
+      "<ellipse cx='820' cy='520' rx='980' ry='200' transform='rotate(62 820 520)' fill='url(#mw)' filter='url(#s)'/>" + stars(300, 1000, 61) +
+      "<g stroke='#d8e2ff' stroke-width='1.7' opacity='.5' fill='none' stroke-linecap='round'><path d='M760 210L820 470L880 800M560 560L700 515L820 470L955 420L1090 390'/></g>" +
+      "<g fill='#eef2ff'><circle cx='820' cy='470' r='4.2'/><circle cx='880' cy='800' r='3.6'/><circle cx='560' cy='560' r='3.4'/><circle cx='700' cy='515' r='3'/><circle cx='955' cy='420' r='3.2'/><circle cx='1090' cy='390' r='3.6'/></g>" +
+      "<circle cx='760' cy='210' r='130' fill='url(#d)'/><g stroke='#fff' stroke-linecap='round' opacity='.85'><path d='M760 150V270M700 210H820' stroke-width='2'/></g><circle cx='760' cy='210' r='7' fill='#fff'/>" +
+      "<path d='M0 910C300 870 640 930 960 895S1380 860 1600 900V1000H0Z' fill='#02030a'/>", '#0e1236') },
+    { name: 'ラグドール（夜の猫）', css: svgWall(
+      "<defs><linearGradient id='g' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#1d2350'/><stop offset='.6' stop-color='#4a3f7a'/><stop offset='1' stop-color='#c47a8f'/></linearGradient>" +
+      "<radialGradient id='m' cx='.5' cy='.5' r='.5'><stop offset='0' stop-color='#fffbe8'/><stop offset='.55' stop-color='#fff1c4'/><stop offset='1' stop-color='#ffe39a' stop-opacity='0'/></radialGradient>" +
+      "<filter id='s' x='-50%' y='-50%' width='200%' height='200%'><feGaussianBlur stdDeviation='40'/></filter></defs>" +
+      "<rect width='1600' height='1000' fill='url(#g)'/>" + stars(120, 560, 23) +
+      "<circle cx='560' cy='330' r='260' fill='#fff3c8' opacity='.25' filter='url(#s)'/><circle cx='560' cy='330' r='150' fill='url(#m)'/><circle cx='560' cy='330' r='112' fill='#fff8e2'/>" +
+      "<path d='M0 820C260 760 520 790 820 760S1360 700 1600 740V1000H0Z' fill='#2a2346'/>" +
+      "<g fill='#15122a'><ellipse cx='1150' cy='770' rx='118' ry='140'/><circle cx='1150' cy='600' r='76'/><path d='M1088 566L1094 488L1136 540Z'/><path d='M1212 566L1206 488L1164 540Z'/></g>" +
+      "<path d='M1255 860C1350 850 1360 740 1300 715' fill='none' stroke='#15122a' stroke-width='30' stroke-linecap='round'/>" +
+      "<path d='M0 900C320 870 700 900 1000 880S1420 860 1600 880V1000H0Z' fill='#110e22'/>", '#4a3f7a') },
+    { name: '星雲', css: svgWall(
+      "<defs><radialGradient id='g' cx='.5' cy='.5' r='.8'><stop offset='0' stop-color='#1a0f2e'/><stop offset='1' stop-color='#05030b'/></radialGradient>" +
+      "<filter id='s' x='-50%' y='-50%' width='200%' height='200%'><feGaussianBlur stdDeviation='70'/></filter><filter id='t' x='-50%' y='-50%' width='200%' height='200%'><feGaussianBlur stdDeviation='26'/></filter></defs>" +
+      "<rect width='1600' height='1000' fill='url(#g)'/>" +
+      "<g filter='url(#s)'><circle cx='620' cy='460' r='300' fill='#d6337a' opacity='.55'/><circle cx='960' cy='520' r='280' fill='#3d6bff' opacity='.5'/><circle cx='800' cy='330' r='200' fill='#ff9a3d' opacity='.35'/><circle cx='1120' cy='300' r='180' fill='#7a3dff' opacity='.4'/></g>" +
+      "<g filter='url(#t)' opacity='.7'><path d='M420 620C560 480 700 560 820 440S1060 360 1180 470' stroke='#ffd6ec' stroke-width='40' fill='none'/><path d='M520 380C680 420 760 300 920 330' stroke='#bcd2ff' stroke-width='24' fill='none'/></g>" +
+      stars(340, 1000, 47) + "<circle cx='860' cy='470' r='5' fill='#fff'/><circle cx='860' cy='470' r='26' fill='#fff' opacity='.18'/>", '#1a0f2e') },
+    { name: '雪山', css: svgWall(
+      "<defs><linearGradient id='g' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#7fa7d8'/><stop offset='.55' stop-color='#d9e6f5'/><stop offset='1' stop-color='#f7f9fc'/></linearGradient>" +
+      "<linearGradient id='m' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#ffffff'/><stop offset='.45' stop-color='#e6eef8'/><stop offset='1' stop-color='#9fb6d3'/></linearGradient></defs>" +
+      "<rect width='1600' height='1000' fill='url(#g)'/><circle cx='1240' cy='210' r='70' fill='#fffdf4' opacity='.9'/>" +
+      "<path d='M0 640L260 420L420 520L640 260L860 520L1000 430L1220 600L1400 470L1600 580V1000H0Z' fill='url(#m)'/>" +
+      "<path d='M640 260L590 330L620 320L560 410L640 360L700 400L680 330L720 350Z' fill='#fff'/><path d='M260 420L230 470L262 455L245 500L300 460Z' fill='#fff'/>" +
+      "<path d='M640 260L860 520L760 470L700 520L660 420Z M260 420L420 520L360 500L320 540Z' fill='#7f97ba' opacity='.35'/>" +
+      "<path d='M0 760L300 680L520 740L760 660L1000 740L1260 680L1600 760V1000H0Z' fill='#b9cbe2'/>" +
+      "<path d='" + trees(800, 60, 13) + "' fill='#3c5a6e' opacity='.7'/>" +
+      "<path d='M0 870L400 820L760 860L1120 810L1600 860V1000H0Z' fill='#f4f7fb'/>", '#d9e6f5') },
   ];
   // 壁紙の CSS。prefs.wallpaper が 'custom' なら、そのユーザーの ~/.config/wallpaper（画像の data: URL）を使う
   function wallCss(prefs, user) {
@@ -293,6 +332,7 @@
     htui.shell = sh; htui.sessionId = sh.id;
     htui.el.textContent = ''; htui.el.className = 'desktop de-' + sh.id;
     htui.prefs = loadPrefs(); applyPrefs();
+    htui.wsReset();
     sh.build(kit);
     if (!htui.desk) kit.desk(false, true);
     if (!htui.tasks) htui.tasks = h('div'); // タスクボタンを出さない環境でも、ウィンドウ側が参照するので置き場だけ作る
@@ -316,6 +356,7 @@
     }
     htui.refreshApps(); htui.refreshUser(); htui.syncMode(); htui.syncTitle(); watchDesk();
     if (sh.onStart) sh.onStart(kit);
+    htui.wsApply();
     htui.syncTasks();
     if (OS.power) OS.power.apply(); // 電源管理（ユーザーの設定どおり）
     if (OS.bgm) OS.bgm.apply(); // アンビエントサウンド（ユーザーの設定どおり）
@@ -632,8 +673,7 @@
       { label: '左半分に配置', act: () => w.snap('left') }, { label: '右半分に配置', act: () => w.snap('right') },
       { label: '左上に配置', act: () => w.snap('tl') }, { label: '右上に配置', act: () => w.snap('tr') },
       { label: '左下に配置', act: () => w.snap('bl') }, { label: '右下に配置', act: () => w.snap('br') },
-      { sep: true }, { label: '閉じる', icon: 'x', act: () => w.close() }
-    ];
+      { sep: true }].concat(htui.wsMoveItems(rootOf(w)), [{ sep: true }, { label: '閉じる', icon: 'x', act: () => w.close() }]);
   }
   htui.winMenu = winMenu;
   function deskMenu() {
@@ -654,6 +694,8 @@
     if (sid === 'mac') items.push({ sep: true }, { label: 'Launchpad', icon: 'grid', act: () => sh.launchpad() }, { label: 'Mission Control', icon: 'grid', act: () => sh.missionControl() });
     if (sid === 'gnome') items.push({ sep: true }, { label: 'アクティビティ', icon: 'grid', act: () => sh.overview() });
     if (sid === 'win') items.push({ sep: true }, { label: 'タスクマネージャー', icon: 'chart', act: () => run('htask') });
+    items.push({ sep: true }, { label: sid === 'mac' ? 'Mission Control（仮想デスク）' : sid === 'gnome' ? 'ワークスペース（アクティビティ）' : '仮想デスク…', icon: 'desks', act: () => (sid === 'mac' ? sh.missionControl() : sid === 'gnome' ? sh.overview() : htui.wsView()) },
+      { label: '新しいデスクトップ', icon: 'plus', disabled: htui.ws.count >= htui.ws.max, act: () => htui.wsAdd(true) });
     const vis = htui.wins.filter(w => !w.el.classList.contains('hidden'));
     if (htui.wins.length) items.push({ sep: true }, vis.length ? { label: 'すべてのウィンドウを最小化', icon: 'min', act: () => vis.forEach(w => w.minimize()) } : { label: 'すべてのウィンドウを戻す', icon: 'max', act: () => htui.wins.forEach(w => w.focus()) });
     items.push({ sep: true }, { label: '設定…', icon: 'gear', act: () => run('settings') });
@@ -927,10 +969,140 @@
     let rq = 0;
     new MutationObserver(() => { if (rq) return; rq = requestAnimationFrame(() => { rq = 0; const r = document.getElementById('os-root'); if (r) htui.syncRanges(r); }); }).observe(document.body, { childList: true, subtree: true });
   }
-  htui.active = () => htui.wins.find(w => hasActive(w) && !w.el.classList.contains('hidden')) || null;
+  htui.active = () => htui.wins.find(w => hasActive(w) && !w.el.classList.contains('hidden') && !w.el.classList.contains('ws-off')) || null;
   // 子ウインドウも含めた、すべてのウインドウ
   htui.allWins = () => { const out = [], add = w => { out.push(w); w.children.forEach(add); }; htui.wins.forEach(add); return out; };
   const rootOf = w => { while (w.parent) w = w.parent; return w; };
+  // ---------- 仮想デスク（htmlOS 6 から）。すべてのデスクトップ環境で使える
+  //   ウィンドウはそれぞれ ws（何番目のデスクトップか）を持つ。今のデスクトップ以外のウィンドウは .ws-off で隠す。
+  //   ほかのデスクトップのウィンドウに focus すると、そのデスクトップへ切り替わる（Alt+Tab・Dock・タスクバーからでも）
+  //   数はユーザーの設定 htui.prefs.desks に覚える（1〜8）。Ctrl+Super+←/→ か Ctrl+Alt+PageUp/PageDown で切り替え、Shift も押すとウィンドウごと移る
+  const ws = htui.ws = { cur: 0, count: 1, max: 8 };
+  htui.wsName = i => 'デスクトップ ' + (i + 1);
+  htui.wsOf = w => rootOf(w).ws | 0;
+  htui.wsReset = function () { ws.cur = 0; ws.count = Math.max(1, Math.min(ws.max, (htui.prefs && htui.prefs.desks) | 0 || 1)); };
+  htui.wsApply = function () {
+    if (!htui.el) return;
+    htui.allWins().forEach(w => {
+      const off = htui.wsOf(w) !== ws.cur;
+      w.el.classList.toggle('ws-off', off);
+      if (w.task) w.task.classList.toggle('ws-off', off);
+    });
+    if (htui.shell && htui.shell.onWs) { try { htui.shell.onWs(); } catch (e) { /* 無視 */ } }
+    htui.syncTitle();
+  };
+  const saveDesks = () => { if (htui.user && (htui.prefs.desks | 0) !== ws.count) htui.setPrefs({ desks: ws.count }); };
+  function wsOsd() {
+    if (!htui.el) return;
+    let o = htui.el.querySelector(':scope > .ws-osd');
+    if (!o) { o = h('div', { class: 'ws-osd', role: 'status' }); htui.el.append(o); }
+    o.textContent = '';
+    o.append(h('b', null, htui.wsName(ws.cur)), h('span', { class: 'ws-osd-dots' }, Array.from({ length: ws.count }, (_, i) => h('i', { class: i === ws.cur ? 'on' : '' }))));
+    o.classList.remove('show'); void o.offsetWidth; o.classList.add('show');
+    clearTimeout(o._t); o._t = setTimeout(() => o.classList.remove('show'), 900);
+  }
+  htui.wsSwitch = function (i, opt) {
+    opt = opt || {};
+    i = Math.max(0, Math.min(ws.count - 1, i | 0));
+    if (i === ws.cur) { if (!opt.quiet) wsOsd(); return false; }
+    const dir = i > ws.cur ? 1 : -1;
+    if (opt.carry) { const w = htui.active(); if (w) rootOf(w).ws = i; }
+    ws.cur = i; htui.wsApply();
+    if (htui.desk && !htui.animOff()) { const d = htui.desk; d.classList.remove('ws-in-l', 'ws-in-r'); void d.offsetWidth; d.classList.add(dir > 0 ? 'ws-in-r' : 'ws-in-l'); setTimeout(() => d.classList.remove('ws-in-l', 'ws-in-r'), 260); }
+    focusTop();
+    if (!opt.quiet) wsOsd();
+    if (OS.ipc) { try { OS.ipc.publish('desk.changed', { desk: i + 1, count: ws.count }, 'htui'); } catch (e) { /* 無視 */ } }
+    return true;
+  };
+  htui.wsAdd = function (go) {
+    if (ws.count >= ws.max) { ui.toast('仮想デスクは ' + ws.max + ' 個までです'); return -1; }
+    ws.count++; saveDesks(); htui.wsApply();
+    if (go) htui.wsSwitch(ws.count - 1);
+    return ws.count - 1;
+  };
+  htui.wsRemove = function (i) {
+    if (ws.count <= 1 || i < 0 || i >= ws.count) return false;
+    const to = i > 0 ? i - 1 : 0;
+    htui.wins.forEach(w => { const d = w.ws | 0; if (d === i) w.ws = to; else if (d > i) w.ws = d - 1; });
+    if (ws.cur === i) ws.cur = to; else if (ws.cur > i) ws.cur--;
+    ws.count--; saveDesks(); htui.wsApply(); focusTop();
+    return true;
+  };
+  htui.wsMove = function (w, i) {
+    if (i >= ws.count) { if (htui.wsAdd() < 0) return; i = ws.count - 1; }
+    rootOf(w).ws = Math.max(0, i); htui.wsApply();
+    if (htui.wsOf(w) !== ws.cur) focusTop();
+  };
+  // ウィンドウの右クリックメニューなどに出す「別のデスクトップへ移動」
+  htui.wsMoveItems = function (w) {
+    const cur = htui.wsOf(w), out = [];
+    for (let i = 0; i < ws.count; i++) if (i !== cur) out.push({ label: htui.wsName(i) + ' へ移動', icon: 'desks', act: () => htui.wsMove(w, i) });
+    if (ws.count < ws.max) out.push({ label: '新しいデスクトップへ移動', icon: 'plus', act: () => htui.wsMove(w, ws.count) });
+    return out;
+  };
+  // デスクトップの縮小図を並べた帯。opt.big で大きく。opt.onPick(i) はデスクトップを選んだとき。ウィンドウはドラッグで別のデスクトップへ移せる
+  htui.wsBar = function (opt) {
+    opt = opt || {};
+    const bar = h('div', { class: 'ws-bar' + (opt.big ? ' big' : '') + (opt.cls ? ' ' + opt.cls : ''), role: 'toolbar', 'aria-label': '仮想デスク' });
+    function render() {
+      bar.textContent = '';
+      const desk = htui.desk, W = (desk && desk.clientWidth) || 1280, H = (desk && desk.clientHeight) || 760;
+      const tw = opt.width || (opt.big ? Math.max(140, Math.min(250, (htui.el.clientWidth - 120) / Math.min(ws.count + 1, 4) - 28)) : 120), th = Math.round(tw * H / W), k = tw / W;
+      const wall = wallCss(htui.prefs, htui.user);
+      for (let i = 0; i < ws.count; i++) {
+        const t = h('div', { class: 'ws-thumb' + (i === ws.cur ? ' cur' : ''), style: 'width:' + tw + 'px;height:' + th + 'px;background:' + wall, role: 'button', tabindex: '0', title: htui.wsName(i) + 'に切り替え', 'aria-label': htui.wsName(i) + (i === ws.cur ? '（今のデスクトップ）' : '') });
+        htui.wins.filter(w => (w.ws | 0) === i && !w.closed && !w.el.classList.contains('hidden')).sort((a, b) => (+a.el.style.zIndex || 0) - (+b.el.style.zIndex || 0)).forEach(w => {
+          const a = OS.apps[w.app] || {}, max = w.zone === 'max';
+          const L = max ? 0 : (parseFloat(w.el.style.left) || 0), T = max ? 0 : (parseFloat(w.el.style.top) || 0), WW = max ? W : (parseFloat(w.el.style.width) || w.el.offsetWidth || 400), HH = max ? H : (parseFloat(w.el.style.height) || w.el.offsetHeight || 300);
+          const m = h('div', { class: 'ws-mini', draggable: 'true', title: w.title + '（ドラッグで別のデスクトップへ）', style: 'left:' + L * k + 'px;top:' + T * k + 'px;width:' + Math.max(14, WW * k) + 'px;height:' + Math.max(10, HH * k) + 'px' }, h('span', { class: 'ws-mico' }, OS.icon(a.icon || 'file', opt.big ? 14 : 10)));
+          m.addEventListener('dragstart', e => { e.dataTransfer.setData('text/x-htmlos-win', String(w.pid)); e.dataTransfer.effectAllowed = 'move'; e.stopPropagation(); });
+          t.append(m);
+        });
+        t.addEventListener('click', () => { htui.wsSwitch(i); if (opt.onPick) opt.onPick(i); else render(); });
+        t.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); t.click(); } });
+        t.addEventListener('dragover', e => { if ([...e.dataTransfer.types].includes('text/x-htmlos-win')) { e.preventDefault(); t.classList.add('drop'); } });
+        t.addEventListener('dragleave', () => t.classList.remove('drop'));
+        t.addEventListener('drop', e => { e.preventDefault(); t.classList.remove('drop'); const pid = +e.dataTransfer.getData('text/x-htmlos-win'); const w = htui.wins.find(x => x.pid === pid); if (w) { htui.wsMove(w, i); render(); if (opt.onChange) opt.onChange(); } });
+        const x = ws.count > 1 ? h('button', { class: 'ws-x', type: 'button', title: htui.wsName(i) + 'を閉じる（ウィンドウは隣へ移ります）', 'aria-label': htui.wsName(i) + 'を閉じる', onclick: e => { e.stopPropagation(); htui.wsRemove(i); render(); if (opt.onChange) opt.onChange(); } }, OS.icon('x', 12)) : null;
+        bar.append(h('div', { class: 'ws-item' }, t, x, h('span', { class: 'ws-label' }, htui.wsName(i))));
+      }
+      if (ws.count < ws.max) {
+        const add = h('button', { class: 'ws-add', type: 'button', style: 'width:' + Math.round(opt.big ? tw * .55 : tw * .45) + 'px;height:' + th + 'px', title: '新しいデスクトップ', 'aria-label': '新しいデスクトップ', onclick: () => { htui.wsAdd(); render(); if (opt.onChange) opt.onChange(); } }, OS.icon('plus', opt.big ? 26 : 18));
+        add.addEventListener('dragover', e => { if ([...e.dataTransfer.types].includes('text/x-htmlos-win')) { e.preventDefault(); add.classList.add('drop'); } });
+        add.addEventListener('dragleave', () => add.classList.remove('drop'));
+        add.addEventListener('drop', e => { e.preventDefault(); const pid = +e.dataTransfer.getData('text/x-htmlos-win'); const w = htui.wins.find(x => x.pid === pid); if (w) { htui.wsMove(w, ws.count); render(); if (opt.onChange) opt.onChange(); } });
+        bar.append(h('div', { class: 'ws-item' }, add, h('span', { class: 'ws-label' }, '新規')));
+      }
+    }
+    bar._render = render;
+    render();
+    return bar;
+  };
+  // 仮想デスクの一覧（HTUi 3 のパネル・hWin のタスクビュー・hwc のメニューから）
+  htui.wsView = function () {
+    if (!htui.el || !htui.user) return;
+    const old = htui.el.querySelector(':scope > .ws-view:not(.leaving)'); if (old) { old._close(); return; }
+    closeMenus();
+    const bar = htui.wsBar({ big: true, onPick: () => close() });
+    const v = h('div', { class: 'ws-view', role: 'dialog', 'aria-label': '仮想デスク' },
+      h('h2', null, '仮想デスク'), bar,
+      h('p', { class: 'ws-hint' }, 'クリックで切り替え ・ ウィンドウをドラッグして別のデスクトップへ移動 ・ Ctrl+Super+←/→ でも切り替え ・ Esc で閉じる'));
+    const esc = e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); } };
+    function close() { document.removeEventListener('keydown', esc, true); htui.leave(v); }
+    v._close = close;
+    v.addEventListener('click', e => { if (e.target === v) close(); });
+    document.addEventListener('keydown', esc, true);
+    htui.el.append(v);
+  };
+  // ほかのユーザーに切り替える（今のユーザーのウィンドウを閉じて、そのユーザーを選んだログイン画面へ）
+  htui.switchUser = async function (name) {
+    if (!users.get(name) || !htui.user) return false;
+    for (const w of htui.wins.slice()) { if ((await w.close()) === false) return false; }
+    const c = OS.hdm.conf(); c.lastUser = name; OS.hdm.save(c);
+    OS.sound.play('logout');
+    toLogin();
+    return true;
+  };
 
   // ---------- HTUi SDK 3.0（Venus）: WebView
   //   hBrowser の表示部分を部品にしたもの。アプリのウインドウの中に web ページ・hFS の HTML・HTML の文字列を表示できる。
@@ -1310,6 +1482,7 @@
     const parent = o.parent && !o.parent.closed ? o.parent : null;
     if (parent && !o.silent) OS.sound.play(o.sound || 'confirm');
     const win = { pid: OS.proc ? OS.proc.alloc() : ++htui.pid, title: o.title, app: o.app || (parent && parent.app), zone: null, rect: null, onClose: null, onDispose: null, onFocus: null, parent: parent, children: [], dialog: !!o.dialog };
+    if (!parent) win.ws = htui.ws.cur; // 開いたときの仮想デスク
     // 親のないウインドウは 1 つのプロセス（子ウインドウは親のプロセスのもの）
     if (OS.proc && !parent) OS.proc.spawn({ pid: win.pid, name: win.app || 'window', cmd: (win.app || 'window') + ' — ' + o.title, user: htui.user || 'root', kind: 'app', win: win,
       ppid: htui.sessionProc ? htui.sessionProc.pid : 1, onsignal: async sig => { const ok = await win.close(sig === 'KILL'); if (ok === false) throw new Error('(' + win.pid + '): ' + o.title + ' が終了を取りやめました（保存していない変更など。強制するなら kill -KILL）'); return true; } });
@@ -1361,6 +1534,7 @@
     win.setTitle = t => { win.title = t; titleEl.textContent = t; task.lastChild.textContent = t; task.title = t; el.setAttribute('aria-label', t); htui.syncTitle(); };
     win.focus = () => {
       win._min = 0;
+      { const r0 = rootOf(win); if ((r0.ws | 0) !== htui.ws.cur && !win.closed) { htui.ws.cur = r0.ws | 0; htui.wsApply(); } } // ほかの仮想デスクのウィンドウ: そのデスクへ
       const back = !parent && el.classList.contains('hidden') && htui.wireMode();
       el.classList.remove('hidden', 'minimizing');
       if (back) { el.style.visibility = 'hidden'; htui.wire(htui.taskAnchor(win), el.getBoundingClientRect(), 200, () => { el.style.visibility = ''; }); }
@@ -1526,7 +1700,7 @@
   };
   function focusTop() {
     // 子ウインドウは親の children にあるので、ここでは親だけを見る（親の focus が子にフォーカスを渡す）
-    const vis = htui.wins.filter(w => !w.el.classList.contains('hidden') && !w.el.classList.contains('minimizing'));
+    const vis = htui.wins.filter(w => !w.el.classList.contains('hidden') && !w.el.classList.contains('minimizing') && !w.el.classList.contains('ws-off'));
     if (!vis.length) { htui.syncTitle(); return; }
     vis.sort((a, b) => (+b.el.style.zIndex || 0) - (+a.el.style.zIndex || 0))[0].focus();
   }
@@ -1575,6 +1749,14 @@
   }
   function hotkeys(e) {
     if (htui.locked) return; // ロック中はショートカットを使わない
+    // 仮想デスク: Ctrl+Super+←/→ か Ctrl+Alt+PageUp/PageDown。Shift も押すと、使っているウィンドウを連れて移る
+    if (htui.user && e.ctrlKey && ((e.metaKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) || (e.altKey && !e.metaKey && (e.key === 'PageUp' || e.key === 'PageDown')))) {
+      e.preventDefault(); e.stopPropagation(); superAlone = false;
+      const to = htui.ws.cur + (e.key === 'ArrowLeft' || e.key === 'PageUp' ? -1 : 1);
+      if (to >= htui.ws.count && e.shiftKey && htui.active() && htui.wsAdd() < 0) return;
+      htui.wsSwitch(to, { carry: e.shiftKey });
+      return;
+    }
     superAlone = e.key === 'Meta' && !e.repeat ? true : e.key === 'Meta' ? superAlone : false;
     if (ats && e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); altTabEnd(true); return; }
     if (htui.user && e.altKey && !e.ctrlKey && !e.metaKey && (e.key === 'Tab' || e.code === 'Backquote') && !htui.el.querySelector('.modal-ov')) {

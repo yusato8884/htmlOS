@@ -57,6 +57,7 @@
   const ICONS = {
     pin: '<path d="M9 3h6l-1 6 4 4H6l4-4zM12 13v8"/>',
     music: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
+    desks: '<rect x="3" y="6" width="13" height="11" rx="2"/><path d="M8 3h11a2 2 0 0 1 2 2v9"/>',
     battery: '<rect x="2" y="7" width="17" height="10" rx="2"/><path d="M22 11v2M6 10v4M10 10v4"/>',
     lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
     terminal: '<path d="M4 6l5 5-5 5M12 17h8"/>',
