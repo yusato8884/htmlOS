@@ -1300,11 +1300,11 @@
     if (OS._down) return;
     const gui = !!(OS.htui && OS.htui.running);
     // 未保存の変更があるウィンドウは確認を出す。キャンセルされたら終了を取りやめる
-    if (gui && OS.htui.user) {
+    if (gui && OS.htui.user && !hib) { // ハイバーネートは中身ごと書き出すので、保存の確認はしない
       OS.shuttingDown = true; // ウィンドウ側が「終了のための close」だとわかるように
       try { for (const w of OS.htui.wins.slice()) { if ((await w.close()) === false) return; } } finally { OS.shuttingDown = false; }
     }
-    const others = gui && OS.htui.loggedIn ? OS.htui.loggedIn().filter(u => u !== OS.htui.user) : [];
+    const others = gui && !hib && OS.htui.loggedIn ? OS.htui.loggedIn().filter(u => u !== OS.htui.user) : [];
     if (others.length && !(await OS.ui.confirm(others.join('、') + ' さんもログインしたままです。' + (reboot ? '再起動' : '電源を切る') + 'と、保存していない変更は失われます。続けますか?', { ok: reboot ? '再起動' : hib ? '休止状態にする' : '電源を切る', danger: true, title: 'ほかのユーザーがログイン中' }))) return;
     OS._down = true;
     if (OS.ipc) { try { OS.ipc.publish(reboot ? 'power.reboot' : 'power.shutdown', null, 'hinit'); } catch (e) { /* 無視 */ } }
@@ -1333,29 +1333,31 @@
     OS.root.textContent = '';
     OS.root.append(h('div', { class: 'poweroff' },
       h('button', { class: 'pw-btn', type: 'button', title: '電源を入れる', 'aria-label': '電源を入れる', onclick: () => (BOOT.warmBoot ? BOOT.warmBoot() : location.reload()) }, OS.icon('power', 34)),
-      h('p', null, hib ? '休止状態です' : '電源が切れています'), h('small', null, hib ? 'ボタンを押して起動し、ログインすると元のウィンドウに戻ります' : 'ボタンを押すと起動します')));
+      h('p', null, hib ? '休止状態です' : '電源が切れています'), h('small', null, hib ? 'ボタンを押して起動し、ログインすると、休止する前の状態に戻ります' : 'ボタンを押すと起動します')));
   };
-  // ハイバーネート（5.3）: 開いているウィンドウ（アプリ・開いたもの・位置と大きさ）を /var/lib/hibernate.json に書いて電源を切る。
-  //   次にそのユーザーがログインすると開き直す。保存していない変更は、シャットダウンと同じく確認する（中身までは残せない）
+  // ハイバーネート（6.0.4 で作り直し）: 保存は求めない。メモリ上の状態（ログインしているユーザーごとのウィンドウ、
+  //   位置と大きさ・仮想デスク、保存していない入力中の中身、Terminal の画面と履歴など）をストレージ（/var/lib/hibernate.json）に
+  //   書き出して電源を切る。次に起動してそのユーザーがログインすると、書き出した状態をそのまま広げて元に戻す
+  //   形式: { v: 2, at, last: 最後に使っていたユーザー, users: { 名前: { sid, cur: 仮想デスク, wins: [...] } } }
   const HIB = '/var/lib/hibernate.json';
-  OS.hibernation = function (clear) {
-    if (clear === null) { try { fs.rm(HIB); } catch (e) { /* ない */ } return null; }
-    try { return JSON.parse(fs.read(HIB)); } catch (e) { return null; }
+  OS.hibernation = function (set) {
+    if (set === null) { try { fs.rm(HIB); } catch (e) { /* ない */ } return null; }
+    if (set) { fs.mkdir('/var/lib', { parents: true }); fs.write(HIB, JSON.stringify(set), { owner: 'root', mode: 0o600 }); return set; }
+    let j = null;
+    try { j = JSON.parse(fs.read(HIB)); } catch (e) { return null; }
+    if (j && !j.users && j.user) j = { v: 2, at: j.at, last: j.user, users: { [j.user]: { sid: j.sid, wins: j.wins || [] } } }; // 5.3 の形式
+    return j && j.users && Object.keys(j.users).length ? j : null;
   };
   OS.hibernate = async function () {
     const H = OS.htui;
     if (OS._down) return;
-    if (!H || !H.running || !H.user) return OS.poweroff();
-    const z = w => +w.el.style.zIndex || 0;
-    const img = { user: H.user, sid: H.sessionId, at: Date.now(), wins: H.wins.filter(w => !w.parent && w.app && OS.apps[w.app]).sort((a, b) => z(a) - z(b)).map(w => ({
-      app: w.app, arg: typeof w.launchArg === 'string' ? w.launchArg : null, title: w.title,
-      max: w.el.classList.contains('max'), min: w.el.classList.contains('hidden'),
-      x: w.el.offsetLeft, y: w.el.offsetTop, w: w.el.offsetWidth, h: w.el.offsetHeight })) };
-    try { fs.mkdir('/var/lib', { parents: true }); fs.write(HIB, JSON.stringify(img), { owner: 'root' }); } catch (e) { return OS.poweroff(); }
-    if (OS.hdm) { const c = OS.hdm.conf(); c.lastUser = H.user; OS.hdm.save(c); }
-    if (OS.journal) { try { OS.journal.log('powerd', 'ハイバーネートします（ウィンドウ ' + img.wins.length + ' 個）'); } catch (e) { /* 無視 */ } }
+    if (!H || !H.running || !H.hibernateImage || !H.loggedIn().length) return OS.poweroff();
+    const img = H.hibernateImage();
+    try { OS.hibernation(img); } catch (e) { OS.ui.toast('休止状態のデータを書き出せませんでした（' + e.message + '）'); return; }
+    if (OS.hdm && img.last) { const c = OS.hdm.conf(); c.lastUser = img.last; OS.hdm.save(c); }
+    const n = Object.values(img.users).reduce((a, u) => a + u.wins.length, 0);
+    if (OS.journal) { try { OS.journal.log('powerd', 'ハイバーネートします（' + Object.keys(img.users).join('、') + '。ウィンドウ ' + n + ' 個）'); } catch (e) { /* 無視 */ } }
     await OS.shutdown(false, null, { hibernate: true });
-    if (!OS._down) OS.hibernation(null); // 取りやめた
   };
   OS.reboot = function (flag) { return OS.shutdown(true, flag); };
   OS.poweroff = function () { return OS.shutdown(false); };

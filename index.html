@@ -506,9 +506,24 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     id: 'terminal', name: 'Terminal', icon: 'terminal', color: '#2e3436', desc: 'jsh コンソール',
     launch(arg) {
       const win = OS.htui.open({ title: 'Terminal', icon: 'terminal', w: 660, h: 400, app: 'terminal' });
-      const tty = new OS.Tty(win.body);
-      const sh = new OS.Jsh(tty, OS.htui.user, { cmd: arg && arg.cmd, ppid: win.pid, onsignal: sig => win.close(sig === 'KILL') });
+      const tty = new OS.Tty(win.body), rs = arg && arg.resume;
+      const sh = new OS.Jsh(tty, OS.htui.user, { cmd: arg && arg.cmd, resume: !!rs, ppid: win.pid, onsignal: sig => win.close(sig === 'KILL') });
       win.onFocus = () => tty.focus();
+      // ハイバーネート: 画面の文字（色の種類つき）と、シェルの状態を書き出す
+      win.onHibernate = () => {
+        const out = []; let size = 0;
+        Array.from(tty.out.childNodes).reverse().some(n => { const t = n.textContent; size += t.length; if (size > 200000) return true; out.unshift([n.nodeType === 1 ? (n.className || '').replace(/^t-/, '') : '', t]); return false; });
+        return { out: out, input: tty.pending ? tty.input.value : '', cwd: sh.cwd, hist: sh.hist.slice(-300), vars: sh.vars, aliases: sh.aliases, umask: sh.umask };
+      };
+      if (rs) {
+        (rs.out || []).forEach(o => tty.print(o[1], o[0] || null));
+        try { if (OS.fs.isDir(rs.cwd)) sh.cwd = rs.cwd; } catch (e) { /* なければホーム */ }
+        if (Array.isArray(rs.hist)) sh.hist.push.apply(sh.hist, rs.hist);
+        Object.assign(sh.vars, rs.vars || {}); Object.assign(sh.aliases, rs.aliases || {});
+        if (rs.umask != null) sh.umask = rs.umask;
+        if (sh.vars) sh.vars.PWD = sh.cwd;
+        if (rs.input) setTimeout(() => { if (tty.pending) tty.input.value = rs.input; }, 0);
+      }
       win.onDispose = () => { sh.exited = true; if (sh.proc) OS.proc.exit(sh.proc.pid); tty.dispose(); };
       tty.focus();
       sh.loop().then(() => win.close(true));
@@ -2089,7 +2104,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         power: ['電源管理', 'battery', () => {
           const P = OS.power, p = P.prefs(), set = patch => OS.htui.setPrefs({ power: Object.assign({}, OS.htui.prefs.power || {}, patch) });
           const sw = (id, label, on, fn) => h('label', null, h('input', { type: 'checkbox', class: 'switch', id: id, checked: on, onchange: e => fn(e.target.checked) }), ' ' + label);
-          const DESC = { lock: 'ウィンドウはそのままで、ロック画面を出します。パスワードで戻ります。', hibernate: '開いているウィンドウを覚えて電源を切ります。次にログインすると元のウィンドウを開き直します（保存していない変更は残りません。確認が出ます）。', poweroff: 'そのまま電源を切ります（保存していない変更があれば確認が出ます）。' };
+          const DESC = { lock: 'ウィンドウはそのままで、ロック画面を出します。パスワードで戻ります。', hibernate: 'メモリ上の状態（ウィンドウと、保存していない中身も）をストレージに退避して電源を切ります。次に起動してログインすると、そのまま元に戻ります。保存の確認は出ません。', poweroff: 'そのまま電源を切ります（保存していない変更があれば確認が出ます）。' };
           const desc = h('p', { class: 'st-note', id: 'st-pw-desc' }, DESC[p.onSleep]);
           const thr = h('input', { class: 'inp', type: 'number', min: '5', max: '95', step: '5', id: 'st-pw-thr', value: String(p.threshold), style: 'width:80px', 'aria-label': 'しきい値（%）', disabled: !p.autoSaver });
           thr.addEventListener('change', () => { const v = Math.max(5, Math.min(95, Math.round(Number(thr.value)) || 20)); thr.value = String(v); set({ threshold: v }); });
@@ -4060,27 +4075,85 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     if (OS.ipc) { try { OS.ipc.publish('session.lock', { user: htui.user }, 'htui'); } catch (e) { /* 無視 */ } }
     return true;
   };
-  // ハイバーネートから戻る: そのユーザーがログインしたら、ウィンドウを開き直す
+  // ---- ハイバーネート（6.0.4）: メモリ上の状態を書き出す・広げる
+  //   アプリは win.onHibernate() で自分の状態を返せる（戻るときは launch({ resume: その状態 }) で開く）。
+  //   返さないアプリは、ウィンドウの中の入力欄（textarea・input・select）の中身を残して、開き直したあとに書き戻す
+  const FIELD_MAX = 1 << 20;
+  function captureFields(w) {
+    const out = [];
+    w.body.querySelectorAll('textarea, input, select').forEach((e, i) => {
+      const t = (e.type || '').toLowerCase();
+      if (t === 'password' || t === 'file' || t === 'hidden' || t === 'button' || t === 'submit') return; // パスワードは書き出さない
+      if (t === 'checkbox' || t === 'radio') { out.push({ i: i, tag: e.tagName, c: e.checked }); return; }
+      if (String(e.value).length > FIELD_MAX) return;
+      const f = { i: i, tag: e.tagName, v: e.value };
+      if (e.tagName === 'TEXTAREA') { f.s = e.selectionStart; f.e = e.selectionEnd; f.top = e.scrollTop; }
+      out.push(f);
+    });
+    return out;
+  }
+  function restoreFields(w, fields) {
+    if (w.closed || !fields || !fields.length) return;
+    const els = w.body.querySelectorAll('textarea, input, select');
+    fields.forEach(f => {
+      const e = els[f.i]; if (!e || e.tagName !== f.tag) return;
+      if ('c' in f) { if (e.checked !== f.c) { e.checked = f.c; e.dispatchEvent(new Event('change', { bubbles: true })); } return; }
+      if (e.value !== f.v) { e.value = f.v; e.dispatchEvent(new Event('input', { bubbles: true })); e.dispatchEvent(new Event('change', { bubbles: true })); }
+      if (f.s != null) { try { e.setSelectionRange(f.s, f.e); } catch (er) { /* 選べない欄 */ } }
+      if (f.top) e.scrollTop = f.top;
+    });
+  }
+  function snapWin(w) {
+    const st = w.el.style, px0 = (v, d) => (/px$/.test(v || '') && isFinite(parseFloat(v)) ? parseFloat(v) : d);
+    const r = w.zone && w.rect ? { x: w.rect.l, y: w.rect.t, w: w.rect.w, h: w.rect.h }
+      : { x: px0(st.left, w.el.offsetLeft), y: px0(st.top, w.el.offsetTop), w: px0(st.width, w.el.offsetWidth), h: px0(st.height, w.el.offsetHeight) };
+    let state = null;
+    if (w.onHibernate) { try { state = w.onHibernate(); } catch (e) { state = null; } }
+    return { app: w.app, arg: typeof w.launchArg === 'string' ? w.launchArg : null, title: w.title, ws: w.ws | 0,
+      zone: w.zone || null, max: w.el.classList.contains('max'), min: w.el.classList.contains('hidden'),
+      x: r.x, y: r.y, w: r.w, h: r.h, state: state, fields: state == null ? captureFields(w) : null };
+  }
+  // 今ログインしているユーザー全員（切り替えで残しているユーザーも）の状態
+  htui.hibernateImage = function () {
+    const z = w => +w.el.style.zIndex || 0;
+    const cap = (wins, cur, sid) => ({ sid: sid, cur: cur | 0, wins: wins.filter(w => !w.parent && !w.closed && w.app && OS.apps[w.app]).sort((a, b) => z(a) - z(b)).map(snapWin) });
+    const us = {};
+    Object.keys(parked).forEach(u => { const p = parked[u]; us[u] = cap(p.wins, p.cur, p.sid); });
+    if (htui.user) us[htui.user] = cap(htui.wins, htui.ws.cur, htui.sessionId);
+    return { v: 2, at: Date.now(), last: htui.user || Object.keys(parked)[0] || null, users: us };
+  };
+  // そのユーザーがログインしたら、書き出しておいた状態を広げる
   function resume(user) {
     const img = OS.hibernation && OS.hibernation();
-    if (!img || img.user !== user) return;
-    OS.hibernation(null);
+    const me = img && img.users[user]; if (!me) return;
+    delete img.users[user];
+    try { OS.hibernation(Object.keys(img.users).length ? img : null); } catch (e) { /* 無視 */ }
     const dw = htui.desk ? htui.desk.clientWidth : 800, dh = htui.desk ? htui.desk.clientHeight : 600;
-    let n = 0;
-    (img.wins || []).forEach(s => {
+    const opened = [];
+    (me.wins || []).forEach(s => {
+      if (!OS.apps[s.app]) return;
       const before = new Set(htui.wins);
-      try { OS.launch(s.app, s.arg || undefined); } catch (e) { return; }
+      try { OS.launch(s.app, s.state != null ? { resume: s.state } : (s.arg || undefined)); } catch (e) { return; }
       const w = htui.wins.find(x => !before.has(x) && !x.parent); if (!w) return;
-      n++;
+      opened.push({ w: w, s: s });
+      w.ws = Math.max(0, Math.min(s.ws | 0, htui.ws.count - 1));
       if (s.w && s.h) {
         const ww = Math.min(s.w, dw), hh = Math.min(s.h, dh);
         w.el.style.width = ww + 'px'; w.el.style.height = hh + 'px';
         w.el.style.left = Math.max(0, Math.min(s.x, dw - ww)) + 'px'; w.el.style.top = Math.max(0, Math.min(s.y, dh - hh)) + 'px';
       }
       if (s.max && !w.el.classList.contains('max')) { const b = w.el.querySelector('.win-btn[aria-label="最大化"]'); if (b) b.click(); }
-      if (s.min) w.minimize();
+      else if (s.zone && s.zone !== 'max') w.snap(s.zone, true);
+      if (s.fields) { restoreFields(w, s.fields); setTimeout(() => restoreFields(w, s.fields), 250); } // 中身を読み込むのが遅いアプリのために、もう一度
+      if (s.min) { w.el.classList.add('hidden'); w.el.classList.remove('active'); w.task.classList.remove('active'); }
     });
-    OS.notify({ app: '電源管理', icon: 'battery', title: '休止状態から戻りました', body: n ? 'ウィンドウを ' + n + ' 個開き直しました' : '開いていたウィンドウはありません' });
+    htui.ws.cur = Math.max(0, Math.min(me.cur | 0, htui.ws.count - 1));
+    htui.wsApply();
+    const top = opened.filter(o => !o.s.min && o.w.ws === htui.ws.cur).pop();
+    if (top) top.w.focus(); else focusTop();
+    htui.syncTasks();
+    const ago = img.at ? Math.round((Date.now() - img.at) / 60000) : null;
+    OS.notify({ app: '電源管理', icon: 'battery', title: '休止状態から戻りました', body: opened.length ? 'ウィンドウ ' + opened.length + ' 個を、休止する前の状態に戻しました' + (ago != null ? '（' + (ago < 60 ? ago + ' 分' : Math.round(ago / 60) + ' 時間') + 'ぶり）' : '') : '開いていたウィンドウはありません' });
   }
   // ログイン画面（hdm）へ
   function toLogin(keep) {
@@ -4092,7 +4165,8 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     if (OS.power) OS.power.apply();
     OS.hdm.show(htui.el, (user, sid) => { session(user, sid); OS.sound.play('login'); resume(user); });
     const hib = OS.hibernation && OS.hibernation();
-    if (hib && users.get(hib.user)) setTimeout(() => OS.ui.toast('休止状態です。' + hib.user + ' でログインすると、元のウィンドウに戻ります'), 300);
+    const hu = hib ? Object.keys(hib.users).filter(u => users.get(u)) : [];
+    if (hu.length) setTimeout(() => OS.ui.toast('休止状態です。' + hu.join('、') + ' でログインすると、休止する前の状態に戻ります'), 300);
   }
 
   // ---------- 個人設定（壁紙・アクセント・アニメーション・画面モード）
@@ -6798,9 +6872,10 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 
     async loop() {
       if (this.opt.login) { try { this.tty.print(fs0.read('/etc/motd'), 'dim'); } catch (e) { /* motdなし */ } }
-      // ~/.jshrc があれば、1 行ずつ実行する（エイリアスや環境変数の設定を書いておける）
+      // ~/.jshrc があれば、1 行ずつ実行する（エイリアスや環境変数の設定を書いておける）。ハイバーネートから戻るときは、状態ごと戻すので読まない
       try {
         if (OS.safe) throw new Error('セーフモードでは ~/.jshrc を読まない');
+        if (this.opt.resume) throw new Error('休止状態から戻る');
         const rc = this.fs.read(this.home + '/.jshrc');
         for (const l of rc.split('\n')) { const t = l.trim(); if (t && !t.startsWith('#')) await this.exec(t, true); }
       } catch (e) { /* なければ何もしない */ }
@@ -9429,11 +9504,11 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     if (OS._down) return;
     const gui = !!(OS.htui && OS.htui.running);
     // 未保存の変更があるウィンドウは確認を出す。キャンセルされたら終了を取りやめる
-    if (gui && OS.htui.user) {
+    if (gui && OS.htui.user && !hib) { // ハイバーネートは中身ごと書き出すので、保存の確認はしない
       OS.shuttingDown = true; // ウィンドウ側が「終了のための close」だとわかるように
       try { for (const w of OS.htui.wins.slice()) { if ((await w.close()) === false) return; } } finally { OS.shuttingDown = false; }
     }
-    const others = gui && OS.htui.loggedIn ? OS.htui.loggedIn().filter(u => u !== OS.htui.user) : [];
+    const others = gui && !hib && OS.htui.loggedIn ? OS.htui.loggedIn().filter(u => u !== OS.htui.user) : [];
     if (others.length && !(await OS.ui.confirm(others.join('、') + ' さんもログインしたままです。' + (reboot ? '再起動' : '電源を切る') + 'と、保存していない変更は失われます。続けますか?', { ok: reboot ? '再起動' : hib ? '休止状態にする' : '電源を切る', danger: true, title: 'ほかのユーザーがログイン中' }))) return;
     OS._down = true;
     if (OS.ipc) { try { OS.ipc.publish(reboot ? 'power.reboot' : 'power.shutdown', null, 'hinit'); } catch (e) { /* 無視 */ } }
@@ -9462,29 +9537,31 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     OS.root.textContent = '';
     OS.root.append(h('div', { class: 'poweroff' },
       h('button', { class: 'pw-btn', type: 'button', title: '電源を入れる', 'aria-label': '電源を入れる', onclick: () => (BOOT.warmBoot ? BOOT.warmBoot() : location.reload()) }, OS.icon('power', 34)),
-      h('p', null, hib ? '休止状態です' : '電源が切れています'), h('small', null, hib ? 'ボタンを押して起動し、ログインすると元のウィンドウに戻ります' : 'ボタンを押すと起動します')));
+      h('p', null, hib ? '休止状態です' : '電源が切れています'), h('small', null, hib ? 'ボタンを押して起動し、ログインすると、休止する前の状態に戻ります' : 'ボタンを押すと起動します')));
   };
-  // ハイバーネート（5.3）: 開いているウィンドウ（アプリ・開いたもの・位置と大きさ）を /var/lib/hibernate.json に書いて電源を切る。
-  //   次にそのユーザーがログインすると開き直す。保存していない変更は、シャットダウンと同じく確認する（中身までは残せない）
+  // ハイバーネート（6.0.4 で作り直し）: 保存は求めない。メモリ上の状態（ログインしているユーザーごとのウィンドウ、
+  //   位置と大きさ・仮想デスク、保存していない入力中の中身、Terminal の画面と履歴など）をストレージ（/var/lib/hibernate.json）に
+  //   書き出して電源を切る。次に起動してそのユーザーがログインすると、書き出した状態をそのまま広げて元に戻す
+  //   形式: { v: 2, at, last: 最後に使っていたユーザー, users: { 名前: { sid, cur: 仮想デスク, wins: [...] } } }
   const HIB = '/var/lib/hibernate.json';
-  OS.hibernation = function (clear) {
-    if (clear === null) { try { fs.rm(HIB); } catch (e) { /* ない */ } return null; }
-    try { return JSON.parse(fs.read(HIB)); } catch (e) { return null; }
+  OS.hibernation = function (set) {
+    if (set === null) { try { fs.rm(HIB); } catch (e) { /* ない */ } return null; }
+    if (set) { fs.mkdir('/var/lib', { parents: true }); fs.write(HIB, JSON.stringify(set), { owner: 'root', mode: 0o600 }); return set; }
+    let j = null;
+    try { j = JSON.parse(fs.read(HIB)); } catch (e) { return null; }
+    if (j && !j.users && j.user) j = { v: 2, at: j.at, last: j.user, users: { [j.user]: { sid: j.sid, wins: j.wins || [] } } }; // 5.3 の形式
+    return j && j.users && Object.keys(j.users).length ? j : null;
   };
   OS.hibernate = async function () {
     const H = OS.htui;
     if (OS._down) return;
-    if (!H || !H.running || !H.user) return OS.poweroff();
-    const z = w => +w.el.style.zIndex || 0;
-    const img = { user: H.user, sid: H.sessionId, at: Date.now(), wins: H.wins.filter(w => !w.parent && w.app && OS.apps[w.app]).sort((a, b) => z(a) - z(b)).map(w => ({
-      app: w.app, arg: typeof w.launchArg === 'string' ? w.launchArg : null, title: w.title,
-      max: w.el.classList.contains('max'), min: w.el.classList.contains('hidden'),
-      x: w.el.offsetLeft, y: w.el.offsetTop, w: w.el.offsetWidth, h: w.el.offsetHeight })) };
-    try { fs.mkdir('/var/lib', { parents: true }); fs.write(HIB, JSON.stringify(img), { owner: 'root' }); } catch (e) { return OS.poweroff(); }
-    if (OS.hdm) { const c = OS.hdm.conf(); c.lastUser = H.user; OS.hdm.save(c); }
-    if (OS.journal) { try { OS.journal.log('powerd', 'ハイバーネートします（ウィンドウ ' + img.wins.length + ' 個）'); } catch (e) { /* 無視 */ } }
+    if (!H || !H.running || !H.hibernateImage || !H.loggedIn().length) return OS.poweroff();
+    const img = H.hibernateImage();
+    try { OS.hibernation(img); } catch (e) { OS.ui.toast('休止状態のデータを書き出せませんでした（' + e.message + '）'); return; }
+    if (OS.hdm && img.last) { const c = OS.hdm.conf(); c.lastUser = img.last; OS.hdm.save(c); }
+    const n = Object.values(img.users).reduce((a, u) => a + u.wins.length, 0);
+    if (OS.journal) { try { OS.journal.log('powerd', 'ハイバーネートします（' + Object.keys(img.users).join('、') + '。ウィンドウ ' + n + ' 個）'); } catch (e) { /* 無視 */ } }
     await OS.shutdown(false, null, { hibernate: true });
-    if (!OS._down) OS.hibernation(null); // 取りやめた
   };
   OS.reboot = function (flag) { return OS.shutdown(true, flag); };
   OS.poweroff = function () { return OS.shutdown(false); };
@@ -12886,7 +12963,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 (function () {
   'use strict';
   // コードネーム: htmlOS は恒星の名前（3.2 = Sirius、4.0 = Vega）、描画エンジン HTUi SDK は惑星の名前（2 = Jupiter、3.0 = Venus）
-  var MEDIA_VERSION = '6.0.3', MEDIA_BUILD = '50', MEDIA_CODENAME = 'Deneb';
+  var MEDIA_VERSION = '6.0.4', MEDIA_BUILD = '51', MEDIA_CODENAME = 'Deneb';
   var BOOT = window.BOOT = {};
   var P = 'htmlos:';
 

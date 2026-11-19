@@ -291,27 +291,85 @@
     if (OS.ipc) { try { OS.ipc.publish('session.lock', { user: htui.user }, 'htui'); } catch (e) { /* 無視 */ } }
     return true;
   };
-  // ハイバーネートから戻る: そのユーザーがログインしたら、ウィンドウを開き直す
+  // ---- ハイバーネート（6.0.4）: メモリ上の状態を書き出す・広げる
+  //   アプリは win.onHibernate() で自分の状態を返せる（戻るときは launch({ resume: その状態 }) で開く）。
+  //   返さないアプリは、ウィンドウの中の入力欄（textarea・input・select）の中身を残して、開き直したあとに書き戻す
+  const FIELD_MAX = 1 << 20;
+  function captureFields(w) {
+    const out = [];
+    w.body.querySelectorAll('textarea, input, select').forEach((e, i) => {
+      const t = (e.type || '').toLowerCase();
+      if (t === 'password' || t === 'file' || t === 'hidden' || t === 'button' || t === 'submit') return; // パスワードは書き出さない
+      if (t === 'checkbox' || t === 'radio') { out.push({ i: i, tag: e.tagName, c: e.checked }); return; }
+      if (String(e.value).length > FIELD_MAX) return;
+      const f = { i: i, tag: e.tagName, v: e.value };
+      if (e.tagName === 'TEXTAREA') { f.s = e.selectionStart; f.e = e.selectionEnd; f.top = e.scrollTop; }
+      out.push(f);
+    });
+    return out;
+  }
+  function restoreFields(w, fields) {
+    if (w.closed || !fields || !fields.length) return;
+    const els = w.body.querySelectorAll('textarea, input, select');
+    fields.forEach(f => {
+      const e = els[f.i]; if (!e || e.tagName !== f.tag) return;
+      if ('c' in f) { if (e.checked !== f.c) { e.checked = f.c; e.dispatchEvent(new Event('change', { bubbles: true })); } return; }
+      if (e.value !== f.v) { e.value = f.v; e.dispatchEvent(new Event('input', { bubbles: true })); e.dispatchEvent(new Event('change', { bubbles: true })); }
+      if (f.s != null) { try { e.setSelectionRange(f.s, f.e); } catch (er) { /* 選べない欄 */ } }
+      if (f.top) e.scrollTop = f.top;
+    });
+  }
+  function snapWin(w) {
+    const st = w.el.style, px0 = (v, d) => (/px$/.test(v || '') && isFinite(parseFloat(v)) ? parseFloat(v) : d);
+    const r = w.zone && w.rect ? { x: w.rect.l, y: w.rect.t, w: w.rect.w, h: w.rect.h }
+      : { x: px0(st.left, w.el.offsetLeft), y: px0(st.top, w.el.offsetTop), w: px0(st.width, w.el.offsetWidth), h: px0(st.height, w.el.offsetHeight) };
+    let state = null;
+    if (w.onHibernate) { try { state = w.onHibernate(); } catch (e) { state = null; } }
+    return { app: w.app, arg: typeof w.launchArg === 'string' ? w.launchArg : null, title: w.title, ws: w.ws | 0,
+      zone: w.zone || null, max: w.el.classList.contains('max'), min: w.el.classList.contains('hidden'),
+      x: r.x, y: r.y, w: r.w, h: r.h, state: state, fields: state == null ? captureFields(w) : null };
+  }
+  // 今ログインしているユーザー全員（切り替えで残しているユーザーも）の状態
+  htui.hibernateImage = function () {
+    const z = w => +w.el.style.zIndex || 0;
+    const cap = (wins, cur, sid) => ({ sid: sid, cur: cur | 0, wins: wins.filter(w => !w.parent && !w.closed && w.app && OS.apps[w.app]).sort((a, b) => z(a) - z(b)).map(snapWin) });
+    const us = {};
+    Object.keys(parked).forEach(u => { const p = parked[u]; us[u] = cap(p.wins, p.cur, p.sid); });
+    if (htui.user) us[htui.user] = cap(htui.wins, htui.ws.cur, htui.sessionId);
+    return { v: 2, at: Date.now(), last: htui.user || Object.keys(parked)[0] || null, users: us };
+  };
+  // そのユーザーがログインしたら、書き出しておいた状態を広げる
   function resume(user) {
     const img = OS.hibernation && OS.hibernation();
-    if (!img || img.user !== user) return;
-    OS.hibernation(null);
+    const me = img && img.users[user]; if (!me) return;
+    delete img.users[user];
+    try { OS.hibernation(Object.keys(img.users).length ? img : null); } catch (e) { /* 無視 */ }
     const dw = htui.desk ? htui.desk.clientWidth : 800, dh = htui.desk ? htui.desk.clientHeight : 600;
-    let n = 0;
-    (img.wins || []).forEach(s => {
+    const opened = [];
+    (me.wins || []).forEach(s => {
+      if (!OS.apps[s.app]) return;
       const before = new Set(htui.wins);
-      try { OS.launch(s.app, s.arg || undefined); } catch (e) { return; }
+      try { OS.launch(s.app, s.state != null ? { resume: s.state } : (s.arg || undefined)); } catch (e) { return; }
       const w = htui.wins.find(x => !before.has(x) && !x.parent); if (!w) return;
-      n++;
+      opened.push({ w: w, s: s });
+      w.ws = Math.max(0, Math.min(s.ws | 0, htui.ws.count - 1));
       if (s.w && s.h) {
         const ww = Math.min(s.w, dw), hh = Math.min(s.h, dh);
         w.el.style.width = ww + 'px'; w.el.style.height = hh + 'px';
         w.el.style.left = Math.max(0, Math.min(s.x, dw - ww)) + 'px'; w.el.style.top = Math.max(0, Math.min(s.y, dh - hh)) + 'px';
       }
       if (s.max && !w.el.classList.contains('max')) { const b = w.el.querySelector('.win-btn[aria-label="最大化"]'); if (b) b.click(); }
-      if (s.min) w.minimize();
+      else if (s.zone && s.zone !== 'max') w.snap(s.zone, true);
+      if (s.fields) { restoreFields(w, s.fields); setTimeout(() => restoreFields(w, s.fields), 250); } // 中身を読み込むのが遅いアプリのために、もう一度
+      if (s.min) { w.el.classList.add('hidden'); w.el.classList.remove('active'); w.task.classList.remove('active'); }
     });
-    OS.notify({ app: '電源管理', icon: 'battery', title: '休止状態から戻りました', body: n ? 'ウィンドウを ' + n + ' 個開き直しました' : '開いていたウィンドウはありません' });
+    htui.ws.cur = Math.max(0, Math.min(me.cur | 0, htui.ws.count - 1));
+    htui.wsApply();
+    const top = opened.filter(o => !o.s.min && o.w.ws === htui.ws.cur).pop();
+    if (top) top.w.focus(); else focusTop();
+    htui.syncTasks();
+    const ago = img.at ? Math.round((Date.now() - img.at) / 60000) : null;
+    OS.notify({ app: '電源管理', icon: 'battery', title: '休止状態から戻りました', body: opened.length ? 'ウィンドウ ' + opened.length + ' 個を、休止する前の状態に戻しました' + (ago != null ? '（' + (ago < 60 ? ago + ' 分' : Math.round(ago / 60) + ' 時間') + 'ぶり）' : '') : '開いていたウィンドウはありません' });
   }
   // ログイン画面（hdm）へ
   function toLogin(keep) {
@@ -323,7 +381,8 @@
     if (OS.power) OS.power.apply();
     OS.hdm.show(htui.el, (user, sid) => { session(user, sid); OS.sound.play('login'); resume(user); });
     const hib = OS.hibernation && OS.hibernation();
-    if (hib && users.get(hib.user)) setTimeout(() => OS.ui.toast('休止状態です。' + hib.user + ' でログインすると、元のウィンドウに戻ります'), 300);
+    const hu = hib ? Object.keys(hib.users).filter(u => users.get(u)) : [];
+    if (hu.length) setTimeout(() => OS.ui.toast('休止状態です。' + hu.join('、') + ' でログインすると、休止する前の状態に戻ります'), 300);
   }
 
   // ---------- 個人設定（壁紙・アクセント・アニメーション・画面モード）

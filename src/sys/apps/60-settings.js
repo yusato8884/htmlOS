@@ -183,7 +183,7 @@
         power: ['電源管理', 'battery', () => {
           const P = OS.power, p = P.prefs(), set = patch => OS.htui.setPrefs({ power: Object.assign({}, OS.htui.prefs.power || {}, patch) });
           const sw = (id, label, on, fn) => h('label', null, h('input', { type: 'checkbox', class: 'switch', id: id, checked: on, onchange: e => fn(e.target.checked) }), ' ' + label);
-          const DESC = { lock: 'ウィンドウはそのままで、ロック画面を出します。パスワードで戻ります。', hibernate: '開いているウィンドウを覚えて電源を切ります。次にログインすると元のウィンドウを開き直します（保存していない変更は残りません。確認が出ます）。', poweroff: 'そのまま電源を切ります（保存していない変更があれば確認が出ます）。' };
+          const DESC = { lock: 'ウィンドウはそのままで、ロック画面を出します。パスワードで戻ります。', hibernate: 'メモリ上の状態（ウィンドウと、保存していない中身も）をストレージに退避して電源を切ります。次に起動してログインすると、そのまま元に戻ります。保存の確認は出ません。', poweroff: 'そのまま電源を切ります（保存していない変更があれば確認が出ます）。' };
           const desc = h('p', { class: 'st-note', id: 'st-pw-desc' }, DESC[p.onSleep]);
           const thr = h('input', { class: 'inp', type: 'number', min: '5', max: '95', step: '5', id: 'st-pw-thr', value: String(p.threshold), style: 'width:80px', 'aria-label': 'しきい値（%）', disabled: !p.autoSaver });
           thr.addEventListener('change', () => { const v = Math.max(5, Math.min(95, Math.round(Number(thr.value)) || 20)); thr.value = String(v); set({ threshold: v }); });

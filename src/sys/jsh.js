@@ -114,9 +114,10 @@
 
     async loop() {
       if (this.opt.login) { try { this.tty.print(fs0.read('/etc/motd'), 'dim'); } catch (e) { /* motdなし */ } }
-      // ~/.jshrc があれば、1 行ずつ実行する（エイリアスや環境変数の設定を書いておける）
+      // ~/.jshrc があれば、1 行ずつ実行する（エイリアスや環境変数の設定を書いておける）。ハイバーネートから戻るときは、状態ごと戻すので読まない
       try {
         if (OS.safe) throw new Error('セーフモードでは ~/.jshrc を読まない');
+        if (this.opt.resume) throw new Error('休止状態から戻る');
         const rc = this.fs.read(this.home + '/.jshrc');
         for (const l of rc.split('\n')) { const t = l.trim(); if (t && !t.startsWith('#')) await this.exec(t, true); }
       } catch (e) { /* なければ何もしない */ }
