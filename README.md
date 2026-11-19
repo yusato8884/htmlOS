@@ -15,6 +15,10 @@
   - **端末をスリープさせない**: htmlOS を表示しているあいだ、Screen Wake Lock で画面が消えないようにします
   - 新しいサービス `powerd.service`（graphical.target で起動。記録は `hjournal -u powerd`）、jsh の `power [status|lock|hibernate|saver on|off|onsleep …|awake on|off]`（Tab で補完）、IPC の信号 `power.resume` `session.lock` `session.unlock`
 
+### 5.3.2
+
+- 省電力モードの枠線のアニメーションを、約 15fps（コマ送り）に落としました。描き直す回数が 1/4 ほどになります
+
 ### 5.3.1
 
 - **省電力モードの最小化・復元**: ウィンドウの中身ごと動かすのをやめ、ウィンドウの枠の形の線だけが、タスクバーのボタン・固定したアイコン・Dock のアイコンへ縮みます（復元はその逆）。ふだんのアニメーションは今までどおりです

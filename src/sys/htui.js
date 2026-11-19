@@ -887,6 +887,7 @@
     const hr = htui.el.getBoundingClientRect(); // 見えるアイコンがなければ画面の下の真ん中へ
     return { left: hr.left + hr.width / 2 - 24, top: hr.bottom - 36, width: 48, height: 32 };
   };
+  htui.wireFps = 15;
   htui.wire = function (from, to, ms, cb) {
     const hr = htui.el.getBoundingClientRect();
     const put = r => ({ left: (r.left - hr.left) + 'px', top: (r.top - hr.top) + 'px', width: Math.max(8, r.width) + 'px', height: Math.max(8, r.height) + 'px' });
@@ -895,9 +896,11 @@
     let fin = false;
     const done = () => { if (fin) return; fin = true; f.remove(); if (cb) cb(); };
     if (!f.animate) { done(); return; }
-    const a = f.animate([Object.assign(put(from), { opacity: 1 }), Object.assign(put(to), { opacity: 0.35 })], { duration: ms || 220, easing: 'cubic-bezier(.4,0,.6,1)' });
+    // 省電力モードではコマ数を落とす（約 15fps。動きは段々になるが、描き直す回数が 1/4 くらいになる）
+    const d = ms || 220, frames = Math.max(2, Math.round(d / 1000 * htui.wireFps) + 1);
+    const a = f.animate([Object.assign(put(from), { opacity: 1 }), Object.assign(put(to), { opacity: 0.35 })], { duration: d, easing: 'steps(' + frames + ', jump-none)' });
     a.onfinish = done; a.oncancel = done;
-    setTimeout(done, (ms || 220) + 200); // 念のため
+    setTimeout(done, d + 200); // 念のため
   };
   function animOut(el, cls, ms, cb) {
     if (htui.animOff()) return cb();
