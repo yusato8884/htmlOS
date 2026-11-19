@@ -334,6 +334,9 @@
 .st-swatches{display:flex;gap:8px;flex-wrap:wrap}
 .st-sw{width:34px;height:34px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px var(--line);cursor:pointer;padding:0}
 .st-sw.wp{width:74px;height:46px;border-radius:7px}
+.st-wpgroup{margin:6px 0 12px}
+.st-wpgroup h4{margin:0 0 6px;font-size:12px;font-weight:600;opacity:.7}
+.st-note{font-size:12px;opacity:.7}
 .st-sw.on{box-shadow:0 0 0 3px var(--accent)}
 .st-meter{height:10px;border-radius:5px;background:var(--line);overflow:hidden;max-width:420px}
 .st-meter i{display:block;height:100%;background:var(--accent)}

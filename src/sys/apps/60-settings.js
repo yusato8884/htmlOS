@@ -103,8 +103,13 @@
           const setWall = src => OS.htui.setWallpaperImage(src).then(() => show('look')).catch(e => OS.ui.alert(e.message));
           page.append(h('h2', null, '外観'), h('p', null, 'この設定はユーザーごとに ~/.config/htui.json に保存されます。'),
             h('h3', null, '壁紙'),
-            h('div', { class: 'st-swatches' }, OS.htui.wallpapers.map((w, i) => h('button', { class: 'st-sw wp' + (p.wallpaper !== 'custom' && (p.wallpaper | 0) === i ? ' on' : ''), type: 'button', style: 'background:' + w.css, title: w.name, 'aria-label': '壁紙 ' + w.name, onclick: () => { OS.htui.setPrefs({ wallpaper: i }); show('look'); } })),
-              OS.htui.hasCustomWallpaper() ? h('button', { class: 'st-sw wp' + (p.wallpaper === 'custom' ? ' on' : ''), type: 'button', style: 'background:' + OS.htui.wallCss({ wallpaper: 'custom' }, OS.htui.user), title: '自分の画像', 'aria-label': '壁紙 自分の画像', onclick: () => { OS.htui.setPrefs({ wallpaper: 'custom' }); show('look'); } }) : null),
+            h('div', { class: 'st-wpgroups' },
+              OS.htui.hasCustomWallpaper() ? h('div', { class: 'st-wpgroup' }, h('h4', null, '自分の画像'), h('div', { class: 'st-swatches' },
+                h('button', { class: 'st-sw wp' + (p.wallpaper === 'custom' ? ' on' : ''), type: 'button', style: 'background:' + OS.htui.wallCss({ wallpaper: 'custom' }, OS.htui.user), title: '自分の画像（~/.config/wallpaper）', 'aria-label': '壁紙 自分の画像', onclick: () => { OS.htui.setPrefs({ wallpaper: 'custom' }); show('look'); } }))) : null,
+              // /usr/share/backgrounds のフォルダ（追加したバージョン）ごと
+              OS.htui.wallList().map(g => h('div', { class: 'st-wpgroup' }, h('h4', null, g.label), h('div', { class: 'st-swatches' }, g.items.map(it =>
+                h('button', { class: 'st-sw wp' + (p.wallpaper !== 'custom' && OS.htui.wallPath(p) === it.path ? ' on' : ''), type: 'button', style: 'background:' + OS.htui.wallCss({ wallpaper: it.path }), title: it.name + '\n' + it.path, 'aria-label': '壁紙 ' + it.name + '（' + g.label + '）', onclick: () => { OS.htui.setPrefs({ wallpaper: it.path }); show('look'); } })))))),
+            h('p', { class: 'st-note' }, '壁紙のファイルは ' + OS.htui.wallDir + '/（追加したバージョンごとのフォルダ）にあります。SVG ファイルを置くと、ここに並びます（root 権限が必要です）。'),
             h('div', { class: 'st-row' },
               h('button', { class: 'btn', type: 'button', onclick: () => {
                 const inp = h('input', { type: 'file', accept: 'image/*', style: 'display:none' });
@@ -122,7 +127,7 @@
               } }, OS.icon('folder', 16), 'hFS の画像…'),
               h('small', null, '長い辺が 1920px より大きい画像は縮めて保存します（~/.config/wallpaper）')),
             h('h3', null, 'アクセントカラー'),
-            h('div', { class: 'st-swatches' }, OS.htui.accents.map(c => h('button', { class: 'st-sw' + ((p.accent || OS.htui.accents[0]) === c ? ' on' : ''), type: 'button', style: 'background:' + c, title: c, 'aria-label': 'アクセントカラー ' + c, onclick: () => { OS.htui.setPrefs({ accent: c }); show('look'); } })),
+            h('div', { class: 'st-swatches' }, OS.htui.accents.map(c => h('button', { class: 'st-sw' + ((p.accent || OS.htui.accents[0]) === c ? ' on' : ''), type: 'button', style: 'background:' + c, title: c, 'aria-label': 'アクセントカラー ' + c, onclick: () => { OS.htui.setPrefs({ accent: c }); show('look'); } }))),
             h('h3', null, 'デスクトップ環境'),
             h('div', { class: 'st-sessions' }, Object.values(OS.sessions).filter(s => !s.hidden).map(s => {
               const cur = OS.hdm.sessionFor(OS.htui.user) === s.id;
@@ -144,7 +149,7 @@
             h('div', { class: 'st-row' }, h('label', null, h('input', { type: 'checkbox', id: 'st-anim', checked: p.anim !== false, onchange: e => OS.htui.setPrefs({ anim: e.target.checked }) }), 'ウィンドウやメニューのアニメーションを使う')),
             h('p', null, 'パソコン側で「アニメーションを減らす」設定にしていても、htmlOS の中ではこのスイッチだけで決まります。'),
             h('h3', null, 'ウィンドウ操作'),
-            h('p', null, 'タイトルバーを画面の左右の端までドラッグすると半分に、四隅の近くで4分の1に、上端で最大化にスナップします。最大化ボタンの右クリックや Ctrl+Alt+矢印キーでも配置できます。ウィンドウの辺と角をドラッグするとサイズを変えられます。')));
+            h('p', null, 'タイトルバーを画面の左右の端までドラッグすると半分に、四隅の近くで4分の1に、上端で最大化にスナップします。最大化ボタンの右クリックや Ctrl+Alt+矢印キーでも配置できます。ウィンドウの辺と角をドラッグするとサイズを変えられます。'));
         }],
         sound: ['サウンド', 'audio', () => {
           const admin = !!me().admin, S = OS.sound, mine = OS.htui.prefs.sound || {}, p = S.prefs();
