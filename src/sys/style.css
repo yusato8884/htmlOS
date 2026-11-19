@@ -65,7 +65,8 @@
 .ht2-dk{position:relative;flex:none;width:46px;height:46px;display:grid;place-items:center;padding:0;border:0;border-radius:12px;background:none;color:inherit;cursor:pointer;transition:background .15s}
 .ht2-dk:hover{background:rgba(255,255,255,.12)}
 .ht2-dk.active{background:rgba(255,255,255,.22)}
-.ht2-dk .app-ico{width:36px;height:36px;border-radius:10px}
+.ht2-dock .ht2-dk .app-ico{width:36px;height:36px;border-radius:10px}
+.ht2-dock .ht2-dk .app-ico svg{width:22px;height:22px}
 .ht2-dk:active .app-ico{transform:scale(.92)}
 .ht2-dots{position:absolute;left:1px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:3px}
 .ht2-main[data-dock=right] .ht2-dots{left:auto;right:1px}
@@ -86,7 +87,8 @@
 .p-pins:empty{display:none}
 .p-pin{position:relative;width:38px;height:100%;min-height:30px;display:grid;place-items:center;padding:0;border:0;border-radius:4px;background:none;color:inherit;cursor:pointer}
 .p-pin:hover{background:rgba(255,255,255,.12)}
-.p-pin .app-ico{width:24px;height:24px;border-radius:6px}
+.p-pins .p-pin .app-ico{width:24px;height:24px;border-radius:6px}
+.p-pins .p-pin .app-ico svg{width:16px;height:16px}
 .p-pin.run::after{content:'';position:absolute;left:30%;right:30%;bottom:2px;height:3px;border-radius:2px;background:rgba(255,255,255,.55)}
 .p-pin.active{background:rgba(255,255,255,.18)}.p-pin.active::after{left:20%;right:20%;background:var(--accent,#3584e4)}
 .p-pin.bounce{animation:ht2-bounce .8s ease}
