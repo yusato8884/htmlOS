@@ -172,7 +172,7 @@
     userItems() {
       const k = htui.kit, others = OS.users.list().filter(u => !u.root && u.name !== htui.user);
       return [{ head: htui.user + ' でログイン中' }, { head: 'ユーザーを切り替える' }]
-        .concat(others.length ? others.map(u => ({ label: u.name + (u.admin ? '（管理者）' : ''), icon: 'user', act: () => htui.switchUser(u.name) })) : [{ label: 'ほかのユーザーはいません', disabled: true }],
+        .concat(others.length ? others.map(u => ({ label: u.name + (u.admin ? '（管理者）' : ''), icon: 'user', hint: htui.isParked(u.name) ? 'ログイン中' : null, act: () => htui.switchUser(u.name) })) : [{ label: 'ほかのユーザーはいません', disabled: true }],
           [{ sep: true }, { label: 'アカウントの設定', icon: 'gear', act: () => k.run('settings', 'users') }, { sep: true }], k.powerItems());
     },
     // ---- 日時: カレンダーと通知

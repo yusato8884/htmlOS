@@ -1304,6 +1304,8 @@
       OS.shuttingDown = true; // ウィンドウ側が「終了のための close」だとわかるように
       try { for (const w of OS.htui.wins.slice()) { if ((await w.close()) === false) return; } } finally { OS.shuttingDown = false; }
     }
+    const others = gui && OS.htui.loggedIn ? OS.htui.loggedIn().filter(u => u !== OS.htui.user) : [];
+    if (others.length && !(await OS.ui.confirm(others.join('、') + ' さんもログインしたままです。' + (reboot ? '再起動' : '電源を切る') + 'と、保存していない変更は失われます。続けますか?', { ok: reboot ? '再起動' : hib ? '休止状態にする' : '電源を切る', danger: true, title: 'ほかのユーザーがログイン中' }))) return;
     OS._down = true;
     if (OS.ipc) { try { OS.ipc.publish(reboot ? 'power.reboot' : 'power.shutdown', null, 'hinit'); } catch (e) { /* 無視 */ } }
     OS.sound.play(reboot ? 'reboot' : 'shutdown');

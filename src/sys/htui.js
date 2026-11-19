@@ -216,6 +216,7 @@
   htui.stop = function () {
     if (!htui.running) return false;
     htui.wins.slice().forEach(w => w.close(true));
+    Object.keys(parked).forEach(u => htui.endParked(u, true));
     clearShell();
     if (OS.hdm) OS.hdm.stop();
     document.removeEventListener('keydown', hotkeys); document.removeEventListener('keyup', keyUp); document.removeEventListener('contextmenu', onContext); window.removeEventListener('blur', altTabEnd); altTabEnd(true);
@@ -270,8 +271,8 @@
     OS.notify({ app: '電源管理', icon: 'battery', title: '休止状態から戻りました', body: n ? 'ウィンドウを ' + n + ' 個開き直しました' : '開いていたウィンドウはありません' });
   }
   // ログイン画面（hdm）へ
-  function toLogin() {
-    if (htui.user && OS.ipc) { try { OS.ipc.publish('session.logout', { user: htui.user }, 'htui'); } catch (e) { /* 無視 */ } }
+  function toLogin(keep) {
+    if (htui.user && OS.ipc && !keep) { try { OS.ipc.publish('session.logout', { user: htui.user }, 'htui'); } catch (e) { /* 無視 */ } }
     clearShell();
     htui.user = null; htui.fs = null; htui.prefs = {};
     OS.setMode('auto');
@@ -325,8 +326,10 @@
   // ---------- セッション開始
   function session(user, sid) {
     clearShell();
+    const pk = parked[user]; delete parked[user];
+    if (pk) pk.wins = pk.wins.filter(w => !w.closed);
     htui.user = user;
-    if (OS.ipc) { try { OS.ipc.publish('session.login', { user: user }, 'htui'); } catch (e) { /* 無視 */ } }
+    if (OS.ipc) { try { OS.ipc.publish(pk ? 'session.resume' : 'session.login', { user: user }, 'htui'); } catch (e) { /* 無視 */ } }
     htui.fs = OS.fsFor(() => htui.user);
     const sh = OS.sessions[sid] || OS.sessions[OS.hdm.sessionFor(user)] || OS.sessions.htui;
     htui.shell = sh; htui.sessionId = sh.id;
@@ -336,6 +339,12 @@
     sh.build(kit);
     if (!htui.desk) kit.desk(false, true);
     if (!htui.tasks) htui.tasks = h('div'); // タスクボタンを出さない環境でも、ウィンドウ側が参照するので置き場だけ作る
+    if (pk) { // ユーザーの切り替えで残しておいたウィンドウを戻す
+      htui.wins = pk.wins; htui.z = Math.max(htui.z, pk.z || 0);
+      htui.wins.forEach(w => { if (w.task) htui.tasks.append(w.task); });
+      htui.allWins().forEach(w => htui.desk.append(w.el));
+      htui.ws.cur = Math.max(0, Math.min(pk.cur | 0, htui.ws.count - 1));
+    }
     // タッチ用の下部ナビ。HTUi だけが使う（ほかの環境は、それぞれのやり方で操作する）
     if (sh.touchNav) {
       const navBtn = (icon, label, fn) => h('button', { class: 'nav-btn', type: 'button', onclick: fn }, OS.icon(icon, 22), h('span', null, label));
@@ -344,15 +353,21 @@
         navBtn('home', 'ホーム', goHome),
         navBtn('grid', 'タスク', switcher)));
     }
-    htui.notices = [];
-    OS.notify({ app: 'htmlOS', icon: 'user', title: 'ようこそ、' + user + ' さん', body: sh.name + ' にログインしました', silent: true });
+    htui.notices = pk ? pk.notices : [];
+    if (!pk) OS.notify({ app: 'htmlOS', icon: 'user', title: 'ようこそ、' + user + ' さん', body: sh.name + ' にログインしました', silent: true });
     const tick = () => ticks.forEach(f => { try { f(new Date()); } catch (e) { /* 無視 */ } });
     tick(); if (!(OS.init && OS.init.has('clock.service'))) clockTimer = setInterval(tick, 5000);
     // ログインセッションのプロセス（アプリのウインドウはこの子になる）
-    if (OS.proc) {
+    if (pk && pk.proc && OS.proc && OS.proc.get && OS.proc.get(pk.proc.pid)) htui.sessionProc = pk.proc;
+    else if (OS.proc) {
       const hs = OS.init && OS.init.state('htui.service');
+      // シグナルは、このユーザーが使っているときはログアウト、切り替えで残しているときはそのセッションを終える
       htui.sessionProc = OS.proc.spawn({ name: 'htui-session', cmd: 'htui-session ' + sh.id + '（' + user + '）', user: user, kind: 'session', ppid: (hs && hs.pid) || 1,
-        onsignal: sig => { if (sig === 'KILL') { htui.wins.slice().forEach(w => w.close(true)); toLogin(); } else htui.logout(); return true; } });
+        onsignal: sig => {
+          if (htui.user !== user) { htui.endParked(user, sig === 'KILL'); return true; }
+          if (sig === 'KILL') { htui.wins.slice().forEach(w => w.close(true)); toLogin(); } else htui.logout();
+          return true;
+        } });
     }
     htui.refreshApps(); htui.refreshUser(); htui.syncMode(); htui.syncTitle(); watchDesk();
     if (sh.onStart) sh.onStart(kit);
@@ -1094,13 +1109,32 @@
     document.addEventListener('keydown', esc, true);
     htui.el.append(v);
   };
-  // ほかのユーザーに切り替える（今のユーザーのウィンドウを閉じて、そのユーザーを選んだログイン画面へ）
-  htui.switchUser = async function (name) {
-    if (!users.get(name) || !htui.user) return false;
-    for (const w of htui.wins.slice()) { if ((await w.close()) === false) return false; }
+  // ほかのユーザーに切り替える（6.0.1）。今のユーザーはログアウトしない: ウィンドウとプロセスはそのまま残し、
+  //   そのユーザーを選んだログイン画面へ。あとで同じユーザーがログインすると、残しておいたウィンドウに戻る
+  htui.switchUser = function (name) {
+    if (!users.get(name) || !htui.user || htui.locked) return false;
+    const me = htui.user;
+    closeMenus(); altTabEnd(true);
+    parked[me] = { wins: htui.wins.slice(), cur: htui.ws.cur, notices: htui.notices || [], sid: htui.sessionId, proc: htui.sessionProc, z: htui.z };
+    htui.wins = []; htui.sessionProc = null; // セッションのプロセスは止めない
+    if (OS.ipc) { try { OS.ipc.publish('session.switch', { from: me, to: name }, 'htui'); } catch (e) { /* 無視 */ } }
     const c = OS.hdm.conf(); c.lastUser = name; OS.hdm.save(c);
-    OS.sound.play('logout');
-    toLogin();
+    toLogin(true);
+    setTimeout(() => OS.ui.toast(me + ' さんはログインしたままです（ウィンドウはそのまま残ります）'), 300);
+    return true;
+  };
+  // 切り替えでログインしたままにしているユーザー
+  const parked = {};
+  htui.loggedIn = () => (htui.user ? [htui.user] : []).concat(Object.keys(parked).filter(u => u !== htui.user));
+  htui.isParked = u => !!parked[u];
+  // 残しておいたセッションを終える（force: 確認なしで閉じる）。閉じるのを取りやめたウィンドウがあれば false
+  htui.endParked = async function (u, force) {
+    const pk = parked[u]; if (!pk) return true;
+    for (const w of pk.wins.slice()) { if (!w.closed && (await w.close(force)) === false) return false; }
+    if (parked[u] !== pk) return true;
+    delete parked[u];
+    if (pk.proc && OS.proc) OS.proc.exit(pk.proc.pid);
+    if (OS.ipc) { try { OS.ipc.publish('session.logout', { user: u }, 'htui'); } catch (e) { /* 無視 */ } }
     return true;
   };
 

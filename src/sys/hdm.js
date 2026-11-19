@@ -98,7 +98,7 @@
           return { input: input, submit: submit, msg: msg, form: form };
         },
         userButtons(cls, size, square) {
-          return list().map(u => h('button', { class: 'gr-user ' + (cls || '') + (st.user && st.user.name === u.name ? ' cur' : ''), type: 'button', onclick: () => c.pick(u) },
+          return list().map(u => h('button', { class: 'gr-user ' + (cls || '') + (st.user && st.user.name === u.name ? ' cur' : '') + (htui.isParked && htui.isParked(u.name) ? ' logged' : ''), type: 'button', title: htui.isParked && htui.isParked(u.name) ? u.name + '（ログイン中）' : null, onclick: () => c.pick(u) },
             c.avatar(u, size || 40, square), h('span', null, u.name)));
         },
         powerButton(cls, size) {
