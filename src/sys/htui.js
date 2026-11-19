@@ -739,6 +739,21 @@
         { label: '電源を切る', icon: 'power', act: () => OS.poweroff() }
       ];
     },
+    // BGM（5.2.1）: クイック設定・コントロールセンター・チャーム・右クリックメニューから使う
+    bgmOn: () => OS.bgm.prefs().on,
+    bgmSet(patch) { htui.setPrefs({ bgm: Object.assign({}, htui.prefs.bgm || {}, patch) }); },
+    bgmToggle() {
+      const on = !kit.bgmOn(); kit.bgmSet({ on: on });
+      const stopped = on && OS.init && OS.init.has('bgm.service') && !OS.init.isActive('bgm.service');
+      OS.ui.toast('BGM を' + (on ? 'オン' : 'オフ') + 'にしました' + (stopped ? '（bgm.service が止まっているので鳴りません）' : ''));
+      return on;
+    },
+    bgmLabel() { const p = OS.bgm.prefs(); return p.on ? OS.bgm.styles[p.style].name : 'オフ'; },
+    bgmItems() {
+      const p = OS.bgm.prefs(), S = OS.bgm.styles;
+      return [{ head: 'BGM（アンビエントサウンド）' }, { label: p.on ? 'BGM をオフにする' : 'BGM をオンにする', icon: 'music', act: () => kit.bgmToggle() }]
+        .concat(Object.keys(S).map(id => ({ label: '曲調: ' + S[id].name, hint: p.on && p.style === id ? '選択中' : null, act: () => kit.bgmSet({ style: id, on: true }) })));
+    },
     userButton(cls, opt) {
       const b = htui.userBtn = h('button', { class: cls, type: 'button', onclick: e => menu(e.currentTarget, [{ label: '設定', icon: 'gear', act: () => run('settings') }, { sep: true }].concat(kit.powerItems()), true, opt) });
       return b;

@@ -106,8 +106,15 @@
       htui.titleEl = h('div', { class: 'p-title' });
       this.dock = h('div', { class: 'ht2-dock', role: 'toolbar', 'aria-label': 'Dock' });
       this.main = h('div', { class: 'ht2-main' }, this.dock, k.desk(true));
-      htui.el.append(h('div', { class: 'panel' }, appsBtn, htui.titleEl, k.modeButton('p-btn'), clock, k.userButton('p-btn')), this.main);
+      const quick = h('button', { class: 'p-btn ht2-quick', type: 'button', title: 'クイック設定', 'aria-label': 'クイック設定', onclick: e => k.menu(e.currentTarget, this.quickItems(), true) }, OS.icon('music', 16));
+      htui.el.append(h('div', { class: 'panel' }, appsBtn, htui.titleEl, quick, k.modeButton('p-btn'), clock, k.userButton('p-btn')), this.main);
       this._sig = null; this.place();
+    },
+    // クイック設定: BGM・おやすみモード・設定
+    quickItems() {
+      const k = htui.kit;
+      return k.bgmItems().concat({ sep: true }, { label: 'おやすみモード', icon: 'bell', hint: htui.prefs.dnd ? 'オン' : 'オフ', act: () => htui.setPrefs({ dnd: !htui.prefs.dnd }) },
+        { label: 'サウンドの設定', icon: 'gear', act: () => k.run('settings') });
     },
     appMenu() {
       return htui.kit.apps().map(a => ({ label: a.name + (htui.pins.has(a.id) ? '  📌' : ''), hint: a.desc, icon: a.icon, act: () => htui.kit.run(a.id) }));
@@ -216,7 +223,7 @@
           if (!el.classList.contains('w8-desk-on') && (v.max > 30 || v.max < 12) && !v.cancel) this.appBar();
         } })
       ];
-      htui.el.append(desk, h('div', { class: 'taskbar' }, start, tasks, h('div', { class: 'tb-tray' }, k.modeButton('tb-btn', { up: true }), clock, showDesk)), ...edges, ...this.buildPhone(k));
+      htui.el.append(desk, h('div', { class: 'taskbar' }, start, tasks, h('div', { class: 'tb-tray' }, h('button', { class: 'tb-btn', type: 'button', title: 'BGM', 'aria-label': 'BGM', onclick: e => k.menu(e.currentTarget, k.bgmItems(), true, { up: true }) }, OS.icon('music', 16)), k.modeButton('tb-btn', { up: true }), clock, showDesk)), ...edges, ...this.buildPhone(k));
       htui.el.classList.add('w8-start-on');
       this.startBtn = start;
     },
@@ -323,6 +330,7 @@
         h('div', { class: 'wp-quick' },
           quick(OS.modeIcons[OS.uiMode], '画面モード', e => k.menu(e.currentTarget, k.modeItems())),
           dnd,
+          quick('music', 'BGM', () => { k.bgmToggle(); close(); self.actionCenter(); }, k.bgmOn()),
           quick('gear', 'すべての設定', () => { close(); self.launch('settings'); }),
           quick('power', '電源', e => k.menu(e.currentTarget, k.powerItems(), true))),
         h('div', { class: 'wp-ahead' }, h('span', null, '通知'), h('button', { class: 'wp-aclear', type: 'button', onclick: () => { htui.notices = []; fill(); } }, 'すべてクリア')),
@@ -462,6 +470,7 @@
         h('div', { class: 'w8-pane-list' },
           h('button', { class: 'w8-pane-item', type: 'button', onclick: () => { close(); this.launch('settings'); } }, OS.icon('gear', 20), 'PC 設定'),
           h('button', { class: 'w8-pane-item', type: 'button', onclick: e => k.menu(e.currentTarget, k.modeItems()) }, OS.icon(OS.modeIcons[OS.uiMode], 20), '画面モード: ' + OS.modeNames[OS.modePref]),
+          h('button', { class: 'w8-pane-item', type: 'button', onclick: e => k.menu(e.currentTarget, k.bgmItems()) }, OS.icon('music', 20), 'BGM: ' + k.bgmLabel()),
           h('button', { class: 'w8-pane-item', type: 'button', onclick: e => k.menu(e.currentTarget, k.powerItems(), false, { up: true }) }, OS.icon('power', 20), '電源')));
       const close = popup(pane, null);
     },
@@ -574,7 +583,7 @@
       const clockText = k.clock(h('span'), d => (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + k.pad(d.getHours()) + ':' + k.pad(d.getMinutes()));
       const clock = this.clockBtn = h('button', { class: 'gn-clock', type: 'button', title: 'カレンダーと通知', 'aria-label': 'カレンダーと通知', onclick: () => self.calendar() }, clockText, this.dot);
       const status = h('button', { class: 'gn-status', type: 'button', 'aria-label': 'システムメニュー', onclick: e => k.menu(e.currentTarget, [
-        { head: htui.user }, { label: '設定', icon: 'gear', act: () => k.run('settings') }, { sep: true }].concat(k.powerItems()), true) }, OS.icon('user', 16), OS.icon('power', 16));
+        { head: htui.user }].concat(k.bgmItems(), [{ sep: true }, { label: 'おやすみモード', icon: 'bell', hint: htui.prefs.dnd ? 'オン' : 'オフ', act: () => htui.setPrefs({ dnd: !htui.prefs.dnd }) }, { label: '設定', icon: 'gear', act: () => k.run('settings') }, { sep: true }], k.powerItems()), true) }, OS.icon('user', 16), OS.icon('power', 16));
       // 左上の角にポインタを当てるとアクティビティ（ホットコーナー）
       const hot = h('div', { class: 'gn-hot', 'aria-hidden': 'true' });
       hot.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse' && !htui.el.classList.contains('dragging')) self.overview(true); });
@@ -825,7 +834,8 @@
         items.push({ sep: true }, { head: 'ウィンドウ' });
         htui.wins.forEach(w => items.push({ label: w.title, icon: (OS.apps[w.app] || {}).icon || 'file', hint: w.el.classList.contains('hidden') ? '最小化' : null, act: () => w.focus() }));
       }
-      items.push({ sep: true }, { label: '画面モード: ' + OS.modeNames[OS.modePref], icon: OS.modeIcons[OS.uiMode], act: () => setTimeout(() => htui.menuAt(x, y, k.modeItems()), 0) });
+      items.push({ sep: true }, { label: '画面モード: ' + OS.modeNames[OS.modePref], icon: OS.modeIcons[OS.uiMode], act: () => setTimeout(() => htui.menuAt(x, y, k.modeItems()), 0) },
+        { label: 'BGM: ' + k.bgmLabel(), icon: 'music', act: () => setTimeout(() => htui.menuAt(x, y, k.bgmItems()), 0) });
       htui.menuAt(x, y, items.concat([{ sep: true }], k.powerItems()));
     },
     onKey(e) {
@@ -1092,6 +1102,8 @@
       const tile = (cls, icon, label, sub, on, fn) => h('button', { class: 'mc-tile ' + cls + (on ? ' on' : ''), type: 'button', onclick: fn }, h('span', { class: 'mc-tico' }, icon), h('span', { class: 'mc-tl' }, h('b', null, label), sub ? h('small', null, sub) : null));
       const bright = h('input', { type: 'range', min: '40', max: '100', value: String(Math.round((htui.prefs.brightness || 1) * 100)), 'aria-label': '画面の明るさ', class: 'mc-range',
         oninput: e => { const v = Number(e.target.value) / 100; OS.root.style.filter = v < 1 ? 'brightness(' + v + ')' : ''; }, onchange: e => htui.setPrefs({ brightness: Number(e.target.value) / 100 }) });
+      const bgmVol = h('input', { type: 'range', min: '0', max: '100', value: String(Math.round(OS.bgm.prefs().vol * 100)), 'aria-label': 'BGM の音量', class: 'mc-range',
+        onchange: e => k.bgmSet({ vol: Number(e.target.value) / 100 }) });
       const cc = h('div', { class: 'mc-cc', role: 'dialog', 'aria-label': 'コントロールセンター' },
         h('div', { class: 'mc-cgrp' },
           tile('', glyph(G_WIFI, 18), 'ネットワーク', navigator.onLine === false ? 'オフライン' : 'オンライン', navigator.onLine !== false, () => OS.ui.toast(navigator.onLine === false ? 'インターネットに接続していません' : 'インターネットに接続しています')),
@@ -1100,7 +1112,9 @@
           tile('', OS.icon(OS.modeIcons[OS.uiMode], 18), '画面モード', OS.modeNames[OS.modePref], false, e => k.menu(e.currentTarget, k.modeItems())),
           tile('', OS.icon('gear', 18), 'システム設定', null, false, () => { close(); self.openApp('settings'); })),
         h('div', { class: 'mc-cslider' }, h('b', null, 'ディスプレイ'), h('label', { class: 'mc-rrow' }, glyph(G_SUN, 16), bright)),
+        h('div', { class: 'mc-cslider' }, h('b', null, 'BGM の音量'), h('label', { class: 'mc-rrow' }, OS.icon('music', 16), bgmVol)),
         h('div', { class: 'mc-cgrp mc-cpow' },
+          tile('mc-bgm', OS.icon('music', 18), 'BGM', k.bgmLabel(), k.bgmOn(), e => { if (e.target.closest('.mc-tsub')) return; k.bgmToggle(); close(); self.controlCenter(); }),
           tile('', OS.icon('power', 18), '電源', null, false, e => k.menu(e.currentTarget, k.powerItems(), true))),
         h('div', { class: 'ios-grip', 'aria-hidden': 'true' }));
       dragOn(cc, (dx, dy) => { if (OS.touch && dy < -60) close(); }, true);
