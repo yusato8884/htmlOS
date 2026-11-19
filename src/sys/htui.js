@@ -876,6 +876,29 @@
   const MINW = 260, MINH = 150;
   const px = v => Math.round(v) + 'px', clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   htui.animOff = () => htui.prefs.anim === false || !!(OS.power && OS.power.saving);
+  // ---------- 枠線だけのアニメーション（5.3.1）。省電力モードの最小化・復元で使う（ウィンドウの中身は動かさない）
+  //   ウィンドウの枠の形の線だけを、タスクバーのボタン・固定したアイコン・Dock のアイコンへ縮める（復元はその逆）
+  htui.wireMode = () => htui.prefs.anim !== false && !!(OS.power && OS.power.saving);
+  htui.taskAnchor = function (win) {
+    const vis = e => !!(e && e.isConnected && !e.hidden && e.offsetParent !== null && e.getBoundingClientRect().width > 0);
+    let a = vis(win.task) ? win.task : null;
+    if (!a && win.app) a = [...htui.el.querySelectorAll('[data-app="' + (window.CSS && CSS.escape ? CSS.escape(win.app) : win.app) + '"]')].find(e => e.matches('.ht2-dk,.p-pin,.gn-dk,.mc-dk,.p-task') && vis(e));
+    if (a) return a.getBoundingClientRect();
+    const hr = htui.el.getBoundingClientRect(); // 見えるアイコンがなければ画面の下の真ん中へ
+    return { left: hr.left + hr.width / 2 - 24, top: hr.bottom - 36, width: 48, height: 32 };
+  };
+  htui.wire = function (from, to, ms, cb) {
+    const hr = htui.el.getBoundingClientRect();
+    const put = r => ({ left: (r.left - hr.left) + 'px', top: (r.top - hr.top) + 'px', width: Math.max(8, r.width) + 'px', height: Math.max(8, r.height) + 'px' });
+    const f = h('div', { class: 'wire', 'aria-hidden': 'true' });
+    Object.assign(f.style, put(from)); htui.el.append(f);
+    let fin = false;
+    const done = () => { if (fin) return; fin = true; f.remove(); if (cb) cb(); };
+    if (!f.animate) { done(); return; }
+    const a = f.animate([Object.assign(put(from), { opacity: 1 }), Object.assign(put(to), { opacity: 0.35 })], { duration: ms || 220, easing: 'cubic-bezier(.4,0,.6,1)' });
+    a.onfinish = done; a.oncancel = done;
+    setTimeout(done, (ms || 220) + 200); // 念のため
+  };
   function animOut(el, cls, ms, cb) {
     if (htui.animOff()) return cb();
     el.classList.add(cls);
@@ -1335,7 +1358,9 @@
     win.setTitle = t => { win.title = t; titleEl.textContent = t; task.lastChild.textContent = t; task.title = t; el.setAttribute('aria-label', t); htui.syncTitle(); };
     win.focus = () => {
       win._min = 0;
+      const back = !parent && el.classList.contains('hidden') && htui.wireMode();
       el.classList.remove('hidden', 'minimizing');
+      if (back) { el.style.visibility = 'hidden'; htui.wire(htui.taskAnchor(win), el.getBoundingClientRect(), 200, () => { el.style.visibility = ''; }); }
       // 子ウインドウがあれば、親を前に出してから、いちばん新しい子にフォーカスする
       if (win.children.length) { el.style.zIndex = ++htui.z; win.children[win.children.length - 1].focus(); return; }
       if (parent) { const r = rootOf(win); r.el.classList.remove('hidden', 'minimizing'); }
@@ -1352,6 +1377,11 @@
       if (parent) { rootOf(win).minimize(); return; }
       const tok = win._min = Date.now() + Math.random();
       el.classList.remove('active'); task.classList.remove('active');
+      if (htui.wireMode() && !el.classList.contains('hidden')) {
+        const from = el.getBoundingClientRect(), to = htui.taskAnchor(win);
+        el.classList.add('hidden'); focusTop(); htui.wire(from, to, 220);
+        return;
+      }
       animOut(el, 'minimizing', 170, () => { if (win._min !== tok || win.closed) return; el.classList.add('hidden'); focusTop(); });
     };
     win.close = async force => {

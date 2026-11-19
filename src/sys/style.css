@@ -54,6 +54,7 @@
 
 /* ---- HTUi */
 #htui{position:absolute;inset:0;display:flex;flex-direction:column;overflow:hidden}
+.wire{position:absolute;z-index:150000;box-sizing:border-box;border:2px solid var(--accent,#3584e4);border-radius:8px;background:rgba(127,127,127,.06);pointer-events:none}
 .lock-wrap{position:absolute;inset:0;z-index:200000}
 .lock-wrap>div{position:absolute;inset:0;display:flex;flex-direction:column;overflow:hidden}
 .lock-wrap>.hdm{color:#fff}
