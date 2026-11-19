@@ -423,6 +423,14 @@
     start(ctx) { ctx.setInterval(() => journal.save(), 30000); return () => journal.save(); }
   });
   register({
+    name: 'bgm.service', desc: 'アンビエントサウンド（BGM）', after: ['soundd.service'], wants: ['soundd.service'], wantedBy: 'graphical.target', restart: 'on-failure',
+    start(ctx) {
+      ctx.setTimeout(() => { if (OS.bgm) OS.bgm.apply(); }, 60); // active になってから設定どおりに鳴らす
+      ctx.log('BGM を使えるようにしました');
+      return () => { if (OS.bgm) OS.bgm.stop(); };
+    }
+  });
+  register({
     name: 'soundd.service', desc: '効果音', wantedBy: 'basic.target', restart: 'on-failure',
     start(ctx) {
       const a = BOOT.audio; if (a && a.state === 'suspended' && navigator.userActivation && navigator.userActivation.hasBeenActive) a.resume().catch(() => { /* まだ鳴らせない */ });

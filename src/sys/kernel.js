@@ -55,6 +55,8 @@
   }, true);
 
   const ICONS = {
+    pin: '<path d="M9 3h6l-1 6 4 4H6l4-4zM12 13v8"/>',
+    music: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
     terminal: '<path d="M4 6l5 5-5 5M12 17h8"/>',
     edit: '<path d="M5 3h10l4 4v14H5zM8 10h8M8 14h8M8 18h5"/>',
     globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3.2 3 3.2 15 0 18M12 3c-3.2 3-3.2 15 0 18"/>',
@@ -389,7 +391,104 @@
       else c.resume().then(() => { if (Date.now() - now < 400 && c.state === 'running') go(); }).catch(() => { /* まだ鳴らせない */ });
       return true;
     }
-    return { play: play, prefs: prefs, names: NAMES, list: () => Object.keys(SOUNDS) };
+    return { play: play, prefs: prefs, names: NAMES, list: () => Object.keys(SOUNDS), _ctx: ctx, _reverb: reverb, _note: note, _tone: tone, M: M };
+  })();
+
+  // ---------- アンビエントサウンド（BGM。5.2 から）。効果音と同じく、音のファイルを使わずにその場で合成する
+  //   ゆっくり入れ替わる和音（パッド）に、ときどき鳴る柔らかいベル、曲調によって低い持続音や雨の音を重ねる。同じ流れは二度と出ない
+  //   OS.bgm.apply() で設定（ユーザーの htui.prefs.bgm、ログイン前は /etc/config.json の bgm）どおりに鳴らす・止める。bgm.service が止まっていると鳴らない
+  OS.bgm = (function () {
+    const S = OS.sound, M = S.M;
+    const STYLES = {
+      calm:  { name: '穏やか', root: 48, bar: 9,  chords: [[0, 4, 7, 11, 14], [5, 9, 12, 16], [-3, 0, 4, 7, 11], [2, 5, 9, 12, 16]], scale: [0, 2, 4, 7, 9], bells: 3, cut: 900 },
+      night: { name: '夜',     root: 45, bar: 11, chords: [[0, 3, 7, 10, 14], [-4, 0, 3, 7], [-7, -3, 0, 5], [-2, 2, 5, 9]], scale: [0, 3, 5, 7, 10], bells: 2, cut: 700 },
+      space: { name: '宇宙',   root: 38, bar: 14, chords: [[0, 7, 14, 19], [0, 5, 12, 17], [0, 7, 15, 19], [0, 2, 9, 14]], scale: [0, 2, 7, 9, 14], bells: 2, cut: 600, drone: true },
+      rain:  { name: '雨',     root: 50, bar: 8,  chords: [[0, 4, 9, 11], [-1, 2, 7, 9], [-3, 0, 4, 7], [-5, 0, 2, 7]], scale: [0, 2, 4, 7, 9, 11], bells: 4, cut: 1100, rain: true }
+    };
+    let cur = null; // 鳴っているもの: { c, master, style, vol, timers, nodes, step }
+    function prefs() {
+      let sys = {}; try { sys = config.get('bgm', {}) || {}; } catch (e) { /* 既定 */ }
+      const p = { on: sys.on === true, vol: typeof sys.vol === 'number' ? sys.vol : 0.35, style: STYLES[sys.style] ? sys.style : 'calm' };
+      const H = OS.htui, hp = H && H.running && H.user && H.prefs && H.prefs.bgm;
+      if (H && H.running && H.user) { p.on = true; if (hp) { if ('on' in hp) p.on = hp.on !== false; if (typeof hp.vol === 'number') p.vol = hp.vol; if (STYLES[hp.style]) p.style = hp.style; } }
+      p.vol = Math.max(0, Math.min(1, p.vol));
+      return p;
+    }
+    const serviceOk = () => !(OS.init && OS.init.has('bgm.service') && !OS.init.isActive('bgm.service'));
+    // パッドの 1 音: 少しずらした 2 つの波形を、ゆっくり開くローパスに通す
+    function pad(c, out, t, f, dur, v, cut) {
+      const g = c.createGain(), lp = c.createBiquadFilter();
+      lp.type = 'lowpass'; lp.Q.value = 0.4;
+      lp.frequency.setValueAtTime(cut * 0.6, t); lp.frequency.linearRampToValueAtTime(cut * 1.3, t + dur * 0.5); lp.frequency.linearRampToValueAtTime(cut * 0.7, t + dur);
+      g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(v, t + Math.min(3.5, dur * 0.35)); g.gain.setValueAtTime(v, t + dur * 0.6); g.gain.linearRampToValueAtTime(0.0001, t + dur);
+      [['triangle', 0], ['sawtooth', 7], ['sine', -5]].forEach(([type, cents], i) => {
+        const o = c.createOscillator(); o.type = type; o.frequency.value = f; o.detune.value = cents;
+        const og = c.createGain(); og.gain.value = i === 1 ? 0.18 : 0.5;
+        o.connect(og); og.connect(lp); o.start(t); o.stop(t + dur + 0.1);
+      });
+      lp.connect(g); g.connect(out);
+    }
+    function bar(st) {
+      if (!cur || cur !== st) return;
+      const c = st.c, s = STYLES[st.style], t = c.currentTime + 0.1, dur = s.bar + 5;
+      const ch = s.chords[st.step % s.chords.length]; st.step++;
+      ch.forEach((n, i) => pad(c, st.bus, t + i * 0.25, M(s.root + n), dur, 0.05, s.cut));
+      pad(c, st.bus, t, M(s.root + ch[0] - 12), dur, 0.06, s.cut * 0.6); // 低音
+      // ときどき鳴る柔らかいベル（音階から選ぶ。鳴らない小節もある）
+      const nb = Math.floor(Math.random() * (s.bells + 1));
+      for (let i = 0; i < nb; i++) {
+        const deg = s.scale[Math.floor(Math.random() * s.scale.length)], oct = Math.random() < 0.5 ? 24 : 36;
+        S._note(c, st.bells, t + 1 + Math.random() * (s.bar - 2), M(s.root + deg + oct), 2.6 + Math.random() * 2, 0.05 + Math.random() * 0.04);
+      }
+      st.timers.push(setTimeout(() => bar(st), s.bar * 1000));
+    }
+    function start(p) {
+      const c = S._ctx(); if (!c) return false;
+      const s = STYLES[p.style];
+      const master = c.createGain(), lim = c.createDynamicsCompressor(), rv = S._reverb(c), wet = c.createGain(), bus = c.createGain(), bells = c.createGain();
+      master.gain.setValueAtTime(0.0001, c.currentTime); master.gain.linearRampToValueAtTime(p.vol * 0.8, c.currentTime + 4); // ゆっくり入る
+      lim.threshold.value = -10; lim.ratio.value = 8;
+      wet.gain.value = 0.55; bus.gain.value = 1; bells.gain.value = 0.9;
+      bus.connect(master); bells.connect(master); bus.connect(rv.input); bells.connect(rv.input); rv.output.connect(wet); wet.connect(master);
+      master.connect(lim); lim.connect(c.destination);
+      const st = cur = { c: c, master: master, lim: lim, wet: wet, rv: rv, bus: bus, bells: bells, style: p.style, vol: p.vol, timers: [], nodes: [], step: Math.floor(Math.random() * 4) };
+      if (s.drone) {
+        [0, 7].forEach((n, i) => { const o = c.createOscillator(), g = c.createGain(), lfo = c.createOscillator(), lg = c.createGain(); o.type = 'sine'; o.frequency.value = M(s.root - 12 + n); g.gain.value = i ? 0.025 : 0.05; lfo.frequency.value = 0.05 + i * 0.03; lg.gain.value = 0.02; lfo.connect(lg); lg.connect(g.gain); o.connect(g); g.connect(bus); o.start(); lfo.start(); st.nodes.push(o, lfo); });
+      }
+      if (s.rain) {
+        const len = c.sampleRate * 3, buf = c.createBuffer(1, len, c.sampleRate), d = buf.getChannelData(0);
+        for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+        const src = c.createBufferSource(), bp = c.createBiquadFilter(), lp = c.createBiquadFilter(), g = c.createGain();
+        src.buffer = buf; src.loop = true; bp.type = 'highpass'; bp.frequency.value = 900; lp.type = 'lowpass'; lp.frequency.value = 5200; g.gain.value = 0.035;
+        src.connect(bp); bp.connect(lp); lp.connect(g); g.connect(master); src.start(); st.nodes.push(src);
+      }
+      bar(st);
+      return true;
+    }
+    function stop(fade) {
+      const st = cur; if (!st) return; cur = null;
+      st.timers.forEach(clearTimeout);
+      const c = st.c, t = c.currentTime, f = fade == null ? 1.5 : fade;
+      try { st.master.gain.cancelScheduledValues(t); st.master.gain.setValueAtTime(st.master.gain.value, t); st.master.gain.linearRampToValueAtTime(0.0001, t + f); } catch (e) { /* 無視 */ }
+      setTimeout(() => { st.nodes.forEach(n => { try { n.stop(); } catch (e) { /* 止まっている */ } }); try { st.rv.output.disconnect(st.wet); } catch (e) { /* 外れている */ } try { st.master.disconnect(); st.lim.disconnect(); } catch (e) { /* 外れている */ } }, f * 1000 + 200);
+    }
+    // 設定どおりにする。鳴らすのは、ログインしていて（またはログイン前でシステムの設定がオン）、bgm.service が動いているとき
+    function apply() {
+      const p = prefs(), want = p.on && p.vol > 0 && serviceOk() && !OS._down && !!(OS.htui && OS.htui.running);
+      if (!want) { stop(); return false; }
+      if (cur && cur.style === p.style) {
+        if (cur.vol !== p.vol) { cur.vol = p.vol; const t = cur.c.currentTime; cur.master.gain.cancelScheduledValues(t); cur.master.gain.setValueAtTime(cur.master.gain.value, t); cur.master.gain.linearRampToValueAtTime(p.vol * 0.8, t + 0.4); }
+        return true;
+      }
+      if (cur) stop(2);
+      const c = S._ctx(); if (!c) return false;
+      if (c.state === 'running') return start(p);
+      c.resume().then(() => { if (!cur && prefs().on) start(prefs()); }).catch(() => { /* まだ鳴らせない（クリックやキーのあとで） */ });
+      return true;
+    }
+    // まだ音を出す許可がなかったとき: 最初のクリック・キーで鳴らし始める
+    ['pointerdown', 'keydown'].forEach(t => window.addEventListener(t, () => { if (!cur && OS.htui && OS.htui.running && OS.htui.user) { const p = prefs(); if (p.on) apply(); } }, { capture: true, passive: true }));
+    return { apply: apply, stop: stop, prefs: prefs, styles: STYLES, get playing() { return !!cur; }, get style() { return cur ? cur.style : null; } };
   })();
 
   // ---------- ユーザー

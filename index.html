@@ -2039,6 +2039,9 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
             OS.hdm.sessionFor(OS.htui.user) !== OS.htui.sessionId
               ? h('div', { class: 'st-row' }, h('button', { class: 'btn primary', type: 'button', onclick: () => OS.htui.switchSession(OS.hdm.sessionFor(OS.htui.user)) }, '今すぐ切り替える'), '開いているアプリは閉じます（未保存の確認は出ます）。')
               : h('p', null, '次回ログイン時も、ここで選んだ環境で起動します。ログイン画面（hdm）でも選べます。'),
+            OS.htui.sessionId === 'htui' ? [h('h3', null, 'Dock の位置（HTUi 2）'),
+              h('div', { class: 'st-row' }, ['left', 'bottom', 'right'].map(d => h('label', null, h('input', { type: 'radio', name: 'st-dock-' + win.pid, id: 'st-dock-' + d, checked: (p.dock || 'left') === d, onchange: () => OS.htui.setPrefs({ dock: d }) }), ' ' + { left: '左（既定）', bottom: '下', right: '右' }[d]))),
+              h('p', null, 'Dock のアイコンを右クリックすると、固定/解除・並び替え・Dock の位置を変えられます。')] : null,
             h('h3', null, '画面モード'),
             h('div', { class: 'st-row' }, h('select', { class: 'sel', id: 'st-mode', 'aria-label': '画面モード', value: p.mode || 'auto', onchange: e => { OS.htui.setPrefs({ mode: e.target.value }); show('look'); } },
               ['auto', 'desktop', 'tablet', 'phone'].map(m => h('option', { value: m }, OS.modeNames[m]))), '今の表示: ' + OS.modeNames[OS.uiMode]),
@@ -2061,6 +2064,17 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
             h('div', { class: 'st-row' }, h('span', null, '音量'), vol, volN),
             h('h3', null, '試しに鳴らす'),
             h('div', { class: 'st-row', style: 'flex-wrap:wrap' }, S.list().map(n => h('button', { class: 'btn small', type: 'button', id: 'st-snd-' + n, onclick: () => S.play(n, true) }, OS.icon('audio', 14), ' ' + S.names[n]))));
+          // アンビエントサウンド（BGM）
+          const B = OS.bgm, bp = B.prefs(), setB = patch => OS.htui.setPrefs({ bgm: Object.assign({}, OS.htui.prefs.bgm || {}, patch) });
+          const bvol = h('input', { type: 'range', min: 0, max: 100, step: 5, value: Math.round(bp.vol * 100), id: 'st-bgm-vol', 'aria-label': 'BGM の音量', style: 'flex:1;max-width:260px' });
+          const bvolN = h('span', { style: 'min-width:3em' }, Math.round(bp.vol * 100) + '%');
+          bvol.addEventListener('input', () => { bvolN.textContent = bvol.value + '%'; setB({ vol: Number(bvol.value) / 100 }); });
+          page.append(h('h3', null, 'アンビエントサウンド（BGM）'),
+            h('p', null, 'ゆっくり移り変わる和音とやわらかいベルを、その場で合成して流します（同じ流れは二度と出ません）。止めたいときはここか、jsh で bgm off。'),
+            h('div', { class: 'st-row' }, h('label', null, h('input', { type: 'checkbox', class: 'switch', id: 'st-bgm-on', checked: bp.on, onchange: e => setB({ on: e.target.checked }) }), ' BGM を流す')),
+            h('div', { class: 'st-row' }, h('span', null, '曲調'), h('select', { class: 'sel', id: 'st-bgm-style', 'aria-label': '曲調', onchange: e => setB({ style: e.target.value, on: true }) },
+              Object.keys(B.styles).map(k => h('option', { value: k, selected: bp.style === k }, B.styles[k].name)))),
+            h('div', { class: 'st-row' }, h('span', null, '音量'), bvol, bvolN));
           const sys = OS.config.get('sound', {}) || {};
           page.append(h('h3', null, 'ログイン前（起動音・ログイン画面）'),
             h('div', { class: 'st-row' }, h('label', null, h('input', { type: 'checkbox', class: 'switch', id: 'st-snd-sys', disabled: !admin, checked: sys.on !== false, onchange: e => { try { OS.config.set('sound', Object.assign({}, OS.config.get('sound', {}) || {}, { on: e.target.checked, vol: Number(vol.value) / 100 })); } catch (er) { err(er); } } }), ' 起動音とログイン音を鳴らす（システム全体）')),
@@ -3882,6 +3896,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   };
   function clearShell() {
     clearInterval(clockTimer); ticks = [];
+    if (OS.bgm) OS.bgm.stop();
     if (htui.sessionProc && OS.proc) { OS.proc.exit(htui.sessionProc.pid); htui.sessionProc = null; }
     if (htui.shell && htui.shell.onStop) { try { htui.shell.onStop(); } catch (e) { /* 無視 */ } }
     htui.shell = null; htui.sessionId = null;
@@ -3921,6 +3936,8 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     Object.assign(htui.prefs, patch);
     try { fs.mkdir(users.home(htui.user) + '/.config', { parents: true, owner: htui.user }); fs.write(users.home(htui.user) + '/.config/htui.json', JSON.stringify(htui.prefs), { owner: htui.user }); } catch (e) { /* 保存できなくても表示は変える */ }
     applyPrefs();
+    if (patch && 'bgm' in patch && OS.bgm) OS.bgm.apply();
+    if (patch && 'dock' in patch && htui.shell && htui.shell.place) htui.shell.place();
   };
   function applyPrefs() {
     htui.el.style.background = wallCss(htui.prefs, htui.user);
@@ -3985,6 +4002,8 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     }
     htui.refreshApps(); htui.refreshUser(); htui.syncMode(); htui.syncTitle(); watchDesk();
     if (sh.onStart) sh.onStart(kit);
+    htui.syncTasks();
+    if (OS.bgm) OS.bgm.apply(); // アンビエントサウンド（ユーザーの設定どおり）
     // セーフモードの印と、新しいバージョンのお知らせ
     if (OS.safe) {
       htui.el.append(h('div', { class: 'safe-mark', 'aria-hidden': 'true' }, h('span', null, 'セーフモード'), h('span', null, 'セーフモード'), h('span', null, 'セーフモード'), h('span', null, 'セーフモード')));
@@ -4008,6 +4027,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     const w = htui.active();
     if (htui.titleEl) htui.titleEl.textContent = w ? w.title : '';
     if (htui.shell && htui.shell.onActive) htui.shell.onActive(w);
+    htui.syncTasks();
   };
   function goHome() {
     const sw = htui.el.querySelector('.switcher:not(.leaving)'); if (sw) leave(sw);
@@ -4127,6 +4147,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   const deskDir = () => users.home(htui.user) + '/Desktop';
   htui.refreshApps = function () {
     if (htui.shell && htui.shell.onApps) htui.shell.onApps();
+    htui.syncTasks();
     htui.refreshDesk();
   };
   htui.refreshDesk = function () {
@@ -4332,7 +4353,8 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     if (isEditable(t) || (selText && window.getSelection().containsNode(t, true))) items = textMenu(t);
     if (!items && htui.shell && htui.shell.onContext) items = htui.shell.onContext(e);
     if (!items) { const head = t.closest('.win-head'); if (head && !t.closest('.win-btn,.win-cbtn')) { const w = htui.wins.find(x => x.el.contains(head)); if (w) items = winMenu(w); } }
-    if (!items) { const tb = t.closest('.p-task'); const w = tb && htui.wins.find(x => x.task === tb); if (w) items = [{ head: w.title }, { label: w.el.classList.contains('hidden') ? '元に戻す' : '最小化', icon: 'min', act: () => (w.el.classList.contains('hidden') ? w.focus() : w.minimize()) }, { label: w.zone === 'max' ? '元のサイズに戻す' : '最大化', icon: 'max', act: () => (w.zone === 'max' ? w.unsnap() : w.snap('max')) }, { label: '新しいウィンドウ', icon: 'plus', act: () => run(w.app) }, { sep: true }, { label: '閉じる', icon: 'x', act: () => w.close() }]; }
+    if (!items) { const pb = t.closest('.p-pin[data-app]'); if (pb) items = pinMenu(pb.dataset.app); }
+    if (!items) { const tb = t.closest('.p-task'); const w = tb && htui.wins.find(x => x.task === tb); if (w) items = [{ head: w.title }, { label: w.el.classList.contains('hidden') ? '元に戻す' : '最小化', icon: 'min', act: () => (w.el.classList.contains('hidden') ? w.focus() : w.minimize()) }, { label: w.zone === 'max' ? '元のサイズに戻す' : '最大化', icon: 'max', act: () => (w.zone === 'max' ? w.unsnap() : w.snap('max')) }, { label: '新しいウィンドウ', icon: 'plus', act: () => run(w.app) }, { sep: true }, { label: '閉じる', icon: 'x', act: () => w.close() }].concat(w.app && OS.apps[w.app] && htui.shell && htui.shell.taskPins ? [{ sep: true }].concat(htui.pins.items(w.app)) : []); }
     if (!items) { const df = t.closest('.desk-file'); if (df && df._o) { htui.iconsEl.querySelectorAll('.sel').forEach(x => x.classList.toggle('sel', x === df)); items = deskFileMenu(df._o); } }
     if (!items) { const di = t.closest('.desk-icon[data-app]'); if (di) { const a = Object.values(OS.apps).find(x => di.title === (x.desc || x.name)); if (a) items = [{ head: a.name }, { label: '開く', icon: a.icon, act: () => run(a.id) }, { label: 'このアプリについて', act: () => ui.alert((a.desc || a.name) + (a.pkg ? '\n（パッケージ ' + a.pkg + '）' : ''), a.name) }]; } }
     if (!items && (t === htui.desk || t.classList.contains('desk-icons') || t.classList.contains('ios-home') || t.classList.contains('ios-grid'))) items = deskMenu();
@@ -4387,6 +4409,10 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     if (top < 4) top = below + mh <= H - 4 ? below : 4;
     let left = right ? r.right - hr.left - mw : r.left - hr.left;
     left = Math.max(4, Math.min(left, W - mw - 4));
+    if (opt && (opt.beside === 'left' || opt.beside === 'right')) { // 左右の Dock: アイコンの横に
+      left = opt.beside === 'left' ? r.right - hr.left + 6 : r.left - hr.left - mw - 6; left = Math.max(4, Math.min(left, W - mw - 4));
+      top = Math.min(r.top - hr.top, H - mh - 4);
+    }
     m.style.top = Math.max(4, top) + 'px'; m.style.left = left + 'px'; m.style.visibility = '';
     close = openMenu(m, anchor);
   }
@@ -4447,6 +4473,70 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       return b;
     }
   };
+
+  // ---------- アイコンの固定（5.2）。タスクバー・Dock に固定したアプリを、環境ごとにユーザーの設定（htui.prefs.pins）に覚える
+  //   既定は環境の pins。環境の taskPins が true なら、htui.tasks の先頭に固定したアプリのボタンを並べ、そのアプリのウィンドウのボタンはまとめる
+  htui.pins = {
+    env: () => htui.sessionId || 'htui',
+    list(env) {
+      env = env || htui.pins.env();
+      const p = (htui.prefs.pins || {})[env], def = (OS.sessions[env] && OS.sessions[env].pins) || [];
+      return (Array.isArray(p) ? p : def).filter((id, i, l) => OS.apps[id] && l.indexOf(id) === i);
+    },
+    has: (id, env) => htui.pins.list(env).includes(id),
+    set(list, env) {
+      env = env || htui.pins.env();
+      htui.setPrefs({ pins: Object.assign({}, htui.prefs.pins || {}, { [env]: list.slice() }) });
+      htui.refreshApps(); htui.syncTasks();
+    },
+    toggle(id, env) { const l = htui.pins.list(env), on = !l.includes(id); htui.pins.set(on ? l.concat(id) : l.filter(x => x !== id), env); return on; },
+    // 固定した中での並び替え（d = -1 で前へ、+1 で後ろへ）
+    move(id, d, env) { const l = htui.pins.list(env), i = l.indexOf(id), j = i + d; if (i < 0 || j < 0 || j >= l.length) return; l.splice(i, 1); l.splice(j, 0, id); htui.pins.set(l, env); },
+    // 右クリックメニューの項目
+    items(id) {
+      if (!OS.apps[id]) return [];
+      const on = htui.pins.has(id), where = (htui.shell && htui.shell.pinWhere) || 'タスクバー', l = htui.pins.list(), i = l.indexOf(id);
+      const out = [{ label: on ? where + 'から固定を解除' : where + 'に固定', icon: 'pin', act: () => htui.pins.toggle(id) }];
+      if (on && i > 0) out.push({ label: '前へ移動', icon: 'back', act: () => htui.pins.move(id, -1) });
+      if (on && i < l.length - 1) out.push({ label: '後ろへ移動', icon: 'play', act: () => htui.pins.move(id, 1) });
+      return out;
+    }
+  };
+  const zOrder = l => l.slice().sort((a, b) => (+b.el.style.zIndex || 0) - (+a.el.style.zIndex || 0));
+  // 固定したアプリ（Dock のアイコン）を押したとき: なければ起動、1 つならそのウィンドウを出す・しまう、いくつもあれば一覧
+  htui.openPinned = function (id, anchor, side) {
+    const ws = zOrder(htui.wins.filter(w => w.app === id && !w.parent));
+    closeMenus();
+    if (!ws.length) { if (anchor && !htui.animOff()) { anchor.classList.remove('bounce'); void anchor.offsetWidth; anchor.classList.add('bounce'); } run(id); return; }
+    const top = ws[0], shown = top.el.classList.contains('active') && !top.el.classList.contains('hidden');
+    if (ws.length === 1 || !anchor) { if (shown && ws.length === 1) top.minimize(); else top.focus(); return; }
+    if (!shown) { top.focus(); return; }
+    menu(anchor, ws.map(w => ({ label: w.title, icon: (OS.apps[id] || {}).icon, hint: w.el.classList.contains('hidden') ? 'しまってある' : null, act: () => w.focus() })).concat({ sep: true }, { label: '新しいウィンドウ', icon: 'plus', act: () => run(id) }), side === 'right', side === 'left' || side === 'right' ? { beside: side } : side === 'bottom' ? { up: true } : null);
+  };
+  // タスクバーの固定したアプリ（taskPins の環境）
+  htui.syncTasks = function () {
+    const sh = htui.shell, box = htui.tasks; if (!sh || !box || !sh.taskPins || !htui.user) return;
+    let zone = box.querySelector(':scope > .p-pins');
+    if (!zone) { zone = h('span', { class: 'p-pins' }); box.prepend(zone); }
+    const pins = htui.pins.list(), act = htui.active();
+    htui.wins.forEach(w => { if (w.task) w.task.hidden = pins.includes(w.app); });
+    const sig = pins.join() + '#' + htui.wins.filter(w => !w.parent).map(w => w.app + (w.el.classList.contains('hidden') ? '-' : '+')).join() + '#' + (act ? act.app : '');
+    if (zone._sig === sig) return;
+    zone._sig = sig; zone.textContent = '';
+    pins.forEach(id => {
+      const a = OS.apps[id], n = htui.wins.filter(w => w.app === id && !w.parent).length;
+      const b = h('button', { class: 'p-pin' + (n ? ' run' : '') + (act && act.app === id ? ' active' : ''), type: 'button', title: a.name + (n > 1 ? '（ウィンドウ ' + n + ' 個）' : ''), 'aria-label': a.name, 'data-app': id }, kit.appIcon(a, 16));
+      b.addEventListener('click', () => htui.openPinned(id, b, 'bottom'));
+      zone.append(b);
+    });
+  };
+  function pinMenu(id) {
+    const a = OS.apps[id]; if (!a) return null;
+    const ws = zOrder(htui.wins.filter(w => w.app === id && !w.parent));
+    return [{ head: a.name }].concat(ws.map(w => ({ label: w.title, icon: a.icon, act: () => w.focus() })), ws.length ? [{ sep: true }] : [],
+      [{ label: ws.length ? '新しいウィンドウ' : '開く', icon: ws.length ? 'plus' : a.icon, act: () => run(id) }],
+      ws.length ? [{ label: 'すべて閉じる', icon: 'x', act: () => ws.forEach(w => w.close()) }] : [], [{ sep: true }], htui.pins.items(id));
+  }
 
   // ---------- ウィンドウマネージャ（移動・8方向リサイズ・スナップ・アニメーション）
   const ZONES = { max: [0, 0, 100, 100], left: [0, 0, 50, 100], right: [50, 0, 50, 100], tl: [0, 0, 50, 50], tr: [50, 0, 50, 50], bl: [0, 50, 50, 50], br: [50, 50, 50, 50] };
@@ -4880,7 +4970,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 
     const task = win.task = h('button', { class: 'p-task', type: 'button', title: o.title }, OS.icon(o.icon, 14), h('span', null, o.title));
     task.addEventListener('click', () => { if (el.classList.contains('active') && !el.classList.contains('hidden')) win.minimize(); else win.focus(); });
-    if (!parent) htui.tasks.append(task);
+    if (!parent) { task.dataset.app = win.app || ''; htui.tasks.append(task); }
 
     win.captionButtons = [];
     win.addButton = spec => {
@@ -5715,6 +5805,14 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   register({
     name: 'hjournald.service', desc: 'ジャーナル（ログ）の保存', wantedBy: 'basic.target', refuseStop: true,
     start(ctx) { ctx.setInterval(() => journal.save(), 30000); return () => journal.save(); }
+  });
+  register({
+    name: 'bgm.service', desc: 'アンビエントサウンド（BGM）', after: ['soundd.service'], wants: ['soundd.service'], wantedBy: 'graphical.target', restart: 'on-failure',
+    start(ctx) {
+      ctx.setTimeout(() => { if (OS.bgm) OS.bgm.apply(); }, 60); // active になってから設定どおりに鳴らす
+      ctx.log('BGM を使えるようにしました');
+      return () => { if (OS.bgm) OS.bgm.stop(); };
+    }
   });
   register({
     name: 'soundd.service', desc: '効果音', wantedBy: 'basic.target', restart: 'on-failure',
@@ -6692,6 +6790,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
           if (sub === 'call' && pos[1] === 'htmlos.Sound' && n === 3) return S.list();
           return [];
         }
+        case 'bgm': if (n === 0) return ['on', 'off', 'style', 'vol', 'list']; if (pos[0] === 'style' && n === 1) return Object.keys(OS.bgm.styles); if (pos[0] === 'vol' && n === 1) return ['0', '25', '35', '50', '75', '100']; return [];
         case 'sound': if (n === 0) return ['on', 'off', 'vol', 'play', 'list']; if (pos[0] === 'play' && n === 1) return S.list(); if (pos[0] === 'vol' && n === 1) return ['0', '25', '50', '75', '100']; return [];
         case 'bell': case 'clear': case 'pwd': case 'whoami': case 'users': case 'df': case 'date': case 'env': case 'uptime': case 'uname': case 'free': case 'neofetch': case 'history': case 'top': case 'dmesg': case 'poweroff': case 'reinstall': return [];
         case 'htui': if (n === 0) return ['start', 'stop', 'status', 'sessions', 'session', 'mode']; if ((pos[0] === 'start' || pos[0] === 'session') && n === 1) return envs(); return [];
@@ -6754,6 +6853,16 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         if (sub === 'list') return S.list().map(n => n.padEnd(10) + S.names[n]).join('\n');
         if (sub === 'play') { if (!S.list().includes(arg)) throw new Error('sound play ' + S.list().join(' / ')); S.play(arg, true); return; }
         throw new Error('使い方: sound [on|off|vol 0〜100|play 名前|list]');
+      });
+      def('bgm', 'bgm [on|off|style 名前|vol 0〜100|list]', 'アンビエントサウンド（BGM）の設定（ログイン中のユーザーの設定）', (sub, arg) => {
+        const B = OS.bgm, H = OS.htui, user = H && H.running && H.user;
+        const save = patch => { if (!user) throw new Error('BGM はデスクトップにログインしているときに使えます'); H.setPrefs({ bgm: Object.assign({}, H.prefs.bgm || {}, patch) }); };
+        if (!sub) { const p = B.prefs(); return 'BGM: ' + (p.on ? 'オン' : 'オフ') + '  曲調: ' + B.styles[p.style].name + '（' + p.style + '）  音量: ' + Math.round(p.vol * 100) + (B.playing ? '  ♪ 再生中' : ''); }
+        if (sub === 'on' || sub === 'off') { save({ on: sub === 'on' }); return 'BGM を' + (sub === 'on' ? 'オン' : 'オフ') + 'にしました'; }
+        if (sub === 'list') return Object.keys(B.styles).map(k => k.padEnd(8) + B.styles[k].name).join('\n');
+        if (sub === 'style') { if (!B.styles[arg]) throw new Error((arg || '（なし）') + ': そのような曲調はありません（' + Object.keys(B.styles).join(' / ') + '）'); save({ style: arg, on: true }); return '曲調: ' + B.styles[arg].name; }
+        if (sub === 'vol') { const v = Number(arg); if (!(v >= 0 && v <= 100)) throw new Error('bgm vol 0〜100'); save({ vol: v / 100 }); return '音量: ' + v; }
+        throw new Error('使い方: bgm [on|off|style 名前|vol 0〜100|list]');
       });
       def('pwd', 'pwd', '現在のディレクトリ', () => self.cwd);
       def('cd', 'cd [ディレクトリ]', 'ディレクトリを移動', p => { const d = A(p == null ? '~' : p); if (!fs.isDir(d)) throw new Error(d + ': ディレクトリではありません'); fs.list(d); self.cwd = d; });
@@ -6889,7 +6998,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       def('uname', 'uname', 'システム情報', () => OS.name + ' ' + OS.version + ' [' + OS.htui.sdk.full + '] (' + (OS.store.ram ? 'ramdisk' : OS.store.disk ? 'hdd1' : 'localstorage') + ') ' + navigator.userAgent);
       def('neofetch', 'neofetch', 'システム情報をそれっぽく表示', () => {
         const u = fs.usage(), art = ['  <  / >  ', ' <  /  > ', '<  /   >', ' <  /  > ', '  <  / >  ', '          '];
-        const who = self.user + '@' + OS.hostname(), de = OS.htui.running && OS.htui.sessionId ? OS.sessions[OS.htui.sessionId].name : 'なし（CUI）';
+        const who = self.user + '@' + OS.hostname(), de = OS.htui.running && OS.htui.sessionId ? (OS.sessions[OS.htui.sessionId].full || OS.sessions[OS.htui.sessionId].name) : 'なし（CUI）';
         const info = [who, '-'.repeat(who.length), 'OS: ' + OS.name + ' (' + OS.version + ')' + (OS.live ? ' (Live)' : ''), 'Shell: jsh', 'UI: ' + OS.htui.sdk.full, 'DE: ' + de, 'Disk: ' + fmtSize(u.used) + (u.disk && !u.total ? '' : ' / ' + fmtSize(u.total)) + ' (' + (OS.store.ram ? 'RAM' : OS.storeLabel()) + ')'];
         art.forEach((a, i) => { tty.print(a + '  ', 'accent'); tty.println(info[i] || ''); });
       });
@@ -7651,6 +7760,8 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   }, true);
 
   const ICONS = {
+    pin: '<path d="M9 3h6l-1 6 4 4H6l4-4zM12 13v8"/>',
+    music: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
     terminal: '<path d="M4 6l5 5-5 5M12 17h8"/>',
     edit: '<path d="M5 3h10l4 4v14H5zM8 10h8M8 14h8M8 18h5"/>',
     globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3.2 3 3.2 15 0 18M12 3c-3.2 3-3.2 15 0 18"/>',
@@ -7985,7 +8096,104 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       else c.resume().then(() => { if (Date.now() - now < 400 && c.state === 'running') go(); }).catch(() => { /* まだ鳴らせない */ });
       return true;
     }
-    return { play: play, prefs: prefs, names: NAMES, list: () => Object.keys(SOUNDS) };
+    return { play: play, prefs: prefs, names: NAMES, list: () => Object.keys(SOUNDS), _ctx: ctx, _reverb: reverb, _note: note, _tone: tone, M: M };
+  })();
+
+  // ---------- アンビエントサウンド（BGM。5.2 から）。効果音と同じく、音のファイルを使わずにその場で合成する
+  //   ゆっくり入れ替わる和音（パッド）に、ときどき鳴る柔らかいベル、曲調によって低い持続音や雨の音を重ねる。同じ流れは二度と出ない
+  //   OS.bgm.apply() で設定（ユーザーの htui.prefs.bgm、ログイン前は /etc/config.json の bgm）どおりに鳴らす・止める。bgm.service が止まっていると鳴らない
+  OS.bgm = (function () {
+    const S = OS.sound, M = S.M;
+    const STYLES = {
+      calm:  { name: '穏やか', root: 48, bar: 9,  chords: [[0, 4, 7, 11, 14], [5, 9, 12, 16], [-3, 0, 4, 7, 11], [2, 5, 9, 12, 16]], scale: [0, 2, 4, 7, 9], bells: 3, cut: 900 },
+      night: { name: '夜',     root: 45, bar: 11, chords: [[0, 3, 7, 10, 14], [-4, 0, 3, 7], [-7, -3, 0, 5], [-2, 2, 5, 9]], scale: [0, 3, 5, 7, 10], bells: 2, cut: 700 },
+      space: { name: '宇宙',   root: 38, bar: 14, chords: [[0, 7, 14, 19], [0, 5, 12, 17], [0, 7, 15, 19], [0, 2, 9, 14]], scale: [0, 2, 7, 9, 14], bells: 2, cut: 600, drone: true },
+      rain:  { name: '雨',     root: 50, bar: 8,  chords: [[0, 4, 9, 11], [-1, 2, 7, 9], [-3, 0, 4, 7], [-5, 0, 2, 7]], scale: [0, 2, 4, 7, 9, 11], bells: 4, cut: 1100, rain: true }
+    };
+    let cur = null; // 鳴っているもの: { c, master, style, vol, timers, nodes, step }
+    function prefs() {
+      let sys = {}; try { sys = config.get('bgm', {}) || {}; } catch (e) { /* 既定 */ }
+      const p = { on: sys.on === true, vol: typeof sys.vol === 'number' ? sys.vol : 0.35, style: STYLES[sys.style] ? sys.style : 'calm' };
+      const H = OS.htui, hp = H && H.running && H.user && H.prefs && H.prefs.bgm;
+      if (H && H.running && H.user) { p.on = true; if (hp) { if ('on' in hp) p.on = hp.on !== false; if (typeof hp.vol === 'number') p.vol = hp.vol; if (STYLES[hp.style]) p.style = hp.style; } }
+      p.vol = Math.max(0, Math.min(1, p.vol));
+      return p;
+    }
+    const serviceOk = () => !(OS.init && OS.init.has('bgm.service') && !OS.init.isActive('bgm.service'));
+    // パッドの 1 音: 少しずらした 2 つの波形を、ゆっくり開くローパスに通す
+    function pad(c, out, t, f, dur, v, cut) {
+      const g = c.createGain(), lp = c.createBiquadFilter();
+      lp.type = 'lowpass'; lp.Q.value = 0.4;
+      lp.frequency.setValueAtTime(cut * 0.6, t); lp.frequency.linearRampToValueAtTime(cut * 1.3, t + dur * 0.5); lp.frequency.linearRampToValueAtTime(cut * 0.7, t + dur);
+      g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(v, t + Math.min(3.5, dur * 0.35)); g.gain.setValueAtTime(v, t + dur * 0.6); g.gain.linearRampToValueAtTime(0.0001, t + dur);
+      [['triangle', 0], ['sawtooth', 7], ['sine', -5]].forEach(([type, cents], i) => {
+        const o = c.createOscillator(); o.type = type; o.frequency.value = f; o.detune.value = cents;
+        const og = c.createGain(); og.gain.value = i === 1 ? 0.18 : 0.5;
+        o.connect(og); og.connect(lp); o.start(t); o.stop(t + dur + 0.1);
+      });
+      lp.connect(g); g.connect(out);
+    }
+    function bar(st) {
+      if (!cur || cur !== st) return;
+      const c = st.c, s = STYLES[st.style], t = c.currentTime + 0.1, dur = s.bar + 5;
+      const ch = s.chords[st.step % s.chords.length]; st.step++;
+      ch.forEach((n, i) => pad(c, st.bus, t + i * 0.25, M(s.root + n), dur, 0.05, s.cut));
+      pad(c, st.bus, t, M(s.root + ch[0] - 12), dur, 0.06, s.cut * 0.6); // 低音
+      // ときどき鳴る柔らかいベル（音階から選ぶ。鳴らない小節もある）
+      const nb = Math.floor(Math.random() * (s.bells + 1));
+      for (let i = 0; i < nb; i++) {
+        const deg = s.scale[Math.floor(Math.random() * s.scale.length)], oct = Math.random() < 0.5 ? 24 : 36;
+        S._note(c, st.bells, t + 1 + Math.random() * (s.bar - 2), M(s.root + deg + oct), 2.6 + Math.random() * 2, 0.05 + Math.random() * 0.04);
+      }
+      st.timers.push(setTimeout(() => bar(st), s.bar * 1000));
+    }
+    function start(p) {
+      const c = S._ctx(); if (!c) return false;
+      const s = STYLES[p.style];
+      const master = c.createGain(), lim = c.createDynamicsCompressor(), rv = S._reverb(c), wet = c.createGain(), bus = c.createGain(), bells = c.createGain();
+      master.gain.setValueAtTime(0.0001, c.currentTime); master.gain.linearRampToValueAtTime(p.vol * 0.8, c.currentTime + 4); // ゆっくり入る
+      lim.threshold.value = -10; lim.ratio.value = 8;
+      wet.gain.value = 0.55; bus.gain.value = 1; bells.gain.value = 0.9;
+      bus.connect(master); bells.connect(master); bus.connect(rv.input); bells.connect(rv.input); rv.output.connect(wet); wet.connect(master);
+      master.connect(lim); lim.connect(c.destination);
+      const st = cur = { c: c, master: master, lim: lim, wet: wet, rv: rv, bus: bus, bells: bells, style: p.style, vol: p.vol, timers: [], nodes: [], step: Math.floor(Math.random() * 4) };
+      if (s.drone) {
+        [0, 7].forEach((n, i) => { const o = c.createOscillator(), g = c.createGain(), lfo = c.createOscillator(), lg = c.createGain(); o.type = 'sine'; o.frequency.value = M(s.root - 12 + n); g.gain.value = i ? 0.025 : 0.05; lfo.frequency.value = 0.05 + i * 0.03; lg.gain.value = 0.02; lfo.connect(lg); lg.connect(g.gain); o.connect(g); g.connect(bus); o.start(); lfo.start(); st.nodes.push(o, lfo); });
+      }
+      if (s.rain) {
+        const len = c.sampleRate * 3, buf = c.createBuffer(1, len, c.sampleRate), d = buf.getChannelData(0);
+        for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+        const src = c.createBufferSource(), bp = c.createBiquadFilter(), lp = c.createBiquadFilter(), g = c.createGain();
+        src.buffer = buf; src.loop = true; bp.type = 'highpass'; bp.frequency.value = 900; lp.type = 'lowpass'; lp.frequency.value = 5200; g.gain.value = 0.035;
+        src.connect(bp); bp.connect(lp); lp.connect(g); g.connect(master); src.start(); st.nodes.push(src);
+      }
+      bar(st);
+      return true;
+    }
+    function stop(fade) {
+      const st = cur; if (!st) return; cur = null;
+      st.timers.forEach(clearTimeout);
+      const c = st.c, t = c.currentTime, f = fade == null ? 1.5 : fade;
+      try { st.master.gain.cancelScheduledValues(t); st.master.gain.setValueAtTime(st.master.gain.value, t); st.master.gain.linearRampToValueAtTime(0.0001, t + f); } catch (e) { /* 無視 */ }
+      setTimeout(() => { st.nodes.forEach(n => { try { n.stop(); } catch (e) { /* 止まっている */ } }); try { st.rv.output.disconnect(st.wet); } catch (e) { /* 外れている */ } try { st.master.disconnect(); st.lim.disconnect(); } catch (e) { /* 外れている */ } }, f * 1000 + 200);
+    }
+    // 設定どおりにする。鳴らすのは、ログインしていて（またはログイン前でシステムの設定がオン）、bgm.service が動いているとき
+    function apply() {
+      const p = prefs(), want = p.on && p.vol > 0 && serviceOk() && !OS._down && !!(OS.htui && OS.htui.running);
+      if (!want) { stop(); return false; }
+      if (cur && cur.style === p.style) {
+        if (cur.vol !== p.vol) { cur.vol = p.vol; const t = cur.c.currentTime; cur.master.gain.cancelScheduledValues(t); cur.master.gain.setValueAtTime(cur.master.gain.value, t); cur.master.gain.linearRampToValueAtTime(p.vol * 0.8, t + 0.4); }
+        return true;
+      }
+      if (cur) stop(2);
+      const c = S._ctx(); if (!c) return false;
+      if (c.state === 'running') return start(p);
+      c.resume().then(() => { if (!cur && prefs().on) start(prefs()); }).catch(() => { /* まだ鳴らせない（クリックやキーのあとで） */ });
+      return true;
+    }
+    // まだ音を出す許可がなかったとき: 最初のクリック・キーで鳴らし始める
+    ['pointerdown', 'keydown'].forEach(t => window.addEventListener(t, () => { if (!cur && OS.htui && OS.htui.running && OS.htui.user) { const p = prefs(); if (p.on) apply(); } }, { capture: true, passive: true }));
+    return { apply: apply, stop: stop, prefs: prefs, styles: STYLES, get playing() { return !!cur; }, get style() { return cur ? cur.style : null; } };
   })();
 
   // ---------- ユーザー
@@ -8897,6 +9105,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     if (wins.length) items.push({ sep: true });
     items.push(wins.length ? { label: '新しいウィンドウ', icon: 'plus', act: () => htui.kit.run(id) } : { label: '開く', icon: a.icon, act: () => open(id) });
     if (wins.length) items.push({ label: 'すべてのウィンドウを最小化', icon: 'min', act: () => wins.forEach(w => w.minimize()) }, { sep: true }, { label: '終了', icon: 'x', act: () => wins.forEach(w => w.close()) });
+    items.push({ sep: true }); htui.pins.items(id).forEach(x => items.push(x));
     items.push({ sep: true }, { label: 'このアプリについて', act: () => OS.ui.alert((a.desc || a.name) + (a.pkg ? '\n（パッケージ ' + a.pkg + '）' : ''), a.name) });
     return items;
   }
@@ -8965,15 +9174,68 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     return close;
   }
 
-  // ======================================================== HTUi（標準）
+  // ======================================================== HTUi 2（MaineCoon。標準）
+  //   上にパネル（アプリ・タイトル・画面モード・時計・ユーザー）、左（既定）・下・右に Dock。
+  //   Dock: 固定したアプリと起動中のアプリ。点の数は開いているウィンドウの数。右クリックで固定/解除・Dock の位置
+  const DOCK_POS = { left: '左', bottom: '下', right: '右' };
   OS.registerSession({
-    id: 'htui', name: 'HTUi', touchNav: true, desc: '上にパネル、左にデスクトップアイコンが並ぶ標準のデスクトップです。タッチでは下に「閉じる・ホーム・タスク」のナビが出ます。',
+    id: 'htui', name: 'HTUi 2', version: '2', codename: 'MaineCoon', full: 'HTUi 2 (MaineCoon)', touchNav: true,
+    pins: ['hfile', 'terminal', 'hbrowser', 'hedit', 'settings'], pinWhere: 'Dock',
+    desc: '上にパネル、左（下・右にも置ける）に Dock がある標準のデスクトップです。Dock には固定したアプリと起動中のアプリが並びます。タッチでは下に「閉じる・ホーム・タスク」のナビが出ます。',
     build(k) {
-      const appsBtn = h('button', { class: 'p-btn', type: 'button', onclick: e => k.menu(e.currentTarget, k.apps().map(a => ({ label: a.name, hint: a.desc, icon: a.icon, act: () => k.run(a.id) }))) }, OS.icon('grid', 16), h('span', { class: 'p-lbl' }, 'アプリ'));
-      const tasks = htui.tasks = h('div', { class: 'p-tasks' });
+      const appsBtn = h('button', { class: 'p-btn', type: 'button', onclick: e => k.menu(e.currentTarget, this.appMenu(), true) }, OS.icon('grid', 16), h('span', { class: 'p-lbl' }, 'アプリ'));
+      htui.tasks = h('div', { class: 'p-tasks', hidden: '' }); // ウィンドウのボタンは Dock にまとめる
       const clock = k.clock(h('div', { class: 'p-clock' }), d => (d.getMonth() + 1) + '/' + d.getDate() + ' ' + k.pad(d.getHours()) + ':' + k.pad(d.getMinutes()));
       htui.titleEl = h('div', { class: 'p-title' });
-      htui.el.append(h('div', { class: 'panel' }, appsBtn, tasks, htui.titleEl, k.modeButton('p-btn'), clock, k.userButton('p-btn')), k.desk(true));
+      this.dock = h('div', { class: 'ht2-dock', role: 'toolbar', 'aria-label': 'Dock' });
+      this.main = h('div', { class: 'ht2-main' }, this.dock, k.desk(true));
+      htui.el.append(h('div', { class: 'panel' }, appsBtn, htui.titleEl, k.modeButton('p-btn'), clock, k.userButton('p-btn')), this.main);
+      this._sig = null; this.place();
+    },
+    appMenu() {
+      return htui.kit.apps().map(a => ({ label: a.name + (htui.pins.has(a.id) ? '  📌' : ''), hint: a.desc, icon: a.icon, act: () => htui.kit.run(a.id) }));
+    },
+    // Dock の位置（htui.prefs.dock: left / bottom / right）
+    place() {
+      if (!this.main) return;
+      const p = DOCK_POS[htui.prefs.dock] ? htui.prefs.dock : 'left';
+      this.main.dataset.dock = p; this.dock.setAttribute('aria-orientation', p === 'bottom' ? 'horizontal' : 'vertical');
+      this._sig = null; this.onApps();
+    },
+    onStart() { this.onApps(); },
+    onStop() { this.dock = null; this.main = null; this._sig = null; },
+    onActive() { this.onApps(); },
+    onFocus() { this.onApps(); },
+    onMode() { this._sig = null; this.onApps(); },
+    onApps() {
+      if (!this.dock) return;
+      const k = htui.kit, act = htui.active(), pins = htui.pins.list();
+      const sig = [pins.join(), Object.keys(OS.apps).join(), htui.wins.filter(w => !w.parent).map(w => w.app + (w.el.classList.contains('hidden') ? '-' : '+')).join(), act ? act.app : '', this.main.dataset.dock].join('#');
+      if (sig === this._sig) return;
+      this._sig = sig;
+      const running = [...new Set(htui.wins.filter(w => !w.parent).map(w => w.app))].filter(id => OS.apps[id] && !pins.includes(id));
+      this.dock.textContent = '';
+      const item = id => {
+        const a = OS.apps[id], n = htui.wins.filter(w => w.app === id && !w.parent).length;
+        const b = h('button', { class: 'ht2-dk' + (n ? ' run' : '') + (act && act.app === id ? ' active' : '') + (pins.includes(id) ? ' pin' : ''), type: 'button', title: a.name + (n > 1 ? '（ウィンドウ ' + n + ' 個）' : ''), 'aria-label': a.name, 'data-app': id },
+          k.appIcon(a, 22), n ? h('span', { class: 'ht2-dots', 'aria-hidden': 'true' }, Array.from({ length: Math.min(n, 3) }, () => h('i'))) : null);
+        b.addEventListener('click', () => htui.openPinned(id, b, this.main.dataset.dock));
+        return b;
+      };
+      pins.forEach(id => this.dock.append(item(id)));
+      if (running.length) { this.dock.append(h('span', { class: 'ht2-sep' })); running.forEach(id => this.dock.append(item(id))); }
+      const all = h('button', { class: 'ht2-dk ht2-all', type: 'button', title: 'すべてのアプリ', 'aria-label': 'すべてのアプリ' }, OS.icon('grid', 20));
+      all.addEventListener('click', () => { const d = this.main.dataset.dock; htui.kit.menu(all, this.appMenu(), d === 'right', d === 'bottom' ? { up: true } : { beside: d }); });
+      this.dock.append(h('span', { class: 'ht2-grow' }), all);
+    },
+    posItems() {
+      return [{ head: 'Dock の位置' }].concat(Object.keys(DOCK_POS).map(p => ({ label: DOCK_POS[p] + (p === 'left' ? '（既定）' : ''), icon: p === 'bottom' ? 'down' : p === 'left' ? 'back' : 'play', hint: (htui.prefs.dock || 'left') === p ? '選択中' : null, act: () => htui.setPrefs({ dock: p }) })));
+    },
+    onContext(e) {
+      const b = e.target.closest('.ht2-dk[data-app]');
+      if (b) return appItems(b.dataset.app, id => htui.openPinned(id)).concat({ sep: true }, this.posItems());
+      if (e.target.closest('.ht2-dock')) return this.posItems();
+      return null;
     }
   });
 
@@ -8987,7 +9249,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   //     右端からスワイプ → チャーム／左端から → 前のアプリ（少し出して戻すと切り替え一覧）
   //     上端から下へ引き下ろす → アプリを閉じる（上端をタップするとタイトルバー）／下端から上へ → すべてのアプリ
   OS.registerSession({
-    id: 'win', name: 'hWin（Windows 風）', desc: 'マウスでは下にタスクバーとスタートメニュー。タブレットとスマートフォンでは Windows 8.1 風のスタート画面とチャーム、画面の端からのスワイプ操作になります。',
+    id: 'win', name: 'hWin（Windows 風）', pins: ['hfile', 'hbrowser', 'terminal'], pinWhere: 'タスクバー', taskPins: true, desc: 'マウスでは下にタスクバーとスタートメニュー。タブレットとスマートフォンでは Windows 8.1 風のスタート画面とチャーム、画面の端からのスワイプ操作になります。',
     build(k) {
       const self = this;
       const desk = k.desk({ files: true, trash: true });
@@ -9385,7 +9647,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 
   // ======================================================== hShell（GNOME 風）
   OS.registerSession({
-    id: 'gnome', name: 'hShell（GNOME 風）', desc: '上にトップバー。「アクティビティ」でウィンドウ一覧・ドック・アプリ一覧、日時でカレンダーと通知センターを出す GNOME 風のデスクトップです。タッチでは下端から上へスワイプでアクティビティ。',
+    id: 'gnome', name: 'hShell（GNOME 風）', pins: ['hfile', 'hbrowser', 'terminal', 'hedit', 'settings'], pinWhere: 'お気に入り（ドック）', desc: '上にトップバー。「アクティビティ」でウィンドウ一覧・ドック・アプリ一覧、日時でカレンダーと通知センターを出す GNOME 風のデスクトップです。タッチでは下端から上へスワイプでアクティビティ。',
     build(k) {
       const self = this;
       const act = h('button', { class: 'gn-act', type: 'button', title: 'アクティビティ（Super / Alt+F1）', 'aria-label': 'アクティビティ', onclick: () => self.overview() },
@@ -9507,7 +9769,8 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       }
       function fillDock() {
         dock.textContent = '';
-        k.apps().forEach(a => dock.append(h('button', { class: 'gn-dk' + (htui.wins.some(w => w.app === a.id) ? ' run' : ''), type: 'button', title: a.name, 'aria-label': a.name, 'data-app': a.id, onclick: () => {
+        const favs = htui.pins.list(), runs = [...new Set(htui.wins.map(w => w.app))].filter(id => OS.apps[id] && !favs.includes(id));
+        favs.concat(runs).map(id => OS.apps[id]).forEach(a => dock.append(h('button', { class: 'gn-dk' + (htui.wins.some(w => w.app === a.id) ? ' run' : ''), type: 'button', title: a.name, 'aria-label': a.name, 'data-app': a.id, onclick: () => {
           const w = byZ().find(x => x.app === a.id);
           if (w) pick(w); else { close(); k.run(a.id); }
         } }, k.appIcon(a, 28))));
@@ -9695,7 +9958,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   const G_LP = '<rect x="3" y="3" width="5" height="5" rx="1.2"/><rect x="9.5" y="3" width="5" height="5" rx="1.2"/><rect x="16" y="3" width="5" height="5" rx="1.2"/><rect x="3" y="9.5" width="5" height="5" rx="1.2"/><rect x="9.5" y="9.5" width="5" height="5" rx="1.2"/><rect x="16" y="9.5" width="5" height="5" rx="1.2"/><rect x="3" y="16" width="5" height="5" rx="1.2"/><rect x="9.5" y="16" width="5" height="5" rx="1.2"/><rect x="16" y="16" width="5" height="5" rx="1.2"/>';
 
   OS.registerSession({
-    id: 'mac', name: 'hAqua（macOS 風）', desc: '上にメニューバー、下に拡大するドック、左上に信号機のボタン。Launchpad・Mission Control・Spotlight もあります。タブレットでは iPadOS 風、スマートフォンでは iOS 風のホーム画面とジェスチャーになります。',
+    id: 'mac', pins: ['hfile', 'hbrowser', 'hedit', 'terminal', 'hplayer', 'hcalc', 'settings'], pinWhere: 'Dock', name: 'hAqua（macOS 風）', desc: '上にメニューバー、下に拡大するドック、左上に信号機のボタン。Launchpad・Mission Control・Spotlight もあります。タブレットでは iPadOS 風、スマートフォンでは iOS 風のホーム画面とジェスチャーになります。',
     build(k) {
       const self = this, el = htui.el;
       // ---- メニューバー（デスクトップ）
@@ -9751,14 +10014,14 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       if (!this.dock) return;
       const k = htui.kit, self = this;
       // 中身が変わらないなら作り直さない（作り直すと、押している途中のボタンが入れ替わってタップが消える）
-      const sig = [OS.uiMode, Object.keys(OS.apps).join(), htui.wins.map(w => w.app + (w.el.classList.contains('hidden') ? '-' : '+') + w.title).join('|'), byZ().map(w => w.app).join(), htui.trash.items().length].join('#');
+      const sig = [OS.uiMode, htui.pins.list().join(), Object.keys(OS.apps).join(), htui.wins.map(w => w.app + (w.el.classList.contains('hidden') ? '-' : '+') + w.title).join('|'), byZ().map(w => w.app).join(), htui.trash.items().length].join('#');
       if (sig === this._sig) return;
       this._sig = sig;
       // デスクトップのドック: Launchpad・よく使うアプリ・（区切り）・ドックにない起動中のアプリ・しまったウインドウ
       const item = (cls, name, icon, onclick, run, app) => h('button', { class: 'mc-dk ' + cls + (run ? ' run' : ''), type: 'button', 'data-name': name, 'data-app': app || '', 'aria-label': name, onclick: onclick }, icon);
       this.dock.textContent = '';
       this.dock.append(item('mc-lp', 'Launchpad', h('span', { class: 'app-ico mc-lpico' }, glyph(G_LP, 30)), () => this.launchpad()));
-      const pinned = MAC_DOCK.filter(id => OS.apps[id]), extra = [...new Set(htui.wins.map(w => w.app))].filter(id => OS.apps[id] && !pinned.includes(id));
+      const pinned = htui.pins.list(), extra = [...new Set(htui.wins.map(w => w.app))].filter(id => OS.apps[id] && !pinned.includes(id));
       pinned.concat(extra).forEach(id => { const a = OS.apps[id]; this.dock.append(item('', a.name, k.appIcon(a, 28), e => this.openApp(id, e.currentTarget), htui.wins.some(w => w.app === id), id)); });
       const mins = htui.wins.filter(w => w.el.classList.contains('hidden'));
       this.dock.append(h('span', { class: 'mc-dsep' }));
@@ -10202,6 +10465,42 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 
 /* ---- HTUi */
 #htui{position:absolute;inset:0;display:flex;flex-direction:column;overflow:hidden}
+
+/* HTUi 2（MaineCoon）: Dock */
+.ht2-main{flex:1;min-height:0;display:flex}
+.ht2-main[data-dock=right]{flex-direction:row-reverse}
+.ht2-main[data-dock=bottom]{flex-direction:column-reverse}
+.ht2-main>.desk{flex:1;min-width:0;min-height:0}
+.ht2-dock{flex:none;display:flex;flex-direction:column;align-items:center;gap:4px;width:58px;box-sizing:border-box;padding:8px 0;background:var(--panel);color:var(--panel-ink);overflow:auto;scrollbar-width:none;z-index:5}
+.ht2-main[data-dock=bottom] .ht2-dock{flex-direction:row;width:auto;height:58px;padding:0 8px;justify-content:center}
+.ht2-dk{position:relative;flex:none;width:46px;height:46px;display:grid;place-items:center;padding:0;border:0;border-radius:12px;background:none;color:inherit;cursor:pointer;transition:background .15s}
+.ht2-dk:hover{background:rgba(255,255,255,.12)}
+.ht2-dk.active{background:rgba(255,255,255,.22)}
+.ht2-dk .app-ico{width:36px;height:36px;border-radius:10px}
+.ht2-dk:active .app-ico{transform:scale(.92)}
+.ht2-dots{position:absolute;left:1px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:3px}
+.ht2-main[data-dock=right] .ht2-dots{left:auto;right:1px}
+.ht2-main[data-dock=bottom] .ht2-dots{left:50%;top:auto;bottom:1px;transform:translateX(-50%);flex-direction:row}
+.ht2-dots i{width:4px;height:4px;border-radius:50%;background:currentColor;opacity:.85}
+.ht2-dk.active .ht2-dots i{background:var(--accent,#3584e4);opacity:1}
+.ht2-sep{flex:none;width:30px;height:1px;margin:4px 0;background:rgba(255,255,255,.22)}
+.ht2-main[data-dock=bottom] .ht2-sep{width:1px;height:30px;margin:0 4px}
+.ht2-grow{flex:1}
+.ht2-main[data-dock=bottom] .ht2-grow{flex:0 0 8px}
+.ht2-dk.bounce{animation:ht2-bounce .8s ease}
+@keyframes ht2-bounce{0%,100%{transform:none}30%{transform:scale(1.15)}60%{transform:scale(.95)}}
+.phone .ht2-dock{display:none}
+.touch .ht2-dk{width:52px;height:52px}
+.touch .ht2-dock{width:64px}.touch .ht2-main[data-dock=bottom] .ht2-dock{width:auto;height:64px}
+/* タスクバーに固定したアプリ（hWin） */
+.p-pins{display:inline-flex;align-items:center;gap:2px;flex:none;margin-right:4px}
+.p-pins:empty{display:none}
+.p-pin{position:relative;width:38px;height:100%;min-height:30px;display:grid;place-items:center;padding:0;border:0;border-radius:4px;background:none;color:inherit;cursor:pointer}
+.p-pin:hover{background:rgba(255,255,255,.12)}
+.p-pin .app-ico{width:24px;height:24px;border-radius:6px}
+.p-pin.run::after{content:'';position:absolute;left:30%;right:30%;bottom:2px;height:3px;border-radius:2px;background:rgba(255,255,255,.55)}
+.p-pin.active{background:rgba(255,255,255,.18)}.p-pin.active::after{left:20%;right:20%;background:var(--accent,#3584e4)}
+.p-pin.bounce{animation:ht2-bounce .8s ease}
 
 .panel{flex:none;height:32px;display:flex;align-items:center;gap:4px;padding:0 6px;background:var(--panel);color:var(--panel-ink);font-size:13px;z-index:5}
 .p-btn{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 9px;border:0;border-radius:6px;background:none;cursor:pointer;flex:none}
@@ -11772,7 +12071,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 (function () {
   'use strict';
   // コードネーム: htmlOS は恒星の名前（3.2 = Sirius、4.0 = Vega）、描画エンジン HTUi SDK は惑星の名前（2 = Jupiter、3.0 = Venus）
-  var MEDIA_VERSION = '5.1.3', MEDIA_BUILD = '39', MEDIA_CODENAME = 'Altair';
+  var MEDIA_VERSION = '5.2.0', MEDIA_BUILD = '40', MEDIA_CODENAME = 'Altair';
   var BOOT = window.BOOT = {};
   var P = 'htmlos:';
 

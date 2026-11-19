@@ -133,6 +133,9 @@
             OS.hdm.sessionFor(OS.htui.user) !== OS.htui.sessionId
               ? h('div', { class: 'st-row' }, h('button', { class: 'btn primary', type: 'button', onclick: () => OS.htui.switchSession(OS.hdm.sessionFor(OS.htui.user)) }, '今すぐ切り替える'), '開いているアプリは閉じます（未保存の確認は出ます）。')
               : h('p', null, '次回ログイン時も、ここで選んだ環境で起動します。ログイン画面（hdm）でも選べます。'),
+            OS.htui.sessionId === 'htui' ? [h('h3', null, 'Dock の位置（HTUi 2）'),
+              h('div', { class: 'st-row' }, ['left', 'bottom', 'right'].map(d => h('label', null, h('input', { type: 'radio', name: 'st-dock-' + win.pid, id: 'st-dock-' + d, checked: (p.dock || 'left') === d, onchange: () => OS.htui.setPrefs({ dock: d }) }), ' ' + { left: '左（既定）', bottom: '下', right: '右' }[d]))),
+              h('p', null, 'Dock のアイコンを右クリックすると、固定/解除・並び替え・Dock の位置を変えられます。')] : null,
             h('h3', null, '画面モード'),
             h('div', { class: 'st-row' }, h('select', { class: 'sel', id: 'st-mode', 'aria-label': '画面モード', value: p.mode || 'auto', onchange: e => { OS.htui.setPrefs({ mode: e.target.value }); show('look'); } },
               ['auto', 'desktop', 'tablet', 'phone'].map(m => h('option', { value: m }, OS.modeNames[m]))), '今の表示: ' + OS.modeNames[OS.uiMode]),
@@ -155,6 +158,17 @@
             h('div', { class: 'st-row' }, h('span', null, '音量'), vol, volN),
             h('h3', null, '試しに鳴らす'),
             h('div', { class: 'st-row', style: 'flex-wrap:wrap' }, S.list().map(n => h('button', { class: 'btn small', type: 'button', id: 'st-snd-' + n, onclick: () => S.play(n, true) }, OS.icon('audio', 14), ' ' + S.names[n]))));
+          // アンビエントサウンド（BGM）
+          const B = OS.bgm, bp = B.prefs(), setB = patch => OS.htui.setPrefs({ bgm: Object.assign({}, OS.htui.prefs.bgm || {}, patch) });
+          const bvol = h('input', { type: 'range', min: 0, max: 100, step: 5, value: Math.round(bp.vol * 100), id: 'st-bgm-vol', 'aria-label': 'BGM の音量', style: 'flex:1;max-width:260px' });
+          const bvolN = h('span', { style: 'min-width:3em' }, Math.round(bp.vol * 100) + '%');
+          bvol.addEventListener('input', () => { bvolN.textContent = bvol.value + '%'; setB({ vol: Number(bvol.value) / 100 }); });
+          page.append(h('h3', null, 'アンビエントサウンド（BGM）'),
+            h('p', null, 'ゆっくり移り変わる和音とやわらかいベルを、その場で合成して流します（同じ流れは二度と出ません）。止めたいときはここか、jsh で bgm off。'),
+            h('div', { class: 'st-row' }, h('label', null, h('input', { type: 'checkbox', class: 'switch', id: 'st-bgm-on', checked: bp.on, onchange: e => setB({ on: e.target.checked }) }), ' BGM を流す')),
+            h('div', { class: 'st-row' }, h('span', null, '曲調'), h('select', { class: 'sel', id: 'st-bgm-style', 'aria-label': '曲調', onchange: e => setB({ style: e.target.value, on: true }) },
+              Object.keys(B.styles).map(k => h('option', { value: k, selected: bp.style === k }, B.styles[k].name)))),
+            h('div', { class: 'st-row' }, h('span', null, '音量'), bvol, bvolN));
           const sys = OS.config.get('sound', {}) || {};
           page.append(h('h3', null, 'ログイン前（起動音・ログイン画面）'),
             h('div', { class: 'st-row' }, h('label', null, h('input', { type: 'checkbox', class: 'switch', id: 'st-snd-sys', disabled: !admin, checked: sys.on !== false, onchange: e => { try { OS.config.set('sound', Object.assign({}, OS.config.get('sound', {}) || {}, { on: e.target.checked, vol: Number(vol.value) / 100 })); } catch (er) { err(er); } } }), ' 起動音とログイン音を鳴らす（システム全体）')),

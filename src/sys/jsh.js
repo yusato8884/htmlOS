@@ -511,6 +511,7 @@
           if (sub === 'call' && pos[1] === 'htmlos.Sound' && n === 3) return S.list();
           return [];
         }
+        case 'bgm': if (n === 0) return ['on', 'off', 'style', 'vol', 'list']; if (pos[0] === 'style' && n === 1) return Object.keys(OS.bgm.styles); if (pos[0] === 'vol' && n === 1) return ['0', '25', '35', '50', '75', '100']; return [];
         case 'sound': if (n === 0) return ['on', 'off', 'vol', 'play', 'list']; if (pos[0] === 'play' && n === 1) return S.list(); if (pos[0] === 'vol' && n === 1) return ['0', '25', '50', '75', '100']; return [];
         case 'bell': case 'clear': case 'pwd': case 'whoami': case 'users': case 'df': case 'date': case 'env': case 'uptime': case 'uname': case 'free': case 'neofetch': case 'history': case 'top': case 'dmesg': case 'poweroff': case 'reinstall': return [];
         case 'htui': if (n === 0) return ['start', 'stop', 'status', 'sessions', 'session', 'mode']; if ((pos[0] === 'start' || pos[0] === 'session') && n === 1) return envs(); return [];
@@ -573,6 +574,16 @@
         if (sub === 'list') return S.list().map(n => n.padEnd(10) + S.names[n]).join('\n');
         if (sub === 'play') { if (!S.list().includes(arg)) throw new Error('sound play ' + S.list().join(' / ')); S.play(arg, true); return; }
         throw new Error('使い方: sound [on|off|vol 0〜100|play 名前|list]');
+      });
+      def('bgm', 'bgm [on|off|style 名前|vol 0〜100|list]', 'アンビエントサウンド（BGM）の設定（ログイン中のユーザーの設定）', (sub, arg) => {
+        const B = OS.bgm, H = OS.htui, user = H && H.running && H.user;
+        const save = patch => { if (!user) throw new Error('BGM はデスクトップにログインしているときに使えます'); H.setPrefs({ bgm: Object.assign({}, H.prefs.bgm || {}, patch) }); };
+        if (!sub) { const p = B.prefs(); return 'BGM: ' + (p.on ? 'オン' : 'オフ') + '  曲調: ' + B.styles[p.style].name + '（' + p.style + '）  音量: ' + Math.round(p.vol * 100) + (B.playing ? '  ♪ 再生中' : ''); }
+        if (sub === 'on' || sub === 'off') { save({ on: sub === 'on' }); return 'BGM を' + (sub === 'on' ? 'オン' : 'オフ') + 'にしました'; }
+        if (sub === 'list') return Object.keys(B.styles).map(k => k.padEnd(8) + B.styles[k].name).join('\n');
+        if (sub === 'style') { if (!B.styles[arg]) throw new Error((arg || '（なし）') + ': そのような曲調はありません（' + Object.keys(B.styles).join(' / ') + '）'); save({ style: arg, on: true }); return '曲調: ' + B.styles[arg].name; }
+        if (sub === 'vol') { const v = Number(arg); if (!(v >= 0 && v <= 100)) throw new Error('bgm vol 0〜100'); save({ vol: v / 100 }); return '音量: ' + v; }
+        throw new Error('使い方: bgm [on|off|style 名前|vol 0〜100|list]');
       });
       def('pwd', 'pwd', '現在のディレクトリ', () => self.cwd);
       def('cd', 'cd [ディレクトリ]', 'ディレクトリを移動', p => { const d = A(p == null ? '~' : p); if (!fs.isDir(d)) throw new Error(d + ': ディレクトリではありません'); fs.list(d); self.cwd = d; });
@@ -708,7 +719,7 @@
       def('uname', 'uname', 'システム情報', () => OS.name + ' ' + OS.version + ' [' + OS.htui.sdk.full + '] (' + (OS.store.ram ? 'ramdisk' : OS.store.disk ? 'hdd1' : 'localstorage') + ') ' + navigator.userAgent);
       def('neofetch', 'neofetch', 'システム情報をそれっぽく表示', () => {
         const u = fs.usage(), art = ['  <  / >  ', ' <  /  > ', '<  /   >', ' <  /  > ', '  <  / >  ', '          '];
-        const who = self.user + '@' + OS.hostname(), de = OS.htui.running && OS.htui.sessionId ? OS.sessions[OS.htui.sessionId].name : 'なし（CUI）';
+        const who = self.user + '@' + OS.hostname(), de = OS.htui.running && OS.htui.sessionId ? (OS.sessions[OS.htui.sessionId].full || OS.sessions[OS.htui.sessionId].name) : 'なし（CUI）';
         const info = [who, '-'.repeat(who.length), 'OS: ' + OS.name + ' (' + OS.version + ')' + (OS.live ? ' (Live)' : ''), 'Shell: jsh', 'UI: ' + OS.htui.sdk.full, 'DE: ' + de, 'Disk: ' + fmtSize(u.used) + (u.disk && !u.total ? '' : ' / ' + fmtSize(u.total)) + ' (' + (OS.store.ram ? 'RAM' : OS.storeLabel()) + ')'];
         art.forEach((a, i) => { tty.print(a + '  ', 'accent'); tty.println(info[i] || ''); });
       });

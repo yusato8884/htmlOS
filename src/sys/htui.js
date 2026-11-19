@@ -167,6 +167,7 @@
   };
   function clearShell() {
     clearInterval(clockTimer); ticks = [];
+    if (OS.bgm) OS.bgm.stop();
     if (htui.sessionProc && OS.proc) { OS.proc.exit(htui.sessionProc.pid); htui.sessionProc = null; }
     if (htui.shell && htui.shell.onStop) { try { htui.shell.onStop(); } catch (e) { /* 無視 */ } }
     htui.shell = null; htui.sessionId = null;
@@ -206,6 +207,8 @@
     Object.assign(htui.prefs, patch);
     try { fs.mkdir(users.home(htui.user) + '/.config', { parents: true, owner: htui.user }); fs.write(users.home(htui.user) + '/.config/htui.json', JSON.stringify(htui.prefs), { owner: htui.user }); } catch (e) { /* 保存できなくても表示は変える */ }
     applyPrefs();
+    if (patch && 'bgm' in patch && OS.bgm) OS.bgm.apply();
+    if (patch && 'dock' in patch && htui.shell && htui.shell.place) htui.shell.place();
   };
   function applyPrefs() {
     htui.el.style.background = wallCss(htui.prefs, htui.user);
@@ -270,6 +273,8 @@
     }
     htui.refreshApps(); htui.refreshUser(); htui.syncMode(); htui.syncTitle(); watchDesk();
     if (sh.onStart) sh.onStart(kit);
+    htui.syncTasks();
+    if (OS.bgm) OS.bgm.apply(); // アンビエントサウンド（ユーザーの設定どおり）
     // セーフモードの印と、新しいバージョンのお知らせ
     if (OS.safe) {
       htui.el.append(h('div', { class: 'safe-mark', 'aria-hidden': 'true' }, h('span', null, 'セーフモード'), h('span', null, 'セーフモード'), h('span', null, 'セーフモード'), h('span', null, 'セーフモード')));
@@ -293,6 +298,7 @@
     const w = htui.active();
     if (htui.titleEl) htui.titleEl.textContent = w ? w.title : '';
     if (htui.shell && htui.shell.onActive) htui.shell.onActive(w);
+    htui.syncTasks();
   };
   function goHome() {
     const sw = htui.el.querySelector('.switcher:not(.leaving)'); if (sw) leave(sw);
@@ -412,6 +418,7 @@
   const deskDir = () => users.home(htui.user) + '/Desktop';
   htui.refreshApps = function () {
     if (htui.shell && htui.shell.onApps) htui.shell.onApps();
+    htui.syncTasks();
     htui.refreshDesk();
   };
   htui.refreshDesk = function () {
@@ -617,7 +624,8 @@
     if (isEditable(t) || (selText && window.getSelection().containsNode(t, true))) items = textMenu(t);
     if (!items && htui.shell && htui.shell.onContext) items = htui.shell.onContext(e);
     if (!items) { const head = t.closest('.win-head'); if (head && !t.closest('.win-btn,.win-cbtn')) { const w = htui.wins.find(x => x.el.contains(head)); if (w) items = winMenu(w); } }
-    if (!items) { const tb = t.closest('.p-task'); const w = tb && htui.wins.find(x => x.task === tb); if (w) items = [{ head: w.title }, { label: w.el.classList.contains('hidden') ? '元に戻す' : '最小化', icon: 'min', act: () => (w.el.classList.contains('hidden') ? w.focus() : w.minimize()) }, { label: w.zone === 'max' ? '元のサイズに戻す' : '最大化', icon: 'max', act: () => (w.zone === 'max' ? w.unsnap() : w.snap('max')) }, { label: '新しいウィンドウ', icon: 'plus', act: () => run(w.app) }, { sep: true }, { label: '閉じる', icon: 'x', act: () => w.close() }]; }
+    if (!items) { const pb = t.closest('.p-pin[data-app]'); if (pb) items = pinMenu(pb.dataset.app); }
+    if (!items) { const tb = t.closest('.p-task'); const w = tb && htui.wins.find(x => x.task === tb); if (w) items = [{ head: w.title }, { label: w.el.classList.contains('hidden') ? '元に戻す' : '最小化', icon: 'min', act: () => (w.el.classList.contains('hidden') ? w.focus() : w.minimize()) }, { label: w.zone === 'max' ? '元のサイズに戻す' : '最大化', icon: 'max', act: () => (w.zone === 'max' ? w.unsnap() : w.snap('max')) }, { label: '新しいウィンドウ', icon: 'plus', act: () => run(w.app) }, { sep: true }, { label: '閉じる', icon: 'x', act: () => w.close() }].concat(w.app && OS.apps[w.app] && htui.shell && htui.shell.taskPins ? [{ sep: true }].concat(htui.pins.items(w.app)) : []); }
     if (!items) { const df = t.closest('.desk-file'); if (df && df._o) { htui.iconsEl.querySelectorAll('.sel').forEach(x => x.classList.toggle('sel', x === df)); items = deskFileMenu(df._o); } }
     if (!items) { const di = t.closest('.desk-icon[data-app]'); if (di) { const a = Object.values(OS.apps).find(x => di.title === (x.desc || x.name)); if (a) items = [{ head: a.name }, { label: '開く', icon: a.icon, act: () => run(a.id) }, { label: 'このアプリについて', act: () => ui.alert((a.desc || a.name) + (a.pkg ? '\n（パッケージ ' + a.pkg + '）' : ''), a.name) }]; } }
     if (!items && (t === htui.desk || t.classList.contains('desk-icons') || t.classList.contains('ios-home') || t.classList.contains('ios-grid'))) items = deskMenu();
@@ -672,6 +680,10 @@
     if (top < 4) top = below + mh <= H - 4 ? below : 4;
     let left = right ? r.right - hr.left - mw : r.left - hr.left;
     left = Math.max(4, Math.min(left, W - mw - 4));
+    if (opt && (opt.beside === 'left' || opt.beside === 'right')) { // 左右の Dock: アイコンの横に
+      left = opt.beside === 'left' ? r.right - hr.left + 6 : r.left - hr.left - mw - 6; left = Math.max(4, Math.min(left, W - mw - 4));
+      top = Math.min(r.top - hr.top, H - mh - 4);
+    }
     m.style.top = Math.max(4, top) + 'px'; m.style.left = left + 'px'; m.style.visibility = '';
     close = openMenu(m, anchor);
   }
@@ -732,6 +744,70 @@
       return b;
     }
   };
+
+  // ---------- アイコンの固定（5.2）。タスクバー・Dock に固定したアプリを、環境ごとにユーザーの設定（htui.prefs.pins）に覚える
+  //   既定は環境の pins。環境の taskPins が true なら、htui.tasks の先頭に固定したアプリのボタンを並べ、そのアプリのウィンドウのボタンはまとめる
+  htui.pins = {
+    env: () => htui.sessionId || 'htui',
+    list(env) {
+      env = env || htui.pins.env();
+      const p = (htui.prefs.pins || {})[env], def = (OS.sessions[env] && OS.sessions[env].pins) || [];
+      return (Array.isArray(p) ? p : def).filter((id, i, l) => OS.apps[id] && l.indexOf(id) === i);
+    },
+    has: (id, env) => htui.pins.list(env).includes(id),
+    set(list, env) {
+      env = env || htui.pins.env();
+      htui.setPrefs({ pins: Object.assign({}, htui.prefs.pins || {}, { [env]: list.slice() }) });
+      htui.refreshApps(); htui.syncTasks();
+    },
+    toggle(id, env) { const l = htui.pins.list(env), on = !l.includes(id); htui.pins.set(on ? l.concat(id) : l.filter(x => x !== id), env); return on; },
+    // 固定した中での並び替え（d = -1 で前へ、+1 で後ろへ）
+    move(id, d, env) { const l = htui.pins.list(env), i = l.indexOf(id), j = i + d; if (i < 0 || j < 0 || j >= l.length) return; l.splice(i, 1); l.splice(j, 0, id); htui.pins.set(l, env); },
+    // 右クリックメニューの項目
+    items(id) {
+      if (!OS.apps[id]) return [];
+      const on = htui.pins.has(id), where = (htui.shell && htui.shell.pinWhere) || 'タスクバー', l = htui.pins.list(), i = l.indexOf(id);
+      const out = [{ label: on ? where + 'から固定を解除' : where + 'に固定', icon: 'pin', act: () => htui.pins.toggle(id) }];
+      if (on && i > 0) out.push({ label: '前へ移動', icon: 'back', act: () => htui.pins.move(id, -1) });
+      if (on && i < l.length - 1) out.push({ label: '後ろへ移動', icon: 'play', act: () => htui.pins.move(id, 1) });
+      return out;
+    }
+  };
+  const zOrder = l => l.slice().sort((a, b) => (+b.el.style.zIndex || 0) - (+a.el.style.zIndex || 0));
+  // 固定したアプリ（Dock のアイコン）を押したとき: なければ起動、1 つならそのウィンドウを出す・しまう、いくつもあれば一覧
+  htui.openPinned = function (id, anchor, side) {
+    const ws = zOrder(htui.wins.filter(w => w.app === id && !w.parent));
+    closeMenus();
+    if (!ws.length) { if (anchor && !htui.animOff()) { anchor.classList.remove('bounce'); void anchor.offsetWidth; anchor.classList.add('bounce'); } run(id); return; }
+    const top = ws[0], shown = top.el.classList.contains('active') && !top.el.classList.contains('hidden');
+    if (ws.length === 1 || !anchor) { if (shown && ws.length === 1) top.minimize(); else top.focus(); return; }
+    if (!shown) { top.focus(); return; }
+    menu(anchor, ws.map(w => ({ label: w.title, icon: (OS.apps[id] || {}).icon, hint: w.el.classList.contains('hidden') ? 'しまってある' : null, act: () => w.focus() })).concat({ sep: true }, { label: '新しいウィンドウ', icon: 'plus', act: () => run(id) }), side === 'right', side === 'left' || side === 'right' ? { beside: side } : side === 'bottom' ? { up: true } : null);
+  };
+  // タスクバーの固定したアプリ（taskPins の環境）
+  htui.syncTasks = function () {
+    const sh = htui.shell, box = htui.tasks; if (!sh || !box || !sh.taskPins || !htui.user) return;
+    let zone = box.querySelector(':scope > .p-pins');
+    if (!zone) { zone = h('span', { class: 'p-pins' }); box.prepend(zone); }
+    const pins = htui.pins.list(), act = htui.active();
+    htui.wins.forEach(w => { if (w.task) w.task.hidden = pins.includes(w.app); });
+    const sig = pins.join() + '#' + htui.wins.filter(w => !w.parent).map(w => w.app + (w.el.classList.contains('hidden') ? '-' : '+')).join() + '#' + (act ? act.app : '');
+    if (zone._sig === sig) return;
+    zone._sig = sig; zone.textContent = '';
+    pins.forEach(id => {
+      const a = OS.apps[id], n = htui.wins.filter(w => w.app === id && !w.parent).length;
+      const b = h('button', { class: 'p-pin' + (n ? ' run' : '') + (act && act.app === id ? ' active' : ''), type: 'button', title: a.name + (n > 1 ? '（ウィンドウ ' + n + ' 個）' : ''), 'aria-label': a.name, 'data-app': id }, kit.appIcon(a, 16));
+      b.addEventListener('click', () => htui.openPinned(id, b, 'bottom'));
+      zone.append(b);
+    });
+  };
+  function pinMenu(id) {
+    const a = OS.apps[id]; if (!a) return null;
+    const ws = zOrder(htui.wins.filter(w => w.app === id && !w.parent));
+    return [{ head: a.name }].concat(ws.map(w => ({ label: w.title, icon: a.icon, act: () => w.focus() })), ws.length ? [{ sep: true }] : [],
+      [{ label: ws.length ? '新しいウィンドウ' : '開く', icon: ws.length ? 'plus' : a.icon, act: () => run(id) }],
+      ws.length ? [{ label: 'すべて閉じる', icon: 'x', act: () => ws.forEach(w => w.close()) }] : [], [{ sep: true }], htui.pins.items(id));
+  }
 
   // ---------- ウィンドウマネージャ（移動・8方向リサイズ・スナップ・アニメーション）
   const ZONES = { max: [0, 0, 100, 100], left: [0, 0, 50, 100], right: [50, 0, 50, 100], tl: [0, 0, 50, 50], tr: [50, 0, 50, 50], bl: [0, 50, 50, 50], br: [50, 50, 50, 50] };
@@ -1165,7 +1241,7 @@
 
     const task = win.task = h('button', { class: 'p-task', type: 'button', title: o.title }, OS.icon(o.icon, 14), h('span', null, o.title));
     task.addEventListener('click', () => { if (el.classList.contains('active') && !el.classList.contains('hidden')) win.minimize(); else win.focus(); });
-    if (!parent) htui.tasks.append(task);
+    if (!parent) { task.dataset.app = win.app || ''; htui.tasks.append(task); }
 
     win.captionButtons = [];
     win.addButton = spec => {

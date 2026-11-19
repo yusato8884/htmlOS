@@ -55,6 +55,42 @@
 /* ---- HTUi */
 #htui{position:absolute;inset:0;display:flex;flex-direction:column;overflow:hidden}
 
+/* HTUi 2（MaineCoon）: Dock */
+.ht2-main{flex:1;min-height:0;display:flex}
+.ht2-main[data-dock=right]{flex-direction:row-reverse}
+.ht2-main[data-dock=bottom]{flex-direction:column-reverse}
+.ht2-main>.desk{flex:1;min-width:0;min-height:0}
+.ht2-dock{flex:none;display:flex;flex-direction:column;align-items:center;gap:4px;width:58px;box-sizing:border-box;padding:8px 0;background:var(--panel);color:var(--panel-ink);overflow:auto;scrollbar-width:none;z-index:5}
+.ht2-main[data-dock=bottom] .ht2-dock{flex-direction:row;width:auto;height:58px;padding:0 8px;justify-content:center}
+.ht2-dk{position:relative;flex:none;width:46px;height:46px;display:grid;place-items:center;padding:0;border:0;border-radius:12px;background:none;color:inherit;cursor:pointer;transition:background .15s}
+.ht2-dk:hover{background:rgba(255,255,255,.12)}
+.ht2-dk.active{background:rgba(255,255,255,.22)}
+.ht2-dk .app-ico{width:36px;height:36px;border-radius:10px}
+.ht2-dk:active .app-ico{transform:scale(.92)}
+.ht2-dots{position:absolute;left:1px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:3px}
+.ht2-main[data-dock=right] .ht2-dots{left:auto;right:1px}
+.ht2-main[data-dock=bottom] .ht2-dots{left:50%;top:auto;bottom:1px;transform:translateX(-50%);flex-direction:row}
+.ht2-dots i{width:4px;height:4px;border-radius:50%;background:currentColor;opacity:.85}
+.ht2-dk.active .ht2-dots i{background:var(--accent,#3584e4);opacity:1}
+.ht2-sep{flex:none;width:30px;height:1px;margin:4px 0;background:rgba(255,255,255,.22)}
+.ht2-main[data-dock=bottom] .ht2-sep{width:1px;height:30px;margin:0 4px}
+.ht2-grow{flex:1}
+.ht2-main[data-dock=bottom] .ht2-grow{flex:0 0 8px}
+.ht2-dk.bounce{animation:ht2-bounce .8s ease}
+@keyframes ht2-bounce{0%,100%{transform:none}30%{transform:scale(1.15)}60%{transform:scale(.95)}}
+.phone .ht2-dock{display:none}
+.touch .ht2-dk{width:52px;height:52px}
+.touch .ht2-dock{width:64px}.touch .ht2-main[data-dock=bottom] .ht2-dock{width:auto;height:64px}
+/* タスクバーに固定したアプリ（hWin） */
+.p-pins{display:inline-flex;align-items:center;gap:2px;flex:none;margin-right:4px}
+.p-pins:empty{display:none}
+.p-pin{position:relative;width:38px;height:100%;min-height:30px;display:grid;place-items:center;padding:0;border:0;border-radius:4px;background:none;color:inherit;cursor:pointer}
+.p-pin:hover{background:rgba(255,255,255,.12)}
+.p-pin .app-ico{width:24px;height:24px;border-radius:6px}
+.p-pin.run::after{content:'';position:absolute;left:30%;right:30%;bottom:2px;height:3px;border-radius:2px;background:rgba(255,255,255,.55)}
+.p-pin.active{background:rgba(255,255,255,.18)}.p-pin.active::after{left:20%;right:20%;background:var(--accent,#3584e4)}
+.p-pin.bounce{animation:ht2-bounce .8s ease}
+
 .panel{flex:none;height:32px;display:flex;align-items:center;gap:4px;padding:0 6px;background:var(--panel);color:var(--panel-ink);font-size:13px;z-index:5}
 .p-btn{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 9px;border:0;border-radius:6px;background:none;cursor:pointer;flex:none}
 .p-btn:hover{background:rgba(255,255,255,.14)}

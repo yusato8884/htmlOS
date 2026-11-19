@@ -22,6 +22,7 @@
     if (wins.length) items.push({ sep: true });
     items.push(wins.length ? { label: '新しいウィンドウ', icon: 'plus', act: () => htui.kit.run(id) } : { label: '開く', icon: a.icon, act: () => open(id) });
     if (wins.length) items.push({ label: 'すべてのウィンドウを最小化', icon: 'min', act: () => wins.forEach(w => w.minimize()) }, { sep: true }, { label: '終了', icon: 'x', act: () => wins.forEach(w => w.close()) });
+    items.push({ sep: true }); htui.pins.items(id).forEach(x => items.push(x));
     items.push({ sep: true }, { label: 'このアプリについて', act: () => OS.ui.alert((a.desc || a.name) + (a.pkg ? '\n（パッケージ ' + a.pkg + '）' : ''), a.name) });
     return items;
   }
@@ -90,15 +91,68 @@
     return close;
   }
 
-  // ======================================================== HTUi（標準）
+  // ======================================================== HTUi 2（MaineCoon。標準）
+  //   上にパネル（アプリ・タイトル・画面モード・時計・ユーザー）、左（既定）・下・右に Dock。
+  //   Dock: 固定したアプリと起動中のアプリ。点の数は開いているウィンドウの数。右クリックで固定/解除・Dock の位置
+  const DOCK_POS = { left: '左', bottom: '下', right: '右' };
   OS.registerSession({
-    id: 'htui', name: 'HTUi', touchNav: true, desc: '上にパネル、左にデスクトップアイコンが並ぶ標準のデスクトップです。タッチでは下に「閉じる・ホーム・タスク」のナビが出ます。',
+    id: 'htui', name: 'HTUi 2', version: '2', codename: 'MaineCoon', full: 'HTUi 2 (MaineCoon)', touchNav: true,
+    pins: ['hfile', 'terminal', 'hbrowser', 'hedit', 'settings'], pinWhere: 'Dock',
+    desc: '上にパネル、左（下・右にも置ける）に Dock がある標準のデスクトップです。Dock には固定したアプリと起動中のアプリが並びます。タッチでは下に「閉じる・ホーム・タスク」のナビが出ます。',
     build(k) {
-      const appsBtn = h('button', { class: 'p-btn', type: 'button', onclick: e => k.menu(e.currentTarget, k.apps().map(a => ({ label: a.name, hint: a.desc, icon: a.icon, act: () => k.run(a.id) }))) }, OS.icon('grid', 16), h('span', { class: 'p-lbl' }, 'アプリ'));
-      const tasks = htui.tasks = h('div', { class: 'p-tasks' });
+      const appsBtn = h('button', { class: 'p-btn', type: 'button', onclick: e => k.menu(e.currentTarget, this.appMenu(), true) }, OS.icon('grid', 16), h('span', { class: 'p-lbl' }, 'アプリ'));
+      htui.tasks = h('div', { class: 'p-tasks', hidden: '' }); // ウィンドウのボタンは Dock にまとめる
       const clock = k.clock(h('div', { class: 'p-clock' }), d => (d.getMonth() + 1) + '/' + d.getDate() + ' ' + k.pad(d.getHours()) + ':' + k.pad(d.getMinutes()));
       htui.titleEl = h('div', { class: 'p-title' });
-      htui.el.append(h('div', { class: 'panel' }, appsBtn, tasks, htui.titleEl, k.modeButton('p-btn'), clock, k.userButton('p-btn')), k.desk(true));
+      this.dock = h('div', { class: 'ht2-dock', role: 'toolbar', 'aria-label': 'Dock' });
+      this.main = h('div', { class: 'ht2-main' }, this.dock, k.desk(true));
+      htui.el.append(h('div', { class: 'panel' }, appsBtn, htui.titleEl, k.modeButton('p-btn'), clock, k.userButton('p-btn')), this.main);
+      this._sig = null; this.place();
+    },
+    appMenu() {
+      return htui.kit.apps().map(a => ({ label: a.name + (htui.pins.has(a.id) ? '  📌' : ''), hint: a.desc, icon: a.icon, act: () => htui.kit.run(a.id) }));
+    },
+    // Dock の位置（htui.prefs.dock: left / bottom / right）
+    place() {
+      if (!this.main) return;
+      const p = DOCK_POS[htui.prefs.dock] ? htui.prefs.dock : 'left';
+      this.main.dataset.dock = p; this.dock.setAttribute('aria-orientation', p === 'bottom' ? 'horizontal' : 'vertical');
+      this._sig = null; this.onApps();
+    },
+    onStart() { this.onApps(); },
+    onStop() { this.dock = null; this.main = null; this._sig = null; },
+    onActive() { this.onApps(); },
+    onFocus() { this.onApps(); },
+    onMode() { this._sig = null; this.onApps(); },
+    onApps() {
+      if (!this.dock) return;
+      const k = htui.kit, act = htui.active(), pins = htui.pins.list();
+      const sig = [pins.join(), Object.keys(OS.apps).join(), htui.wins.filter(w => !w.parent).map(w => w.app + (w.el.classList.contains('hidden') ? '-' : '+')).join(), act ? act.app : '', this.main.dataset.dock].join('#');
+      if (sig === this._sig) return;
+      this._sig = sig;
+      const running = [...new Set(htui.wins.filter(w => !w.parent).map(w => w.app))].filter(id => OS.apps[id] && !pins.includes(id));
+      this.dock.textContent = '';
+      const item = id => {
+        const a = OS.apps[id], n = htui.wins.filter(w => w.app === id && !w.parent).length;
+        const b = h('button', { class: 'ht2-dk' + (n ? ' run' : '') + (act && act.app === id ? ' active' : '') + (pins.includes(id) ? ' pin' : ''), type: 'button', title: a.name + (n > 1 ? '（ウィンドウ ' + n + ' 個）' : ''), 'aria-label': a.name, 'data-app': id },
+          k.appIcon(a, 22), n ? h('span', { class: 'ht2-dots', 'aria-hidden': 'true' }, Array.from({ length: Math.min(n, 3) }, () => h('i'))) : null);
+        b.addEventListener('click', () => htui.openPinned(id, b, this.main.dataset.dock));
+        return b;
+      };
+      pins.forEach(id => this.dock.append(item(id)));
+      if (running.length) { this.dock.append(h('span', { class: 'ht2-sep' })); running.forEach(id => this.dock.append(item(id))); }
+      const all = h('button', { class: 'ht2-dk ht2-all', type: 'button', title: 'すべてのアプリ', 'aria-label': 'すべてのアプリ' }, OS.icon('grid', 20));
+      all.addEventListener('click', () => { const d = this.main.dataset.dock; htui.kit.menu(all, this.appMenu(), d === 'right', d === 'bottom' ? { up: true } : { beside: d }); });
+      this.dock.append(h('span', { class: 'ht2-grow' }), all);
+    },
+    posItems() {
+      return [{ head: 'Dock の位置' }].concat(Object.keys(DOCK_POS).map(p => ({ label: DOCK_POS[p] + (p === 'left' ? '（既定）' : ''), icon: p === 'bottom' ? 'down' : p === 'left' ? 'back' : 'play', hint: (htui.prefs.dock || 'left') === p ? '選択中' : null, act: () => htui.setPrefs({ dock: p }) })));
+    },
+    onContext(e) {
+      const b = e.target.closest('.ht2-dk[data-app]');
+      if (b) return appItems(b.dataset.app, id => htui.openPinned(id)).concat({ sep: true }, this.posItems());
+      if (e.target.closest('.ht2-dock')) return this.posItems();
+      return null;
     }
   });
 
@@ -112,7 +166,7 @@
   //     右端からスワイプ → チャーム／左端から → 前のアプリ（少し出して戻すと切り替え一覧）
   //     上端から下へ引き下ろす → アプリを閉じる（上端をタップするとタイトルバー）／下端から上へ → すべてのアプリ
   OS.registerSession({
-    id: 'win', name: 'hWin（Windows 風）', desc: 'マウスでは下にタスクバーとスタートメニュー。タブレットとスマートフォンでは Windows 8.1 風のスタート画面とチャーム、画面の端からのスワイプ操作になります。',
+    id: 'win', name: 'hWin（Windows 風）', pins: ['hfile', 'hbrowser', 'terminal'], pinWhere: 'タスクバー', taskPins: true, desc: 'マウスでは下にタスクバーとスタートメニュー。タブレットとスマートフォンでは Windows 8.1 風のスタート画面とチャーム、画面の端からのスワイプ操作になります。',
     build(k) {
       const self = this;
       const desk = k.desk({ files: true, trash: true });
@@ -510,7 +564,7 @@
 
   // ======================================================== hShell（GNOME 風）
   OS.registerSession({
-    id: 'gnome', name: 'hShell（GNOME 風）', desc: '上にトップバー。「アクティビティ」でウィンドウ一覧・ドック・アプリ一覧、日時でカレンダーと通知センターを出す GNOME 風のデスクトップです。タッチでは下端から上へスワイプでアクティビティ。',
+    id: 'gnome', name: 'hShell（GNOME 風）', pins: ['hfile', 'hbrowser', 'terminal', 'hedit', 'settings'], pinWhere: 'お気に入り（ドック）', desc: '上にトップバー。「アクティビティ」でウィンドウ一覧・ドック・アプリ一覧、日時でカレンダーと通知センターを出す GNOME 風のデスクトップです。タッチでは下端から上へスワイプでアクティビティ。',
     build(k) {
       const self = this;
       const act = h('button', { class: 'gn-act', type: 'button', title: 'アクティビティ（Super / Alt+F1）', 'aria-label': 'アクティビティ', onclick: () => self.overview() },
@@ -632,7 +686,8 @@
       }
       function fillDock() {
         dock.textContent = '';
-        k.apps().forEach(a => dock.append(h('button', { class: 'gn-dk' + (htui.wins.some(w => w.app === a.id) ? ' run' : ''), type: 'button', title: a.name, 'aria-label': a.name, 'data-app': a.id, onclick: () => {
+        const favs = htui.pins.list(), runs = [...new Set(htui.wins.map(w => w.app))].filter(id => OS.apps[id] && !favs.includes(id));
+        favs.concat(runs).map(id => OS.apps[id]).forEach(a => dock.append(h('button', { class: 'gn-dk' + (htui.wins.some(w => w.app === a.id) ? ' run' : ''), type: 'button', title: a.name, 'aria-label': a.name, 'data-app': a.id, onclick: () => {
           const w = byZ().find(x => x.app === a.id);
           if (w) pick(w); else { close(); k.run(a.id); }
         } }, k.appIcon(a, 28))));
@@ -820,7 +875,7 @@
   const G_LP = '<rect x="3" y="3" width="5" height="5" rx="1.2"/><rect x="9.5" y="3" width="5" height="5" rx="1.2"/><rect x="16" y="3" width="5" height="5" rx="1.2"/><rect x="3" y="9.5" width="5" height="5" rx="1.2"/><rect x="9.5" y="9.5" width="5" height="5" rx="1.2"/><rect x="16" y="9.5" width="5" height="5" rx="1.2"/><rect x="3" y="16" width="5" height="5" rx="1.2"/><rect x="9.5" y="16" width="5" height="5" rx="1.2"/><rect x="16" y="16" width="5" height="5" rx="1.2"/>';
 
   OS.registerSession({
-    id: 'mac', name: 'hAqua（macOS 風）', desc: '上にメニューバー、下に拡大するドック、左上に信号機のボタン。Launchpad・Mission Control・Spotlight もあります。タブレットでは iPadOS 風、スマートフォンでは iOS 風のホーム画面とジェスチャーになります。',
+    id: 'mac', pins: ['hfile', 'hbrowser', 'hedit', 'terminal', 'hplayer', 'hcalc', 'settings'], pinWhere: 'Dock', name: 'hAqua（macOS 風）', desc: '上にメニューバー、下に拡大するドック、左上に信号機のボタン。Launchpad・Mission Control・Spotlight もあります。タブレットでは iPadOS 風、スマートフォンでは iOS 風のホーム画面とジェスチャーになります。',
     build(k) {
       const self = this, el = htui.el;
       // ---- メニューバー（デスクトップ）
@@ -876,14 +931,14 @@
       if (!this.dock) return;
       const k = htui.kit, self = this;
       // 中身が変わらないなら作り直さない（作り直すと、押している途中のボタンが入れ替わってタップが消える）
-      const sig = [OS.uiMode, Object.keys(OS.apps).join(), htui.wins.map(w => w.app + (w.el.classList.contains('hidden') ? '-' : '+') + w.title).join('|'), byZ().map(w => w.app).join(), htui.trash.items().length].join('#');
+      const sig = [OS.uiMode, htui.pins.list().join(), Object.keys(OS.apps).join(), htui.wins.map(w => w.app + (w.el.classList.contains('hidden') ? '-' : '+') + w.title).join('|'), byZ().map(w => w.app).join(), htui.trash.items().length].join('#');
       if (sig === this._sig) return;
       this._sig = sig;
       // デスクトップのドック: Launchpad・よく使うアプリ・（区切り）・ドックにない起動中のアプリ・しまったウインドウ
       const item = (cls, name, icon, onclick, run, app) => h('button', { class: 'mc-dk ' + cls + (run ? ' run' : ''), type: 'button', 'data-name': name, 'data-app': app || '', 'aria-label': name, onclick: onclick }, icon);
       this.dock.textContent = '';
       this.dock.append(item('mc-lp', 'Launchpad', h('span', { class: 'app-ico mc-lpico' }, glyph(G_LP, 30)), () => this.launchpad()));
-      const pinned = MAC_DOCK.filter(id => OS.apps[id]), extra = [...new Set(htui.wins.map(w => w.app))].filter(id => OS.apps[id] && !pinned.includes(id));
+      const pinned = htui.pins.list(), extra = [...new Set(htui.wins.map(w => w.app))].filter(id => OS.apps[id] && !pinned.includes(id));
       pinned.concat(extra).forEach(id => { const a = OS.apps[id]; this.dock.append(item('', a.name, k.appIcon(a, 28), e => this.openApp(id, e.currentTarget), htui.wins.some(w => w.app === id), id)); });
       const mins = htui.wins.filter(w => w.el.classList.contains('hidden'));
       this.dock.append(h('span', { class: 'mc-dsep' }));
