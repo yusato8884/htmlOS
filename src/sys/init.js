@@ -423,6 +423,15 @@
     start(ctx) { ctx.setInterval(() => journal.save(), 30000); return () => journal.save(); }
   });
   register({
+    name: 'powerd.service', desc: '電源管理（スリープの見張り・省電力・スリープ防止）', wantedBy: 'graphical.target', restart: 'on-failure',
+    start(ctx) {
+      if (!OS.power) throw new Error('電源管理（OS.power）がありません');
+      OS.power.start(ctx);
+      ctx.log('スリープの見張りを始めました');
+      return () => OS.power.stop();
+    }
+  });
+  register({
     name: 'bgm.service', desc: 'アンビエントサウンド（BGM）', after: ['soundd.service'], wants: ['soundd.service'], wantedBy: 'graphical.target', restart: 'on-failure',
     start(ctx) {
       ctx.setTimeout(() => { if (OS.bgm) OS.bgm.apply(); }, 60); // active になってから設定どおりに鳴らす

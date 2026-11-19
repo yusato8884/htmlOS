@@ -511,6 +511,7 @@
           if (sub === 'call' && pos[1] === 'htmlos.Sound' && n === 3) return S.list();
           return [];
         }
+        case 'power': if (n === 0) return ['status', 'lock', 'hibernate', 'saver', 'onsleep', 'awake']; if ((pos[0] === 'saver' || pos[0] === 'awake') && n === 1) return ['on', 'off']; if (pos[0] === 'onsleep' && n === 1) return Object.keys(OS.power.actions); return [];
         case 'bgm': if (n === 0) return ['on', 'off', 'style', 'vol', 'list']; if (pos[0] === 'style' && n === 1) return Object.keys(OS.bgm.styles); if (pos[0] === 'vol' && n === 1) return ['0', '25', '35', '50', '75', '100']; return [];
         case 'sound': if (n === 0) return ['on', 'off', 'vol', 'play', 'list']; if (pos[0] === 'play' && n === 1) return S.list(); if (pos[0] === 'vol' && n === 1) return ['0', '25', '50', '75', '100']; return [];
         case 'bell': case 'clear': case 'pwd': case 'whoami': case 'users': case 'df': case 'date': case 'env': case 'uptime': case 'uname': case 'free': case 'neofetch': case 'history': case 'top': case 'dmesg': case 'poweroff': case 'reinstall': return [];
@@ -574,6 +575,24 @@
         if (sub === 'list') return S.list().map(n => n.padEnd(10) + S.names[n]).join('\n');
         if (sub === 'play') { if (!S.list().includes(arg)) throw new Error('sound play ' + S.list().join(' / ')); S.play(arg, true); return; }
         throw new Error('使い方: sound [on|off|vol 0〜100|play 名前|list]');
+      });
+      def('power', 'power [status|lock|hibernate|saver on|off|onsleep lock|hibernate|poweroff|awake on|off]', '電源管理（スリープした場合の動作・省電力モード・スリープさせない）', (sub, arg) => {
+        const P = OS.power, H = OS.htui;
+        const save = patch => { if (!(H && H.running && H.user)) throw new Error('電源管理の設定は、デスクトップにログインしているときに変えられます'); H.setPrefs({ power: Object.assign({}, H.prefs.power || {}, patch) }); };
+        if (!sub || sub === 'status') {
+          const p = P.prefs(), b = P.battery;
+          return ['スリープした場合: ' + P.actions[p.onSleep] + '（' + p.onSleep + '）',
+            '省電力モード: ' + (P.saving ? 'オン' : 'オフ') + (p.saver ? '' : p.autoSaver ? '（自動。バッテリー ' + p.threshold + '% 以下で）' : ''),
+            'スリープさせない: ' + (p.keepAwake ? 'オン' + (P.wakeLock ? '' : '（今は効いていません）') : 'オフ'),
+            'バッテリー: ' + (P.hasBattery ? Math.round(b.level * 100) + '%' + (b.charging ? '（充電中）' : '') : 'なし（または取得できません）'),
+            'powerd.service: ' + (P.running ? '動作中' : '停止中')].join('\n');
+        }
+        if (sub === 'lock') { if (!H || !H.lock()) throw new Error('ロックできません（デスクトップにログインしていないか、もうロックしています）'); return; }
+        if (sub === 'hibernate') { OS.hibernate(); return; }
+        if (sub === 'saver') { if (arg !== 'on' && arg !== 'off') throw new Error('使い方: power saver on|off'); save({ saver: arg === 'on' }); return '省電力モードを' + (arg === 'on' ? 'オン' : 'オフ') + 'にしました'; }
+        if (sub === 'awake') { if (arg !== 'on' && arg !== 'off') throw new Error('使い方: power awake on|off'); save({ keepAwake: arg === 'on' }); return '端末をスリープさせない: ' + (arg === 'on' ? 'オン' : 'オフ'); }
+        if (sub === 'onsleep') { if (!P.actions[arg]) throw new Error((arg || '（なし）') + ': lock / hibernate / poweroff のどれかを指定してください'); save({ onSleep: arg }); return 'スリープした場合: ' + P.actions[arg]; }
+        throw new Error('使い方: power [status|lock|hibernate|saver on|off|onsleep lock|hibernate|poweroff|awake on|off]');
       });
       def('bgm', 'bgm [on|off|style 名前|vol 0〜100|list]', 'アンビエントサウンド（BGM）の設定（ログイン中のユーザーの設定）', (sub, arg) => {
         const B = OS.bgm, H = OS.htui, user = H && H.running && H.user;

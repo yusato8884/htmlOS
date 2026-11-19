@@ -32,18 +32,20 @@
     },
 
     // container にログイン画面を出す。ログインできたら onLogin(ユーザー名, セッションID)
-    show(container, onLogin) {
+    //   opt.lock にユーザー名を渡すと、そのユーザーのロック画面になる（ほかのユーザーは選べない。ロックを外すと onLogin）
+    show(container, onLogin, opt) {
       hdm.stop();
-      const el = container, htui = OS.htui;
-      const list = () => users.list().filter(u => !u.root);
+      opt = opt || {};
+      const el = container, htui = OS.htui, L = opt.lock ? users.get(opt.lock) : null;
+      const list = () => L ? [L] : users.list().filter(u => !u.root);
       const lastU = users.get(hdm.conf().lastUser);
-      const first = lastU && !lastU.root ? lastU : list().length === 1 ? list()[0] : null;
-      const st = { user: first, sid: first ? hdm.sessionFor(first.name) : hdm.defaultSession(), unlocked: false, msg: '' };
+      const first = L || (lastU && !lastU.root ? lastU : list().length === 1 ? list()[0] : null);
+      const st = { user: first, sid: L && opt.sid ? opt.sid : first ? hdm.sessionFor(first.name) : hdm.defaultSession(), unlocked: false, msg: '' };
       const prefsOf = u => { try { return JSON.parse(OS.fs.read(users.home(u.name) + '/.config/htui.json')); } catch (e) { return {}; } };
 
       // 各テーマに渡す部品
       const c = {
-        get user() { return st.user; }, get sid() { return st.sid; }, get unlocked() { return st.unlocked; },
+        get user() { return st.user; }, get sid() { return st.sid; }, get unlocked() { return st.unlocked; }, locking: !!L,
         list: list, menuUp: false,
         avatar(u, size, square) { const a = htui.avatar(u, size); if (square) a.classList.add('sq'); return a; },
         wallpaper(u) { return htui.wallCss(u ? prefsOf(u) : {}, u && u.name); },
@@ -54,7 +56,7 @@
         sessionDesc() { return (OS.sessions[st.sid] || {}).desc || ''; },
         // デスクトップ環境の選択。overlay=true なら、アイコンの上に重ねる透明な選択欄にする
         sessionSelect(cls, overlay) {
-          const sel = h('select', { class: (cls || 'sel') + (overlay ? ' hdm-ovsel' : ''), id: 'hdm-session', 'aria-label': 'デスクトップ環境', title: 'デスクトップ環境' },
+          const sel = h('select', { class: (cls || 'sel') + (overlay ? ' hdm-ovsel' : ''), id: 'hdm-session', 'aria-label': 'デスクトップ環境', title: 'デスクトップ環境', disabled: !!L },
             Object.values(OS.sessions).filter(s => !s.hidden).map(s => h('option', { value: s.id, selected: s.id === st.sid }, s.name)));
           sel.addEventListener('change', () => { st.sid = sel.value; st.unlocked = true; render(); });
           return sel;
@@ -82,7 +84,8 @@
           const form = h('form', { class: o.formClass || '', onsubmit: e => { e.preventDefault(); login(); } });
           async function doLogin() {
             const u = o.nameInput ? users.get(o.nameInput.value.trim()) : st.user;
-            if (u && !u.root && await users.verify(u.name, input.value)) {
+            if (u && !u.root && (!L || u.name === L.name) && await users.verify(u.name, input.value)) {
+              if (L) { hdm.stop(); onLogin(u.name, st.sid); return; }
               const cf = hdm.conf(); cf.lastUser = u.name; cf.users = cf.users || {}; cf.users[u.name] = st.sid; hdm.save(cf);
               hdm.stop();
               onLogin(u.name, st.sid);

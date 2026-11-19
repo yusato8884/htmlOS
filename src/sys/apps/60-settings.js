@@ -175,6 +175,38 @@
             adminNote());
           if (mine.on === undefined && mine.vol === undefined) { /* まだユーザーの設定がない: システムの設定に従っている */ }
         }],
+        power: ['電源管理', 'battery', () => {
+          const P = OS.power, p = P.prefs(), set = patch => OS.htui.setPrefs({ power: Object.assign({}, OS.htui.prefs.power || {}, patch) });
+          const sw = (id, label, on, fn) => h('label', null, h('input', { type: 'checkbox', class: 'switch', id: id, checked: on, onchange: e => fn(e.target.checked) }), ' ' + label);
+          const DESC = { lock: 'ウィンドウはそのままで、ロック画面を出します。パスワードで戻ります。', hibernate: '開いているウィンドウを覚えて電源を切ります。次にログインすると元のウィンドウを開き直します（保存していない変更は残りません。確認が出ます）。', poweroff: 'そのまま電源を切ります（保存していない変更があれば確認が出ます）。' };
+          const desc = h('p', { class: 'st-note', id: 'st-pw-desc' }, DESC[p.onSleep]);
+          const thr = h('input', { class: 'inp', type: 'number', min: '5', max: '95', step: '5', id: 'st-pw-thr', value: String(p.threshold), style: 'width:80px', 'aria-label': 'しきい値（%）', disabled: !p.autoSaver });
+          thr.addEventListener('change', () => { const v = Math.max(5, Math.min(95, Math.round(Number(thr.value)) || 20)); thr.value = String(v); set({ threshold: v }); });
+          const bat = h('div', { id: 'st-pw-bat' });
+          const fillBat = () => {
+            bat.textContent = '';
+            if (!P.hasBattery) return;
+            const b = P.battery;
+            bat.append(h('div', { class: 'st-row' }, sw('st-pw-auto', '自動で省電力モードに設定する', P.prefs().autoSaver, v => { set({ autoSaver: v }); thr.disabled = !v; })),
+              h('div', { class: 'st-row', style: 'padding-left:2.6em' }, h('span', null, 'しきい値'), thr, h('span', null, '% 以下で、充電していないとき')),
+              h('p', { class: 'st-note' }, 'バッテリー: 残り ' + Math.round(b.level * 100) + '%（' + (b.charging ? '充電中' : '充電していません') + '）' + (P.low ? '。今は自動で省電力モードになっています' : '')));
+          };
+          P.ready().then(() => { if (bat.isConnected || !page.isConnected) fillBat(); });
+          page.append(h('h2', null, '電源管理'),
+            h('p', null, 'この設定はユーザーごとに保存されます。働くのは powerd.service が動いているときです（hjournal -u powerd で記録を見られます）。'),
+            h('h3', null, '端末がスリープした場合'),
+            h('div', { class: 'st-row' }, h('select', { class: 'sel', id: 'st-pw-sleep', 'aria-label': '端末がスリープした場合', onchange: e => { set({ onSleep: e.target.value }); desc.textContent = DESC[e.target.value]; } },
+              Object.keys(P.actions).map(k => h('option', { value: k, selected: p.onSleep === k }, P.actions[k])))),
+            desc,
+            h('p', { class: 'st-note' }, 'ブラウザからはスリープを直接知ることができないため、スリープから戻ったとき（時計が大きく飛んだとき）に動きます。'),
+            h('h3', null, '省電力'),
+            h('div', { class: 'st-row' }, sw('st-pw-saver', '省電力モード', p.saver, v => set({ saver: v }))),
+            h('p', { class: 'st-note' }, 'アニメーションと半透明のぼかしを止め、BGM を流しません。'),
+            bat,
+            h('h3', null, 'スリープ'),
+            h('div', { class: 'st-row' }, sw('st-pw-awake', '端末をスリープさせない', p.keepAwake, v => set({ keepAwake: v }))),
+            h('p', { class: 'st-note' }, P.wakeLockOk ? 'htmlOS を表示しているあいだ、画面が消えたり端末がスリープしたりしないようにします（ほかのタブやアプリに切り替えると外れ、戻るとまた効きます）。' : 'このブラウザは画面のスリープ防止（Screen Wake Lock）に対応していないため、この設定は効きません。'));
+        }],
         net: ['ネットワーク', 'globe', () => {
           const admin = !!me().admin;
           const res = h('pre', { class: 'st-proxy-res', id: 'st-proxy-res', style: 'white-space:pre-wrap;font-size:12px;margin:8px 0 0' });

@@ -181,7 +181,8 @@
     if (OS.hdm) OS.hdm.stop();
     document.removeEventListener('keydown', hotkeys); document.removeEventListener('keyup', keyUp); document.removeEventListener('contextmenu', onContext); window.removeEventListener('blur', altTabEnd); altTabEnd(true);
     htui.el.remove(); htui.el = null;
-    htui.running = false; htui.user = null; htui.fs = null;
+    htui.running = false; htui.user = null; htui.fs = null; htui.locked = false;
+    if (OS.power) OS.power.apply();
     OS.setMode('auto');
     OS.tty1.focus();
     return true;
@@ -191,14 +192,55 @@
     OS.sound.play('logout');
     toLogin();
   };
+  // ---------- ロック（5.3）: ウィンドウはそのままで、ログイン画面と同じ見た目のロック画面を重ねる。パスワードで外れる
+  htui.locked = false;
+  htui.lock = function () {
+    if (!htui.running || !htui.user || htui.locked) return false;
+    closeMenus(); altTabEnd(true);
+    const inner = h('div'), wrap = h('div', { class: 'lock-wrap', role: 'dialog', 'aria-label': 'ロック中' }, inner);
+    htui.el.append(wrap); htui.locked = true;
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    OS.hdm.show(inner, () => {
+      wrap.remove(); htui.locked = false;
+      if (OS.ipc) { try { OS.ipc.publish('session.unlock', { user: htui.user }, 'htui'); } catch (e) { /* 無視 */ } }
+      const w = htui.active(); if (w) w.focus();
+    }, { lock: htui.user, sid: htui.sessionId });
+    if (OS.ipc) { try { OS.ipc.publish('session.lock', { user: htui.user }, 'htui'); } catch (e) { /* 無視 */ } }
+    return true;
+  };
+  // ハイバーネートから戻る: そのユーザーがログインしたら、ウィンドウを開き直す
+  function resume(user) {
+    const img = OS.hibernation && OS.hibernation();
+    if (!img || img.user !== user) return;
+    OS.hibernation(null);
+    const dw = htui.desk ? htui.desk.clientWidth : 800, dh = htui.desk ? htui.desk.clientHeight : 600;
+    let n = 0;
+    (img.wins || []).forEach(s => {
+      const before = new Set(htui.wins);
+      try { OS.launch(s.app, s.arg || undefined); } catch (e) { return; }
+      const w = htui.wins.find(x => !before.has(x) && !x.parent); if (!w) return;
+      n++;
+      if (s.w && s.h) {
+        const ww = Math.min(s.w, dw), hh = Math.min(s.h, dh);
+        w.el.style.width = ww + 'px'; w.el.style.height = hh + 'px';
+        w.el.style.left = Math.max(0, Math.min(s.x, dw - ww)) + 'px'; w.el.style.top = Math.max(0, Math.min(s.y, dh - hh)) + 'px';
+      }
+      if (s.max && !w.el.classList.contains('max')) { const b = w.el.querySelector('.win-btn[aria-label="最大化"]'); if (b) b.click(); }
+      if (s.min) w.minimize();
+    });
+    OS.notify({ app: '電源管理', icon: 'battery', title: '休止状態から戻りました', body: n ? 'ウィンドウを ' + n + ' 個開き直しました' : '開いていたウィンドウはありません' });
+  }
   // ログイン画面（hdm）へ
   function toLogin() {
     if (htui.user && OS.ipc) { try { OS.ipc.publish('session.logout', { user: htui.user }, 'htui'); } catch (e) { /* 無視 */ } }
     clearShell();
     htui.user = null; htui.fs = null; htui.prefs = {};
     OS.setMode('auto');
-    htui.el.textContent = ''; htui.el.removeAttribute('style'); htui.el.className = '';
-    OS.hdm.show(htui.el, (user, sid) => { session(user, sid); OS.sound.play('login'); });
+    htui.el.textContent = ''; htui.el.removeAttribute('style'); htui.el.className = ''; htui.locked = false;
+    if (OS.power) OS.power.apply();
+    OS.hdm.show(htui.el, (user, sid) => { session(user, sid); OS.sound.play('login'); resume(user); });
+    const hib = OS.hibernation && OS.hibernation();
+    if (hib && users.get(hib.user)) setTimeout(() => OS.ui.toast('休止状態です。' + hib.user + ' でログインすると、元のウィンドウに戻ります'), 300);
   }
 
   // ---------- 個人設定（壁紙・アクセント・アニメーション・画面モード）
@@ -207,6 +249,7 @@
     Object.assign(htui.prefs, patch);
     try { fs.mkdir(users.home(htui.user) + '/.config', { parents: true, owner: htui.user }); fs.write(users.home(htui.user) + '/.config/htui.json', JSON.stringify(htui.prefs), { owner: htui.user }); } catch (e) { /* 保存できなくても表示は変える */ }
     applyPrefs();
+    if (patch && 'power' in patch && OS.power) OS.power.apply();
     if (patch && 'bgm' in patch && OS.bgm) OS.bgm.apply();
     if (patch && 'dock' in patch && htui.shell && htui.shell.place) htui.shell.place();
   };
@@ -274,6 +317,7 @@
     htui.refreshApps(); htui.refreshUser(); htui.syncMode(); htui.syncTitle(); watchDesk();
     if (sh.onStart) sh.onStart(kit);
     htui.syncTasks();
+    if (OS.power) OS.power.apply(); // 電源管理（ユーザーの設定どおり）
     if (OS.bgm) OS.bgm.apply(); // アンビエントサウンド（ユーザーの設定どおり）
     // セーフモードの印と、新しいバージョンのお知らせ
     if (OS.safe) {
@@ -616,6 +660,7 @@
     return items;
   }
   function onContext(e) {
+    if (htui.locked) { e.preventDefault(); return; }
     if (!htui.user || !htui.el || !htui.el.contains(e.target) || e.defaultPrevented) return;
     if (e.shiftKey) return; // Shift+右クリックはブラウザのメニュー
     const t = e.target, at = htui._ctxAt = [e.clientX, e.clientY];
@@ -733,9 +778,11 @@
     // ログアウト・CUI・再起動・電源
     powerItems() {
       return [
+        { label: 'ロック', icon: 'lock', act: () => htui.lock() },
         { label: 'ログアウト', icon: 'user', act: () => htui.logout() },
         { label: 'HTUi を終了して CUI へ', icon: 'terminal', act: () => htui.stop() },
         { label: '再起動', icon: 'reload', act: () => OS.reboot() },
+        { label: 'ハイバーネート', icon: 'battery', act: () => OS.hibernate() },
         { label: '電源を切る', icon: 'power', act: () => OS.poweroff() }
       ];
     },
@@ -828,7 +875,7 @@
   const ZONES = { max: [0, 0, 100, 100], left: [0, 0, 50, 100], right: [50, 0, 50, 100], tl: [0, 0, 50, 50], tr: [50, 0, 50, 50], bl: [0, 50, 50, 50], br: [50, 50, 50, 50] };
   const MINW = 260, MINH = 150;
   const px = v => Math.round(v) + 'px', clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  htui.animOff = () => htui.prefs.anim === false;
+  htui.animOff = () => htui.prefs.anim === false || !!(OS.power && OS.power.saving);
   function animOut(el, cls, ms, cb) {
     if (htui.animOff()) return cb();
     el.classList.add(cls);
@@ -1454,6 +1501,7 @@
   // Super（Windows / Command）キーだけを押して離したら、環境の onSuper を呼ぶ（GNOME のアクティビティ、Windows のスタートなど）
   let superAlone = false;
   function keyUp(e) {
+    if (htui.locked) return;
     if (e.key === 'Alt' && ats) { e.preventDefault(); altTabEnd(); return; }
     if (e.key !== 'Meta' || !superAlone) return;
     superAlone = false;
@@ -1493,6 +1541,7 @@
     if (cancel !== true && list[i] && !list[i].closed) list[i].focus();
   }
   function hotkeys(e) {
+    if (htui.locked) return; // ロック中はショートカットを使わない
     superAlone = e.key === 'Meta' && !e.repeat ? true : e.key === 'Meta' ? superAlone : false;
     if (ats && e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); altTabEnd(true); return; }
     if (htui.user && e.altKey && !e.ctrlKey && !e.metaKey && (e.key === 'Tab' || e.code === 'Backquote') && !htui.el.querySelector('.modal-ov')) {

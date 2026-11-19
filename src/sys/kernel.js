@@ -57,6 +57,8 @@
   const ICONS = {
     pin: '<path d="M9 3h6l-1 6 4 4H6l4-4zM12 13v8"/>',
     music: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
+    battery: '<rect x="2" y="7" width="17" height="10" rx="2"/><path d="M22 11v2M6 10v4M10 10v4"/>',
+    lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
     terminal: '<path d="M4 6l5 5-5 5M12 17h8"/>',
     edit: '<path d="M5 3h10l4 4v14H5zM8 10h8M8 14h8M8 18h5"/>',
     globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3.2 3 3.2 15 0 18M12 3c-3.2 3-3.2 15 0 18"/>',
@@ -474,7 +476,7 @@
     }
     // 設定どおりにする。鳴らすのは、ログインしていて（またはログイン前でシステムの設定がオン）、bgm.service が動いているとき
     function apply() {
-      const p = prefs(), want = p.on && p.vol > 0 && serviceOk() && !OS._down && !!(OS.htui && OS.htui.running);
+      const p = prefs(), want = p.on && p.vol > 0 && serviceOk() && !OS._down && !!(OS.htui && OS.htui.running) && !(OS.power && OS.power.saving);
       if (!want) { stop(); return false; }
       if (cur && cur.style === p.style) {
         if (cur.vol !== p.vol) { cur.vol = p.vol; const t = cur.c.currentTime; cur.master.gain.cancelScheduledValues(t); cur.master.gain.setValueAtTime(cur.master.gain.value, t); cur.master.gain.linearRampToValueAtTime(p.vol * 0.8, t + 0.4); }
@@ -489,6 +491,104 @@
     // まだ音を出す許可がなかったとき: 最初のクリック・キーで鳴らし始める
     ['pointerdown', 'keydown'].forEach(t => window.addEventListener(t, () => { if (!cur && OS.htui && OS.htui.running && OS.htui.user) { const p = prefs(); if (p.on) apply(); } }, { capture: true, passive: true }));
     return { apply: apply, stop: stop, prefs: prefs, styles: STYLES, get playing() { return !!cur; }, get style() { return cur ? cur.style : null; } };
+  })();
+
+  // ---------- 電源管理（5.3 から）。設定は、ログイン中のユーザーの htui.prefs.power
+  //   { onSleep: 'lock' | 'hibernate' | 'poweroff', saver: 省電力モード, autoSaver: バッテリーが減ったら自動で省電力, threshold: しきい値（%）, keepAwake: 端末をスリープさせない }
+  //   ブラウザには「スリープした」ことを直接知る方法がないので、2 秒ごとのタイマーが大きく遅れたこと（タイムギャップ）でスリープからの復帰を知る。
+  //   ページが見えているときは 15 秒以上、隠れているとき（タイマーが間引かれる）は 2 分以上の遅れをスリープとみなす。
+  //   省電力モード: アニメーション・半透明のぼかしを止め、BGM を流さない。スリープさせない: Screen Wake Lock。バッテリーは Battery Status API。
+  //   powerd.service が動いているあいだだけ働く（OS.power.start / stop）
+  OS.power = (function () {
+    const ACTIONS = { lock: 'ロック', hibernate: 'ハイバーネート', poweroff: '電源オフ' };
+    const DEF = { onSleep: 'lock', saver: false, autoSaver: false, threshold: 20, keepAwake: false };
+    const STEP = 2000;
+    let on = false, timer = null, last = 0, battery = null, batReady = null, low = false, lock = null, wlBusy = false, logf = () => {};
+    function prefs() {
+      const H = OS.htui, u = H && H.running && H.user && H.prefs && H.prefs.power;
+      const p = Object.assign({}, DEF, u || {});
+      if (!ACTIONS[p.onSleep]) p.onSleep = 'lock';
+      p.threshold = Math.max(5, Math.min(95, Math.round(Number(p.threshold)) || 20));
+      return p;
+    }
+    // バッテリーのない機種でも getBattery は「充電中・100%・充電完了まで 0 秒」を返すので、それはバッテリーなしとみなす
+    const hasBattery = () => !!battery && !(battery.charging && battery.level >= 1 && battery.chargingTime === 0);
+    const saving = () => { if (!on) return false; const p = prefs(); return !!(p.saver || (p.autoSaver && low)); };
+    function sync() {
+      const sv = saving();
+      if (OS.root) OS.root.classList.toggle('powersave', sv);
+      if (OS.bgm && OS.htui && OS.htui.running) OS.bgm.apply();
+      awake();
+    }
+    // バッテリーの残りがしきい値以下で、充電していなければ自動で省電力
+    function checkBattery(quiet) {
+      const p = prefs(), was = low;
+      low = !!(on && p.autoSaver && hasBattery() && !battery.charging && battery.level * 100 <= p.threshold);
+      if (was !== low) {
+        logf('バッテリー ' + Math.round(battery.level * 100) + '%: 省電力モードを自動で' + (low ? 'オン' : 'オフ') + 'にしました');
+        if (!quiet && !p.saver && OS.htui && OS.htui.user) OS.notify({ app: '電源管理', icon: 'battery', title: low ? '省電力モードをオンにしました' : '省電力モードをオフにしました', body: low ? 'バッテリーの残りが ' + Math.round(battery.level * 100) + '% になりました' : battery.charging ? '充電を始めました' : 'バッテリーの残りがしきい値を超えました' });
+      }
+      sync();
+    }
+    // 端末をスリープさせない（Screen Wake Lock。ページが隠れると外れるので、見えたらまた取る）
+    async function awake() {
+      const want = () => !!(on && prefs().keepAwake && OS.htui && OS.htui.running && OS.htui.user && document.visibilityState === 'visible' && !OS._down);
+      if (wlBusy) return;
+      if (want() && !lock && navigator.wakeLock) {
+        wlBusy = true;
+        try { const l = await navigator.wakeLock.request('screen'); lock = l; l.addEventListener('release', () => { if (lock === l) lock = null; }); } catch (e) { lock = null; }
+        wlBusy = false;
+        if (!want() && lock) awake();
+      } else if (!want() && lock) {
+        const l = lock; lock = null;
+        try { await l.release(); } catch (e) { /* 外れている */ }
+      }
+    }
+    function tick() {
+      const now = Date.now(), gap = now - last; last = now;
+      if (gap > STEP + (document.hidden ? 120000 : 15000)) slept(gap);
+    }
+    // スリープから戻ったとき: 設定どおりにロック・ハイバーネート・電源オフ
+    function slept(ms) {
+      const H = OS.htui;
+      logf('端末が約 ' + Math.round(ms / 1000) + ' 秒スリープしていました');
+      if (OS.ipc) { try { OS.ipc.publish('power.resume', { ms: ms }, 'powerd'); } catch (e) { /* 無視 */ } }
+      if (!on || OS._down || !H || !H.running || !H.user) return null;
+      const a = prefs().onSleep;
+      logf('スリープから戻ったので' + ACTIONS[a] + 'します（' + H.user + '）');
+      if (a === 'lock') H.lock();
+      else if (a === 'hibernate') OS.hibernate();
+      else OS.poweroff();
+      return a;
+    }
+    const onVis = () => { if (document.visibilityState === 'visible') tick(); awake(); };
+    function ready() {
+      if (!batReady) batReady = navigator.getBattery ? navigator.getBattery().then(b => {
+        battery = b;
+        ['levelchange', 'chargingchange'].forEach(t => b.addEventListener(t, () => { if (on) checkBattery(); }));
+      }).catch(() => { /* 使えない */ }) : Promise.resolve();
+      return batReady;
+    }
+    function start(ctx) {
+      logf = ctx && ctx.log ? m => ctx.log(m) : () => {};
+      on = true; last = Date.now();
+      clearInterval(timer); timer = setInterval(tick, STEP);
+      document.addEventListener('visibilitychange', onVis);
+      ready().then(() => { if (on) checkBattery(true); });
+      sync();
+    }
+    function stop() {
+      on = false; clearInterval(timer); timer = null; low = false;
+      document.removeEventListener('visibilitychange', onVis);
+      sync();
+    }
+    return {
+      actions: ACTIONS, prefs: prefs, start: start, stop: stop, ready: ready, slept: slept,
+      apply() { checkBattery(true); }, // 設定が変わったとき・ログイン・ログアウトのとき
+      wakeLockOk: !!navigator.wakeLock,
+      get running() { return on; }, get saving() { return saving(); }, get low() { return low; },
+      get battery() { return battery; }, get hasBattery() { return hasBattery(); }, get wakeLock() { return !!lock; }
+    };
   })();
 
   // ---------- ユーザー
@@ -1055,7 +1155,10 @@
     if (!OS.htui || !OS.htui.running || !OS.htui.user) throw new Error('HTUi が起動していません。「htui start」でデスクトップを起動してください');
     const a = OS.apps[id];
     if (!a) throw new Error(id + ': そのようなアプリはありません');
-    return a.launch(arg);
+    const before = new Set(OS.htui.wins);
+    const r = a.launch(arg);
+    if (typeof arg === 'string') OS.htui.wins.forEach(w => { if (!before.has(w) && !w.parent && w.launchArg === undefined) w.launchArg = arg; });
+    return r;
   };
   OS.openFile = function (p) {
     const k = fs.kind(p);
@@ -1191,7 +1294,8 @@
   // ---------- 電源
   // 電源オフ・再起動。終了画面（GUIはロゴと進捗、CUIは終了ログ）を最低でも約1.3秒表示する
   const nap = ms => new Promise(r => setTimeout(r, ms));
-  OS.shutdown = async function (reboot, flag) {
+  OS.shutdown = async function (reboot, flag, opt) {
+    const hib = !reboot && !!(opt && opt.hibernate);
     if (OS._down) return;
     const gui = !!(OS.htui && OS.htui.running);
     // 未保存の変更があるウィンドウは確認を出す。キャンセルされたら終了を取りやめる
@@ -1203,7 +1307,7 @@
     if (OS.ipc) { try { OS.ipc.publish(reboot ? 'power.reboot' : 'power.shutdown', null, 'hinit'); } catch (e) { /* 無視 */ } }
     OS.sound.play(reboot ? 'reboot' : 'shutdown');
     if (flag) store.set('bootflag', flag);
-    const t0 = Date.now(), tty = OS.tty1, label = reboot ? '再起動しています…' : 'シャットダウンしています…';
+    const t0 = Date.now(), tty = OS.tty1, label = reboot ? '再起動しています…' : hib ? '休止状態にしています…' : 'シャットダウンしています…';
     tty.pending = null; tty.capture = null; tty.line.style.display = 'none';
     const bar = h('i', { style: 'width:100%' }), msg = h('div', { class: 'sp-msg' });
     if (gui) OS.root.append(h('div', { id: 'splash', class: 'down', role: 'status' }, OS.mark(120, 'sp-mark'), spinner(), h('div', { class: 'sp-name' }, label)));
@@ -1226,7 +1330,29 @@
     OS.root.textContent = '';
     OS.root.append(h('div', { class: 'poweroff' },
       h('button', { class: 'pw-btn', type: 'button', title: '電源を入れる', 'aria-label': '電源を入れる', onclick: () => (BOOT.warmBoot ? BOOT.warmBoot() : location.reload()) }, OS.icon('power', 34)),
-      h('p', null, '電源が切れています'), h('small', null, 'ボタンを押すと起動します')));
+      h('p', null, hib ? '休止状態です' : '電源が切れています'), h('small', null, hib ? 'ボタンを押して起動し、ログインすると元のウィンドウに戻ります' : 'ボタンを押すと起動します')));
+  };
+  // ハイバーネート（5.3）: 開いているウィンドウ（アプリ・開いたもの・位置と大きさ）を /var/lib/hibernate.json に書いて電源を切る。
+  //   次にそのユーザーがログインすると開き直す。保存していない変更は、シャットダウンと同じく確認する（中身までは残せない）
+  const HIB = '/var/lib/hibernate.json';
+  OS.hibernation = function (clear) {
+    if (clear === null) { try { fs.rm(HIB); } catch (e) { /* ない */ } return null; }
+    try { return JSON.parse(fs.read(HIB)); } catch (e) { return null; }
+  };
+  OS.hibernate = async function () {
+    const H = OS.htui;
+    if (OS._down) return;
+    if (!H || !H.running || !H.user) return OS.poweroff();
+    const z = w => +w.el.style.zIndex || 0;
+    const img = { user: H.user, sid: H.sessionId, at: Date.now(), wins: H.wins.filter(w => !w.parent && w.app && OS.apps[w.app]).sort((a, b) => z(a) - z(b)).map(w => ({
+      app: w.app, arg: typeof w.launchArg === 'string' ? w.launchArg : null, title: w.title,
+      max: w.el.classList.contains('max'), min: w.el.classList.contains('hidden'),
+      x: w.el.offsetLeft, y: w.el.offsetTop, w: w.el.offsetWidth, h: w.el.offsetHeight })) };
+    try { fs.mkdir('/var/lib', { parents: true }); fs.write(HIB, JSON.stringify(img), { owner: 'root' }); } catch (e) { return OS.poweroff(); }
+    if (OS.hdm) { const c = OS.hdm.conf(); c.lastUser = H.user; OS.hdm.save(c); }
+    if (OS.journal) { try { OS.journal.log('powerd', 'ハイバーネートします（ウィンドウ ' + img.wins.length + ' 個）'); } catch (e) { /* 無視 */ } }
+    await OS.shutdown(false, null, { hibernate: true });
+    if (!OS._down) OS.hibernation(null); // 取りやめた
   };
   OS.reboot = function (flag) { return OS.shutdown(true, flag); };
   OS.poweroff = function () { return OS.shutdown(false); };

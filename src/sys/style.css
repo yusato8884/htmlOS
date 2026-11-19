@@ -54,6 +54,12 @@
 
 /* ---- HTUi */
 #htui{position:absolute;inset:0;display:flex;flex-direction:column;overflow:hidden}
+.lock-wrap{position:absolute;inset:0;z-index:200000}
+.lock-wrap>div{position:absolute;inset:0;display:flex;flex-direction:column;overflow:hidden}
+.lock-wrap>.hdm{color:#fff}
+.lock-wrap :has(> #hdm-session),.lock-wrap .hh-desc{display:none!important}
+#os-root.powersave #htui *,#os-root.powersave #htui{animation:none!important;transition:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important}
+.st-note{font-size:12.5px;opacity:.75;margin:4px 0 10px}
 
 /* HTUi 2（MaineCoon）: Dock */
 .ht2-main{flex:1;min-height:0;display:flex}
