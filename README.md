@@ -25,7 +25,7 @@
 - htmlOS のテーマソングを最初から入れました。作曲・歌は **Suno** で作成、作詞は **Claude Sonnet 5.5** です
 - `/usr/share/music/htmlOS/` に `htmlOS.mp3`・`lyrics.txt`（歌詞）・`README.txt`（クレジット）があり、各ユーザーの `~/Music/htmlOS` からもリンクで開けます
 - hPlayer で開くと、同じフォルダの歌詞（`<曲名>.txt`・`.lrc`・`lyrics.txt`）を一緒に表示します
-- 曲のデータ（約 5MB）は LocalStorage に入らないので、このリポジトリの `media/htmlOS.mp3`（GitHub Pages）から読み込みます。再生にはインターネット接続が必要です
+- 曲のデータ（約 5MB）: **HDD1（PC のフォルダ）にインストールした場合**は、最初の起動で読み込んで HDD1 に実ファイルとして保存します（6.0.9）。**HDD0（LocalStorage）** は容量が足りないので、このリポジトリの `media/htmlOS.mp3`（GitHub Pages）から読み込みます（再生にはインターネット接続が必要です）
 
 ### 6.0.6 の修正
 

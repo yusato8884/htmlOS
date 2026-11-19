@@ -192,21 +192,38 @@
   //   曲のデータは約 5MB あり LocalStorage に入らないので、ファイルの中身は配布元（GitHub Pages）の media/htmlOS.mp3 への URL にしている
   const MUSIC_DIR = '/usr/share/music/htmlOS';
   const SONG_LYRICS = "真っ黒な画面に 白いタグが灯る\nブラウザの中で 小さな宇宙が起動する\nLocalStorageに刻んだ 僕の記憶\n電源を落としても ここにまだ残ってる\n\nBIOSを抜けて カーネルが目を覚ます\n一秒だけの静けさのあと\n\nHello, htmlOS\nタグの海から生まれた世界\nHello, htmlOS\nひとつのファイルに 夢を詰め込んで\nSirius, Vega, Altair, Deneb\n星の名前で 進化してく\nブラウザは背骨 あとは全部 僕のもの\n\njshに打ち込む 一行のコマンド\nsudoで開く扉 rootだけの領域\n指先で窓がスナップする\n仮想デスクトップ 八つの空\n\nログアウトなんて いらない\nユーザーを切り替えて そのまま続きへ\n\nHello, htmlOS\nタグの海から生まれた世界\nHello, htmlOS\nひとつのファイルに 夢を詰め込んで\nSirius, Vega, Altair, Deneb\n星の名前で 進化してく\nブラウザは背骨 あとは全部 僕のもの\n\n眠りにつくときも 全部そのまま\nハイバネートの闇の中で\n目覚めたらまた 同じ画面\nずっと待ってたよ おかえり\n\nHello, htmlOS\nここが僕の 動き出す未来\nHello, htmlOS\nどこまでも広がる 小さな宇宙\nSirius, Vega, Altair, Deneb\n星をたどって 次の空へ\nブラウザの中で 僕らは どこへでも行ける\n\nshutdown -h now\n...See you, htmlOS\n";
-  const SONG_CREDIT = "htmlOS（テーマソング）\n\n作曲・歌: Suno で作成\n作詞: Claude Sonnet 5.5\n\nhtmlOS に最初から入っている曲です（htmlOS 6.0.7 から）。\nhPlayer で htmlOS.mp3 を開くと、歌詞（lyrics.txt）も一緒に表示されます。\n曲のデータは、htmlOS を配っている場所の media/htmlOS.mp3 から読み込みます（インターネットにつながっていないと再生できません）。\n";
+  const SONG_CREDIT = "htmlOS（テーマソング）\n\n作曲・歌: Suno で作成\n作詞: Claude Sonnet 5.5\n\nhtmlOS に最初から入っている曲です（htmlOS 6.0.7 から）。\nhPlayer で htmlOS.mp3 を開くと、歌詞（lyrics.txt）も一緒に表示されます。\nHDD1（PC のフォルダ）にインストールした htmlOS では、曲のデータを HDD1 に保存します（最初の起動で読み込みます）。\nHDD0（LocalStorage）では容量が足りないため、配布元の media/htmlOS.mp3 から読み込みます（インターネットにつながっていないと再生できません）。\n";
   function songURL() {
     try { if (/^https?:$/.test(location.protocol)) return new URL('media/htmlOS.mp3', location.href).href; } catch (e) { /* 下へ */ }
     return 'https://yusato8884.github.io/htmlOS/media/htmlOS.mp3';
   }
+  //   6.0.9: HDD1（PC のフォルダ）から起動しているときは、曲のデータを読み込んでローカル（HDD1 の実ファイル）に保存する。
+  //   HDD0（LocalStorage）は容量が足りないので、これまでどおりオンラインの曲を指すだけ
+  const SONG = MUSIC_DIR + '/htmlOS.mp3';
+  const songLocal = () => { try { const n = fs.stat(SONG); return !!(n && /^data:audio\//.test(n.c || '')); } catch (e) { return false; } };
+  let fetching = false;
+  function fetchSong() {
+    if (fetching || !OS.store.disk || songLocal()) return;
+    fetching = true;
+    const log = m => { if (OS.journal) { try { OS.journal.log('htui', m); } catch (e) { /* 無視 */ } } };
+    fetch(songURL()).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.blob(); })
+      .then(b => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).replace(/^data:[^;,]*/, 'data:audio/mpeg')); fr.onerror = () => rej(fr.error); fr.readAsDataURL(b); }))
+      .then(d => { fs.write(SONG, d, { bin: true }); log('テーマソングを HDD1 に保存しました（' + SONG + '）'); })
+      .catch(e => log('テーマソングを HDD1 に保存できませんでした（' + e.message + '）。次に起動したときにもう一度試します'))
+      .then(() => { fetching = false; });
+  }
   function installMusic() {
     const stamp = MUSIC_DIR + '/.version', want = (OS.version || '') + '/' + songURL();
-    try { if (fs.read(stamp) === want) return; } catch (e) { /* まだない */ }
+    let done = false; try { done = fs.read(stamp) === want; } catch (e) { /* まだない */ }
+    if (done) { fetchSong(); return; }
     try {
       fs.mkdir(MUSIC_DIR, { parents: true });
-      fs.write(MUSIC_DIR + '/htmlOS.mp3', songURL(), { bin: true });
+      if (!songLocal()) fs.write(SONG, songURL(), { bin: true }); // ローカルに保存してあれば、そのまま使う
       fs.write(MUSIC_DIR + '/lyrics.txt', SONG_LYRICS);
       fs.write(MUSIC_DIR + '/README.txt', SONG_CREDIT);
       fs.write(stamp, want);
     } catch (e) { /* 書けなくても続ける */ }
+    fetchSong();
   }
   // ユーザーの ~/Music に、同梱の曲のフォルダへのリンクを置く（一度だけ。消したら作り直さない）
   function linkMusic(user) {
