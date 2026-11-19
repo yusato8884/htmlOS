@@ -22,15 +22,16 @@
 
       function guess(name) { const k = OS.fs.kind(name.split(/[?#]/)[0]); return MEDIA.includes(k) ? k : 'video'; }
       function release() { if (objUrl) { URL.revokeObjectURL(objUrl); objUrl = null; } stage.querySelectorAll('audio,video').forEach(m => { try { m.pause(); } catch (e) { /* 無視 */ } }); }
-      function show(kind, src, label, from) {
+      function show(kind, src, label, from, lyr) {
         stage.textContent = '';
         const fail = () => { stage.textContent = ''; stage.append(h('p', { class: 'hp-note' }, label + ' を再生できませんでした。このブラウザが対応していない形式か、読み込めない場所にあります。')); };
         let el;
         if (kind === 'image') el = h('img', { src: src, alt: label });
-        else if (kind === 'audio') { el = h('audio', { src: src, controls: true }); stage.append(h('div', { class: 'hp-disc' }, OS.icon('audio', 40)), h('div', null, label)); }
+        else if (kind === 'audio') { el = h('audio', { src: src, controls: true }); if (!lyr) stage.append(h('div', { class: 'hp-disc' }, OS.icon('audio', 40))); stage.append(h('div', null, label)); }
         else el = h('video', { src: src, controls: true });
         el.addEventListener('error', fail);
         stage.append(el);
+        if (lyr && kind === 'audio') stage.append(h('pre', { class: 'hp-lyrics', 'aria-label': '歌詞' }, lyr));
         info.textContent = label + ' ・ ' + from;
         win.setTitle(label + ' — hPlayer');
         bPrev.disabled = bNext.disabled = !cur;
@@ -42,7 +43,12 @@
           const k = fsx.kind(p);
           if (!MEDIA.includes(k)) throw new Error(path.base(p) + ' は画像・音声・動画ではありません');
           release(); cur = p;
-          show(k, fsx.dataURL(p), path.base(p), 'hFS: ' + p);
+          let lyr = null;
+          if (k === 'audio') {
+            const d = path.dir(p), stem = path.base(p).replace(/\.[^.]+$/, '');
+            for (const n of [stem + '.txt', stem + '.lrc', 'lyrics.txt']) { try { const q = path.join(d, n); if (fsx.exists(q)) { lyr = fsx.read(q).replace(/^\[\d+:[\d.]+\]/gm, ''); break; } } catch (e) { /* 読めない */ } }
+          }
+          show(k, fsx.dataURL(p), path.base(p), 'hFS: ' + p, lyr);
         } catch (e) { ui.alert(e.message); }
       }
       pc.addEventListener('change', () => {

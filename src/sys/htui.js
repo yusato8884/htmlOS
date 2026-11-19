@@ -188,6 +188,33 @@
     });
     try { fs.write(stamp, want); } catch (e) { /* 無視 */ }
   }
+  // ---- 同梱の曲（6.0.7）: /usr/share/music/htmlOS/ に htmlOS.mp3・歌詞・クレジットを置く。
+  //   曲のデータは約 5MB あり LocalStorage に入らないので、ファイルの中身は配布元（GitHub Pages）の media/htmlOS.mp3 への URL にしている
+  const MUSIC_DIR = '/usr/share/music/htmlOS';
+  const SONG_LYRICS = "[Intro]\n(soft vinyl crackle, mellow keys)\n\n[Verse 1]\n真っ黒な画面に 白いタグが灯る\nブラウザの中で 小さな宇宙が起動する\nローカルストレージに刻んだ 僕の記憶\n電源を落としても ここにまだ残ってる\n\n[Pre-Chorus]\nバイオスを抜けて カーネルが目を覚ます\n一秒だけの静けさのあと\n\n[Chorus]\nHello, エイチティーエムエル オーエス\nタグの海から生まれた世界\nHello, エイチティーエムエル オーエス\nひとつのファイルに 夢を詰め込んで\nSirius, Vega, Altair, Deneb\n星の名前で 進化してく\nブラウザは背骨 あとは全部 僕のもの\n\n[Verse 2]\nジェイシェルに打ち込む 一行のコマンド\nスードで開く扉 ルートだけの領域\n指先で窓がスナップする\n仮想デスクトップ 八つの空\n\n[Pre-Chorus]\nログアウトなんて いらない\nユーザーを切り替えて そのまま続きへ\n\n[Chorus]\nHello, エイチティーエムエル オーエス\nタグの海から生まれた世界\nHello, エイチティーエムエル オーエス\nひとつのファイルに 夢を詰め込んで\nSirius, Vega, Altair, Deneb\n星の名前で 進化してく\nブラウザは背骨 あとは全部 僕のもの\n\n[Bridge]\n(quiet, minimal keys)\n眠りにつくときも 全部そのまま\nハイバネートの闇の中で\n目覚めたらまた 同じ画面\nずっと待ってたよ おかえり\n\n[Final Chorus]\n(slightly fuller, warm)\nHello, エイチティーエムエル オーエス\nここが僕の 動き出す未来\nHello, エイチティーエムエル オーエス\nどこまでも広がる 小さな宇宙\nSirius, Vega, Altair, Deneb\n星をたどって 次の空へ\nブラウザの中で 僕らは どこへでも行ける\n\n[Outro]\n(fade out)\nshutdown h now\n...See you, エイチティーエムエル オーエス\n";
+  const SONG_CREDIT = "htmlOS（テーマソング）\n\n作曲・歌: Suno で作成\n作詞: Claude Sonnet 5.5\n\nhtmlOS に最初から入っている曲です（htmlOS 6.0.7 から）。\nhPlayer で htmlOS.mp3 を開くと、歌詞（lyrics.txt）も一緒に表示されます。\n曲のデータは、htmlOS を配っている場所の media/htmlOS.mp3 から読み込みます（インターネットにつながっていないと再生できません）。\n";
+  function songURL() {
+    try { if (/^https?:$/.test(location.protocol)) return new URL('media/htmlOS.mp3', location.href).href; } catch (e) { /* 下へ */ }
+    return 'https://yusato8884.github.io/htmlOS/media/htmlOS.mp3';
+  }
+  function installMusic() {
+    const stamp = MUSIC_DIR + '/.version', want = (OS.version || '') + '/' + songURL();
+    try { if (fs.read(stamp) === want) return; } catch (e) { /* まだない */ }
+    try {
+      fs.mkdir(MUSIC_DIR, { parents: true });
+      fs.write(MUSIC_DIR + '/htmlOS.mp3', songURL(), { bin: true });
+      fs.write(MUSIC_DIR + '/lyrics.txt', SONG_LYRICS);
+      fs.write(MUSIC_DIR + '/README.txt', SONG_CREDIT);
+      fs.write(stamp, want);
+    } catch (e) { /* 書けなくても続ける */ }
+  }
+  // ユーザーの ~/Music に、同梱の曲のフォルダへのリンクを置く（一度だけ。消したら作り直さない）
+  function linkMusic(user) {
+    const home = users.home(user), link = home + '/Music/htmlOS';
+    if (htui.prefs.musicLinked) return;
+    try { if (fs.isDir(home + '/Music') && !fs.exists(link) && !fs.isLink(link)) fs.symlink(MUSIC_DIR, link, { owner: user }); } catch (e) { /* 作れなくてもよい */ }
+    htui.setPrefs({ musicLinked: true });
+  }
   const fileCache = new Map();
   function wallFileCss(p) {
     const st = fs.stat(p); if (!st || st.t !== 'f') return null;
@@ -240,7 +267,7 @@
   htui.start = function (user, sid) {
     if (htui.running) return false;
     htui.running = true;
-    installWallpapers();
+    installWallpapers(); installMusic();
     htui.el = h('div', { id: 'htui' });
     OS.root.append(htui.el);
     document.addEventListener('keydown', hotkeys); document.addEventListener('keyup', keyUp); document.addEventListener('contextmenu', onContext); window.addEventListener('blur', altTabEnd);
@@ -437,6 +464,7 @@
     htui.shell = sh; htui.sessionId = sh.id;
     htui.el.textContent = ''; htui.el.className = 'desktop de-' + sh.id;
     htui.prefs = loadPrefs(); applyPrefs();
+    linkMusic(user);
     htui.wsReset();
     sh.build(kit);
     if (!htui.desk) kit.desk(false, true);
