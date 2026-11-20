@@ -1857,6 +1857,10 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       // HDD1（PC のフォルダ）。HDD1 から起動しているときは / そのものなので出さない
       const hddOk = OS.hdd.supported && !OS.hdd.root, inHdd = p => p === OS.hdd.at || p.startsWith(OS.hdd.at + '/');
       if (hddOk) places.splice(7, 0, ['HDD1', OS.hdd.at, 'drive']);
+      // 7.0: HDD3（データ置き場としてつないでいるとき）と RAID（md0）
+      let at = hddOk ? 8 : 7;
+      if (OS.hdd3 && OS.hdd3.mounted) places.splice(at++, 0, ['HDD3', OS.hdd3.at, 'drive']);
+      if (OS.raid && OS.raid.active) places.splice(at++, 0, ['RAID', OS.raid.at, 'raid']);
       const placeBtns = places.map(p => { const b = h('button', { class: 'hf-place', type: 'button', title: p[1], onclick: () => go(p[1]) }, OS.icon(p[2], 16), h('span', null, p[0])); side.append(b); return b; });
 
       const err = e => ui.alert(e.message);
@@ -2245,6 +2249,64 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
               } }, '接続テスト')),
             res);
         }],
+        // ストレージ（7.0）: HDD1・HDD2・HDD3 と RAID
+        storage: ['ストレージ', 'drive', () => {
+          const admin = !!me().admin, R = OS.raid, S = OS.storage, u = OS.fs.usage();
+          const busy = async (b, fn) => { b.disabled = true; try { await fn(); } catch (e) { if (e.name !== 'AbortError') err(e); } finally { b.disabled = false; if (win.curPage === 'storage') show('storage'); } };
+          const btn = (label, fn, o) => { const b = h('button', { class: 'btn' + (o && o.primary ? ' primary' : '') + (o && o.danger ? ' danger' : ''), type: 'button', id: o && o.id, disabled: o && o.disabled, onclick: () => busy(b, fn) }, label); return b; };
+          const card = (icon, title, sub, ...btns) => h('div', { class: 'st-card st-drive' }, OS.icon(icon, 22), h('div', { class: 'who' }, h('b', null, title), h('small', null, sub)), ...btns);
+          const drive = d => d.root ? 'ここから起動しています（/）' : d.mounted ? d.at + ' に接続中（フォルダ「' + d.name + '」）' : d.waiting ? '許可を待っています（フォルダ「' + d.waiting + '」）' : '未接続';
+          page.append(h('h2', null, 'ストレージ'),
+            h('h3', null, 'ドライブ'),
+            h('div', { class: 'st-list' },
+              card('drive', 'HDD2（IndexedDB）', (OS.store.idb ? 'システムのドライブ（/）・' + fmtSize(u.used) + ' / ' + fmtSize(u.total) : 'このブラウザの IndexedDB') + '。RAID のメンバーにもなれます'),
+              card('drive', 'HDD1（PC のフォルダ）', OS.hdd.supported ? drive(OS.hdd) : 'このブラウザでは使えません',
+                OS.hdd.supported && !OS.hdd.root ? (OS.hdd.mounted ? btn('切り離す', () => OS.hdd.unmount()) : btn('接続', () => OS.hdd.mount(false))) : null),
+              h('div', { id: 'st-hdd3' }, card('drive', 'HDD3（PC のフォルダ）', !OS.hdd3.supported ? 'このブラウザでは使えません' : S.hdd3Use() === 'raid' ? 'RAID 用' + (OS.hdd3.waiting ? '（許可待ち）' : '') : drive(OS.hdd3),
+                ...(!OS.hdd3.supported ? [] : [
+                  S.hdd3Use() === 'data' && !OS.hdd3.mounted && OS.hdd3.waiting ? btn('接続', () => OS.hdd3.mount(false)) : null,
+                  S.hdd3Use() === 'data' && OS.hdd3.mounted ? btn('切り離す', () => OS.hdd3.unmount()) : null,
+                  btn('セットアップ…', setupHdd3, { id: 'st-hdd3-setup', disabled: !admin })])))),
+            h('p', { class: 'st-note' }, 'HDD3 は、HDD1 とは別の PC のフォルダです。「データ置き場」にすると ' + OS.hdd3.at + ' に、「RAID 用」にすると RAID5 などのメンバーになります。'),
+            h('h3', null, 'RAID（md0）'),
+            raidBox(),
+            adminNote());
+          async function setupHdd3() {
+            const use = await ui.modal({ title: 'HDD3 のセットアップ', body: h('div', null, h('p', null, 'HDD3 にする PC のフォルダを選びます（HDD1 とは別のフォルダ）。何に使いますか？'),
+              h('p', { class: 'st-note' }, 'データ置き場: ' + OS.hdd3.at + ' に接続して、ふつうのファイル置き場にします。\nRAID 用: RAID（RAID5 なら HDD1・HDD2・HDD3 の 3 台）のメンバーにします。')),
+              buttons: [{ label: 'キャンセル', cancel: true, value: null }, { label: 'RAID 用', value: 'raid' }, { label: 'データ置き場', primary: true, value: 'data' }] });
+            if (!use) return;
+            const name = await S.setupHdd3(use);
+            ui.toast('HDD3 にフォルダ「' + name + '」を設定しました');
+          }
+          function raidBox() {
+            const st = R.status();
+            if (st) {
+              return h('div', { class: 'st-raid', id: 'st-raid' },
+                card('raid', 'md0 — ' + R.levels[st.level].name, R.stateName(st.state) + (st.reason ? '（' + st.reason + '）' : '') + ' ・ ' + st.members.map(m => m.label + (m.ok ? '' : '（欠け）')).join('・') + (st.files != null ? ' ・ ' + R.at + ' ・ 使用 ' + fmtSize(st.used) : ''),
+                  st.state === 'waiting' ? btn('組み立てる', () => R.assemble({ ask: true }), { primary: true, id: 'st-raid-asm', disabled: !admin }) : null,
+                  st.state === 'degraded' ? btn('再構築', () => R.rebuild({ ask: true }), { primary: true, disabled: !admin }) : null,
+                  st.state !== 'waiting' ? btn('止める', () => R.stop(), { disabled: !admin }) : null,
+                  btn('削除…', async () => { if (await ui.confirm('RAID（md0）を削除して、各ドライブの RAID のデータ（' + R.at + ' の中身）を消します。元に戻せません。', { ok: '削除', danger: true, title: 'RAID を削除' })) await R.destroy(); }, { danger: true, disabled: !admin })),
+                h('p', { class: 'st-note' }, '容量: ' + R.capacityNote(st.level, st.members.length) + '。' + (st.level === 'raid0' ? '1 台でも使えなくなると読めません。' : st.level === 'raid1' ? '1 台残っていれば読めます。' : '1 台欠けても読め、戻ってきたら再構築します。')));
+            }
+            const sel = { level: 'raid1', devs: { hdd1: false, hdd2: true, hdd3: false } }, box = h('div', { class: 'st-raid', id: 'st-raid' });
+            const draw = av => {
+              box.textContent = '';
+              const L = R.levels[sel.level], picked = Object.keys(sel.devs).filter(d => sel.devs[d] && av[d]);
+              const why = sel.level === 'raid5' && !av.hdd3 ? 'RAID5 は HDD3 をセットアップ（RAID 用）してから使えます' : picked.length < L.min ? L.min + ' 台以上選んでください' : sel.level === 'raid5' && picked.length !== 3 ? 'RAID5 は HDD1・HDD2・HDD3 の 3 台で作ります' : '';
+              box.append(
+                h('div', { class: 'st-opts' }, Object.keys(R.levels).map(k => h('label', { class: 'st-opt' }, h('input', { type: 'radio', name: 'st-raid-lv', id: 'st-raid-' + k, checked: sel.level === k, onchange: () => { sel.level = k; if (k === 'raid5') sel.devs = { hdd1: true, hdd2: true, hdd3: true }; draw(av); } }), R.levels[k].name))),
+                h('div', { class: 'st-opts' }, Object.keys(R.devs).map(d => h('label', { class: 'st-opt' + (av[d] ? '' : ' off') }, h('input', { type: 'checkbox', id: 'st-raid-' + d, checked: sel.devs[d] && av[d], disabled: !av[d], onchange: e => { sel.devs[d] = e.target.checked; draw(av); } }),
+                  R.devs[d] + (av[d] ? '' : d === 'hdd3' ? '（未セットアップ・RAID 用でない）' : '（未設定）')))),
+                h('p', { class: 'st-note' }, '容量: ' + R.capacityNote(sel.level, Math.max(picked.length, L.min)) + '。' + (why ? '' : '作ると ' + R.at + ' につながります。')),
+                why ? h('p', { class: 'st-note bad' }, why) : null,
+                h('div', { class: 'st-row' }, btn('RAID を作る', () => R.create(sel.level, picked, { ask: true }), { primary: true, id: 'st-raid-create', disabled: !admin || !!why })));
+            };
+            R.available().then(draw);
+            return box;
+          }
+        }],
         system: ['システム', 'gear', () => {
           const admin = !!me().admin, u = OS.fs.usage(), meta = window.BOOT.getMeta() || {};
           const d = ms => ms ? new Date(ms).toLocaleString('ja-JP') : '-';
@@ -2284,6 +2346,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       const btns = {};
       Object.keys(pages).forEach(k => { btns[k] = h('button', { class: 'hf-place', type: 'button', onclick: () => show(k) }, OS.icon(pages[k][1], 16), h('span', null, pages[k][0])); nav.append(btns[k]); });
       function show(k) {
+        win.curPage = k;
         page.textContent = '';
         Object.keys(btns).forEach(x => btns[x].classList.toggle('on', x === k));
         win.setTitle(pages[k][0] + ' — Settings');
@@ -2357,6 +2420,140 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       const timer = setInterval(() => { if (tab === 'proc' && !win.el.classList.contains('hidden')) procs(); }, 1000);
       win.onDispose = () => clearInterval(timer);
       render();
+      return win;
+    }
+  });
+})();
+</script>
+<script type="text/x-htmlos" data-path="/sys/apps/71-hcron.js">
+/* hCron — cron のジョブを GUI で見る・追加する・直す（htmlOS 7.0）。中身は OS.cron（/sys/init.js）と同じ /var/spool/cron/<ユーザー>
+   jsh の crontab -e からも開く */
+(function () {
+  const OS = window.OS, h = OS.h;
+  const W = ['日', '月', '火', '水', '木', '金', '土'];
+  const fmt = t => t ? new Date(t).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit' }) : '-';
+
+  OS.registerApp({
+    id: 'hcron', name: 'hCron', icon: 'clock', color: '#9141ac', desc: '決まった時刻にコマンドを実行する（cron）',
+    launch(arg) {
+      const ex = OS.htui.wins.find(w => w.app === 'hcron');
+      if (ex) { ex.focus(); return ex; }
+      const ui = OS.ui, C = OS.cron;
+      const win = OS.htui.open({ title: 'hCron', icon: 'clock', w: 760, h: 500, app: 'hcron' });
+      const me = OS.htui.user, isRoot = OS.users.isRoot(me);
+      let who = typeof arg === 'string' && (arg === me || isRoot) ? arg : me;
+      const list = h('div', { class: 'cr-list' }), logBox = h('pre', { class: 'cr-log', id: 'cr-log' }), stat = h('span', { class: 'cr-stat' });
+      const userSel = isRoot ? h('select', { class: 'inp cr-user', 'aria-label': 'ユーザー', onchange: e => { who = e.target.value; render(); } },
+        OS.users.list().map(u => h('option', { value: u.name, selected: u.name === who }, u.name))) : null;
+      win.body.append(h('div', { class: 'cr' },
+        h('div', { class: 'cr-bar' },
+          h('button', { class: 'btn primary', type: 'button', id: 'cr-add', onclick: () => edit(null) }, OS.icon('plus', 16), 'ジョブを追加'),
+          h('button', { class: 'btn', type: 'button', id: 'cr-text', onclick: editText }, 'テキストで編集'),
+          userSel ? h('label', { class: 'cr-who' }, 'ユーザー ', userSel) : h('span', { class: 'cr-who' }, me + ' のジョブ'),
+          stat),
+        list,
+        h('div', { class: 'cr-logh' }, '最近の実行（cron.service のログ）'),
+        logBox));
+      if (!C) { list.textContent = 'cron がありません'; return win; }
+
+      function svc() { try { return OS.init.state('cron.service').active; } catch (e) { return '?'; } }
+      function render() {
+        list.textContent = '';
+        const jobs = C.jobs(who), s = svc();
+        stat.textContent = 'cron.service: ' + (s === 'active' ? '動いています' : s);
+        stat.classList.toggle('bad', s !== 'active');
+        if (!jobs.length) { list.append(h('p', { class: 'cr-empty' }, 'ジョブはありません。「ジョブを追加」で、決まった時刻に jsh のコマンドを実行できます。')); }
+        else list.append(h('table', { class: 'tbl cr-tbl' },
+          h('thead', null, h('tr', null, h('th', null, 'いつ'), h('th', null, 'コマンド'), h('th', null, '次の実行'), h('th', null, '前回'), h('th', null, ''))),
+          h('tbody', null, jobs.map(j => {
+            if (j.error) return h('tr', { class: 'cr-err' }, h('td', { colspan: 4 }, j.line + ' 行目: ' + j.error + '（' + j.text + '）'), h('td', null, h('button', { class: 'btn small danger', type: 'button', onclick: () => del(j) }, '削除')));
+            const last = C.last[who + ':' + j.line];
+            return h('tr', { 'data-line': j.line },
+              h('td', null, h('b', null, j.desc), h('small', null, j.spec)),
+              h('td', null, h('code', null, j.cmd)),
+              h('td', null, j.reboot ? '起動したとき' : fmt(j.next)),
+              h('td', null, last ? fmt(last.t) + (last.code ? '（失敗 ' + last.code + '）' : '（成功）') : '-'),
+              h('td', { class: 'num' },
+                h('button', { class: 'btn small', type: 'button', title: '今すぐ実行', onclick: async () => { await C.run(Object.assign({}, j, { user: who }), '（手動）'); ui.toast('実行しました: ' + j.cmd); render(); } }, '実行'), ' ',
+                h('button', { class: 'btn small', type: 'button', onclick: () => edit(j) }, '編集'), ' ',
+                h('button', { class: 'btn small danger', type: 'button', onclick: () => del(j) }, '削除')));
+          }))));
+        const L = OS.journal ? OS.journal.entries({ unit: 'cron.service', n: 40 }) : [];
+        logBox.textContent = L.length ? L.map(e => OS.journal.format(e)).join('\n') : '（まだありません）';
+        logBox.scrollTop = logBox.scrollHeight;
+      }
+      const save = text => { try { C.write(who, text); render(); return true; } catch (e) { ui.alert(e.message); return false; } };
+      function setLine(n, line) {
+        const l = C.read(who).split('\n'); if (l[l.length - 1] === '') l.pop();
+        if (n) l[n - 1] = line; else l.push(line);
+        return save(l.join('\n'));
+      }
+      async function del(j) {
+        if (!(await ui.confirm('このジョブを消しますか？\n' + j.text, { ok: '削除', danger: true, title: 'hCron' }))) return;
+        const l = C.read(who).split('\n'); l.splice(j.line - 1, 1); save(l.join('\n'));
+      }
+      // 追加・編集。よく使う形はフォームで、それ以外は「詳しく指定」で 5 つの欄を直接書く
+      async function edit(j) {
+        let kind = 'daily', m = 0, hh = 9, dw = 1, dm = 1, every = 5, custom = '* * * * *';
+        if (j) {
+          const s = j.spec.split(/\s+/);
+          if (j.reboot) kind = 'reboot';
+          else if (j.spec === '* * * * *') kind = 'minute';
+          else if (/^\*\/\d+$/.test(s[0]) && s.slice(1).join(' ') === '* * * *') { kind = 'every'; every = +s[0].slice(2); }
+          else if (/^\d+$/.test(s[0]) && s.slice(1).join(' ') === '* * * *') { kind = 'hourly'; m = +s[0]; }
+          else if (/^\d+$/.test(s[0]) && /^\d+$/.test(s[1]) && s.slice(2).join(' ') === '* * *') { kind = 'daily'; m = +s[0]; hh = +s[1]; }
+          else if (/^\d+$/.test(s[0]) && /^\d+$/.test(s[1]) && s[2] === '*' && s[3] === '*' && /^\d$/.test(s[4])) { kind = 'weekly'; m = +s[0]; hh = +s[1]; dw = +s[4] % 7; }
+          else if (/^\d+$/.test(s[0]) && /^\d+$/.test(s[1]) && /^\d+$/.test(s[2]) && s[3] === '*' && s[4] === '*') { kind = 'monthly'; m = +s[0]; hh = +s[1]; dm = +s[2]; }
+          else { kind = 'custom'; custom = j.spec; }
+        }
+        const KINDS = [['minute', '毎分'], ['every', '○分ごと'], ['hourly', '毎時'], ['daily', '毎日'], ['weekly', '毎週'], ['monthly', '毎月'], ['reboot', '起動したとき'], ['custom', '詳しく指定（cron の書き方）']];
+        const kSel = h('select', { class: 'inp', id: 'cr-kind' }, KINDS.map(k => h('option', { value: k[0], selected: k[0] === kind }, k[1])));
+        const num = (id, v, lo, hi) => h('input', { class: 'inp cr-num', id: id, type: 'number', min: lo, max: hi, value: v });
+        const iEvery = num('cr-every', every, 1, 59), iM = num('cr-m', m, 0, 59), iH = num('cr-h', hh, 0, 23), iDm = num('cr-dm', dm, 1, 31);
+        const iDw = h('select', { class: 'inp', id: 'cr-dw' }, W.map((x, i) => h('option', { value: i, selected: i === dw }, x + '曜日')));
+        const iCustom = h('input', { class: 'inp', id: 'cr-spec', value: custom, spellcheck: 'false', placeholder: '分 時 日 月 曜日' });
+        const iCmd = h('input', { class: 'inp', id: 'cr-cmd', value: j ? j.cmd : '', spellcheck: 'false', placeholder: '例: echo こんにちは >> ~/cron.log' });
+        const preview = h('p', { class: 'cr-prev', id: 'cr-prev' });
+        const row = (label, ...els) => h('label', { class: 'cr-f' }, h('span', null, label), ...els);
+        const rows = {
+          every: row('間隔', iEvery, '分ごと'), m: row('分', iM), h: row('時', iH), dw: row('曜日', iDw), dm: row('日', iDm), custom: row('時刻の指定', iCustom)
+        };
+        const spec = () => {
+          const k = kSel.value, M = +iM.value | 0, H = +iH.value | 0;
+          return k === 'minute' ? '* * * * *' : k === 'every' ? '*/' + Math.max(1, +iEvery.value | 0) + ' * * * *' : k === 'hourly' ? M + ' * * * *'
+            : k === 'daily' ? M + ' ' + H + ' * * *' : k === 'weekly' ? M + ' ' + H + ' * * ' + iDw.value : k === 'monthly' ? M + ' ' + H + ' ' + (+iDm.value | 0) + ' * *'
+            : k === 'reboot' ? '@reboot' : iCustom.value.trim();
+        };
+        const upd = () => {
+          const k = kSel.value, show = { every: k === 'every', m: /hourly|daily|weekly|monthly/.test(k), h: /daily|weekly|monthly/.test(k), dw: k === 'weekly', dm: k === 'monthly', custom: k === 'custom' };
+          Object.keys(rows).forEach(x => { rows[x].hidden = !show[x]; });
+          try { const p = C.parse(spec() + ' x'); preview.textContent = p.desc || C.describe(p) + (p.reboot ? '' : '　次の実行: ' + fmt(C.next(p))); preview.classList.remove('bad'); }
+          catch (e) { preview.textContent = e.message; preview.classList.add('bad'); }
+        };
+        [kSel, iEvery, iM, iH, iDw, iDm, iCustom].forEach(x => x.addEventListener('input', upd));
+        upd();
+        const body = h('div', { class: 'cr-form' }, row('いつ', kSel), ...Object.values(rows), row('コマンド（jsh）', iCmd), preview,
+          h('small', null, 'コマンドは ' + who + ' として、画面なしの jsh で実行します。出力は hjournal（cron.service）に残ります。'));
+        const ok = await ui.modal({ title: j ? 'ジョブを編集' : 'ジョブを追加', width: 460, body: body, onOpen: () => iCmd.focus(),
+          buttons: [{ label: 'キャンセル', cancel: true, value: false }, { label: j ? '保存' : '追加', primary: true, value: () => {
+            if (!iCmd.value.trim()) { preview.textContent = 'コマンドを入れてください'; preview.classList.add('bad'); return ui.KEEP; }
+            const line = spec() + ' ' + iCmd.value.trim();
+            try { C.parse(line); } catch (e) { preview.textContent = e.message; preview.classList.add('bad'); return ui.KEEP; }
+            return line;
+          } }] });
+        if (ok) setLine(j ? j.line : 0, ok);
+      }
+      async function editText() {
+        const ta = h('textarea', { class: 'inp cr-ta', id: 'cr-ta', spellcheck: 'false' }, C.read(who));
+        const err = h('p', { class: 'cr-prev bad' });
+        const r = await ui.modal({ title: who + ' の crontab', width: 560, body: h('div', { class: 'cr-form' }, h('small', null, '1 行に 1 つ: 分 時 日 月 曜日 コマンド（# でコメント、@daily などの書き方も使えます）'), ta, err),
+          buttons: [{ label: 'キャンセル', cancel: true, value: null }, { label: '保存', primary: true, value: () => { try { C.check(ta.value); return ta.value; } catch (e) { err.textContent = e.message; return ui.KEEP; } } }] });
+        if (r != null) save(r);
+      }
+      render();
+      const off = OS.journal ? OS.journal.watch(e => { if (e.unit === 'cron.service') setTimeout(render, 50); }) : null;
+      const t = setInterval(render, 30000);
+      win.onDispose = () => { clearInterval(t); if (off) off(); };
       return win;
     }
   });
@@ -3952,6 +4149,14 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   const scatter = (n, seed, fn) => { let s = seed, out = ''; const r = () => (s = (s * 9301 + 49297) % 233280) / 233280; for (let i = 0; i < n; i++) out += fn(Math.round(r() * 1600), Math.round(r() * 1000), r(), r(), r()); return out; };
   // 針葉樹の並んだ稜線（y: 根元の高さ, amp: 木の高さ）
   const trees = (y, amp, seed) => { let s = seed, d = 'M0 ' + (y + 40); const r = () => (s = (s * 9301 + 49297) % 233280) / 233280; for (let x = 0; x < 1600; x += 34) { const w = 26 + r() * 20; d += 'L' + Math.round(x) + ' ' + y + 'L' + Math.round(x + w / 2) + ' ' + Math.round(y - amp * (.55 + r() * .45)) + 'L' + Math.round(x + w) + ' ' + y; } return d + 'L1600 ' + y + 'V1000H0Z'; };
+  // 7.0 の壁紙用。決まった並びの乱数（seed から毎回同じ列）
+  const rnd = seed => { let s = seed; return () => (s = (s * 9301 + 49297) % 233280) / 233280; };
+  // 北極星のまわりを回る星の軌跡（中心 cx, cy）
+  const trails = (cx, cy, n, seed) => { const r = rnd(seed); let out = ''; for (let i = 0; i < n; i++) { const R = 40 + r() * 1100, a = r() * 6.283, d = .12 + r() * .35, x1 = cx + R * Math.cos(a), y1 = cy + R * Math.sin(a), x2 = cx + R * Math.cos(a + d), y2 = cy + R * Math.sin(a + d); out += "<path d='M" + x1.toFixed(1) + ' ' + y1.toFixed(1) + 'A' + R.toFixed(1) + ' ' + R.toFixed(1) + ' 0 0 1 ' + x2.toFixed(1) + ' ' + y2.toFixed(1) + "' stroke='" + (r() > .7 ? '#ffd9a8' : r() > .5 ? '#b9d3ff' : '#e8eeff') + "' stroke-width='" + (r() * 1.6 + .5).toFixed(1) + "' opacity='" + (r() * .35 + .12).toFixed(2) + "'/>"; } return out; };
+  // カエデの葉（中心 0,0、だいたい半径 30）
+  const MAPLE = 'M0 -34.2L2.2 -30.9L4.2 -30.1L5 -23.6L6 -20.9L5.2 -14.3L6.7 -15.1L8.2 -15.4L12 -19.2L13.4 -18.5L16.9 -20.2L18.9 -19.6L23.8 -21.4L24.3 -19L26.6 -17.9L23.6 -13.6L23 -11.2L17.6 -7.1L16.2 -5.3L12.7 -3.2L18.7 -3.3L21.1 -2.2L27.6 -1L28.7 1L32.6 3.4L30.1 5.3L30 7.5L24.1 7.8L24 9.7L19.5 9.5L18.3 10.6L13.1 8.9L12.2 9.5L12.9 11.6L16.7 17.3L16.9 20.1L18.8 25.9L16.8 26.9L15.9 30L12.4 27.9L11.2 30.8L7.9 27.6L5.7 27L2.9 21L1.3 19L0 13L-1.3 19L-2.9 21L-5.7 27L-7.9 27.6L-11.2 30.8L-12.4 27.9L-15.9 30L-16.8 26.9L-18.8 25.9L-16.9 20.1L-16.7 17.3L-12.9 11.6L-12.2 9.5L-13.1 8.9L-18.3 10.6L-19.5 9.5L-24 9.7L-24.1 7.8L-30 7.5L-30.1 5.3L-32.6 3.4L-28.7 1L-27.6 -1L-21.1 -2.2L-18.7 -3.3L-12.7 -3.2L-16.2 -5.3L-17.6 -7.1L-23 -11.2L-23.6 -13.6L-26.6 -17.9L-24.3 -19L-23.8 -21.4L-18.9 -19.6L-16.9 -20.2L-13.4 -18.5L-12 -19.2L-8.2 -15.4L-6.7 -15.1L-5.2 -14.3L-6 -20.9L-5 -23.6L-4.2 -30.1L-2.2 -30.9ZM-1 6L1 6L2 30L-0.5 30Z';
+  // 夜の街のビル（明かりのついた窓つき）
+  const city = (base, hmin, hmax, col, win, seed) => { const r = rnd(seed); let out = '', x = 0; while (x < 1600) { const w = 50 + Math.round(r() * 90), ht = hmin + Math.round(r() * (hmax - hmin)); out += "<rect x='" + x + "' y='" + (base - ht) + "' width='" + (w - 4) + "' height='" + (ht + 400) + "' fill='" + col + "'/>"; if (win) for (let wy = base - ht + 14; wy < base - 10; wy += 22) for (let wx = x + 8; wx < x + w - 14; wx += 16) if (r() > .62) out += "<rect x='" + wx + "' y='" + wy + "' width='7' height='10' fill='" + (r() > .3 ? '#ffd88a' : '#9fd0ff') + "' opacity='" + (r() * .5 + .45).toFixed(2) + "'/>"; x += w; } return out; };
   // dir: 追加した htmlOS のバージョン（/usr/share/backgrounds/<dir>/<file>.svg に置く）
   const WALLPAPERS = [
     { name: 'ブルーム', dir: '2.0', file: 'bloom', css: svgWall(
@@ -4095,6 +4300,50 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       "<path d='M0 760L300 680L520 740L760 660L1000 740L1260 680L1600 760V1000H0Z' fill='#b9cbe2'/>" +
       "<path d='" + trees(800, 60, 13) + "' fill='#3c5a6e' opacity='.7'/>" +
       "<path d='M0 870L400 820L760 860L1120 810L1600 860V1000H0Z' fill='#f4f7fb'/>", '#d9e6f5') },
+    // ---- htmlOS 7.0（Polaris）で追加
+    { name: 'ポラリス（こぐま座）', dir: '7.0-Polaris', file: 'polaris', css: svgWall(
+      "<defs><radialGradient id='g' cx='.3' cy='.22' r='1.05'><stop offset='0' stop-color='#1d2a5c'/><stop offset='.5' stop-color='#0b1233'/><stop offset='1' stop-color='#03050e'/></radialGradient>" +
+      "<radialGradient id='p' cx='.5' cy='.5' r='.5'><stop offset='0' stop-color='#fff'/><stop offset='.1' stop-color='#fff6e2'/><stop offset='.32' stop-color='#ffe2a6' stop-opacity='.55'/><stop offset='1' stop-color='#ffc56b' stop-opacity='0'/></radialGradient>" +
+      "<linearGradient id='h' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#1b2c55' stop-opacity='0'/><stop offset='1' stop-color='#2c4a7a' stop-opacity='.55'/></linearGradient></defs>" +
+      "<rect width='1600' height='1000' fill='url(#g)'/><g fill='none' stroke-linecap='round'>" + trails(430, 210, 170, 71) + '</g>' + stars(160, 1000, 73) +
+      "<g stroke='#dfe8ff' stroke-width='1.7' opacity='.5' fill='none' stroke-linecap='round' stroke-linejoin='round'><path d='M430 210L525 296L612 352L700 424L752 514L912 470L866 378L700 424'/></g>" +
+      "<g fill='#f0f4ff'><circle cx='525' cy='296' r='3'/><circle cx='612' cy='352' r='3.2'/><circle cx='700' cy='424' r='3.4'/><circle cx='752' cy='514' r='3.2'/><circle cx='912' cy='470' r='4'/><circle cx='866' cy='378' r='4.4'/></g>" +
+      "<circle cx='430' cy='210' r='140' fill='url(#p)'/><g stroke='#fff' stroke-linecap='round' opacity='.9'><path d='M430 140V280M360 210H500' stroke-width='2'/><path d='M395 175L465 245M465 175L395 245' stroke-width='1' opacity='.5'/></g><circle cx='430' cy='210' r='7.5' fill='#fff'/>" +
+      "<rect y='700' width='1600' height='300' fill='url(#h)'/><path d='M0 880C200 840 380 870 560 850S900 800 1120 840S1440 830 1600 860V1000H0Z' fill='#050814'/>" +
+      "<path d='M0 940C320 910 620 950 960 925S1400 905 1600 935V1000H0Z' fill='#020309'/>", '#0b1233') },
+    { name: '富士山', dir: '7.0-Polaris', file: 'mt-fuji', css: svgWall(
+      "<defs><linearGradient id='g' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#25356e'/><stop offset='.38' stop-color='#9a6a9a'/><stop offset='.6' stop-color='#f3a487'/><stop offset='.72' stop-color='#ffd6a3'/><stop offset='.72' stop-color='#c99a9a'/><stop offset='1' stop-color='#3d4a7a'/></linearGradient>" +
+      "<linearGradient id='m' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#4a4f86'/><stop offset='1' stop-color='#232650'/></linearGradient>" +
+      "<linearGradient id='sn' x1='0' y1='0' x2='1' y2='0'><stop offset='0' stop-color='#ffe9e0'/><stop offset='.5' stop-color='#fff8f3'/><stop offset='1' stop-color='#c9c6e6'/></linearGradient>" +
+      "<filter id='s' x='-50%' y='-50%' width='200%' height='200%'><feGaussianBlur stdDeviation='22'/></filter>" +
+      "<path id='fj' d='M120 720C380 620 600 450 728 318L764 300L792 312L822 296L846 306L872 318C1000 450 1220 620 1480 720Z'/><clipPath id='c'><use href='#fj'/></clipPath></defs>" +
+      "<rect width='1600' height='1000' fill='url(#g)'/>" + stars(40, 250, 79) +
+      "<circle cx='1430' cy='560' r='150' fill='#ffcf8f' opacity='.5' filter='url(#s)'/><circle cx='1430' cy='566' r='42' fill='#fff1d4'/>" +
+      "<use href='#fj' fill='url(#m)'/><g clip-path='url(#c)'><path d='M600 300H1000V420L960 455L930 425L895 470L860 430L825 480L790 432L755 476L720 438L688 470L660 440L630 462L600 440Z' fill='url(#sn)'/>" +
+      "<path d='M800 300L786 420M840 300L846 420M760 320L740 425M870 320L892 415' stroke='#7c7fb0' stroke-width='5' opacity='.35'/></g>" +
+      "<g fill='#fff' opacity='.55' filter='url(#s)'><ellipse cx='300' cy='610' rx='260' ry='26'/><ellipse cx='1180' cy='560' rx='220' ry='20'/></g>" +
+      "<g opacity='.33' transform='translate(0 1440) scale(1 -1)'><use href='#fj' fill='url(#m)'/><g clip-path='url(#c)'><path d='M600 300H1000V420L960 455L930 425L895 470L860 430L825 480L790 432L755 476L720 438L688 470L660 440L630 462L600 440Z' fill='#fff'/></g></g>" +
+      "<g stroke='#fff' stroke-linecap='round' opacity='.35'><path d='M1340 740H1520M1370 772H1490M1400 805H1460' stroke-width='3'/></g>" +
+      "<path d='" + trees(905, 70, 83) + "' fill='#141733'/>", '#9a6a9a') },
+    { name: '紅葉', dir: '7.0-Polaris', file: 'momiji', css: svgWall(
+      "<defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='#fff3df'/><stop offset='.55' stop-color='#f9cf9b'/><stop offset='1' stop-color='#e8875a'/></linearGradient>" +
+      "<path id='lf' d='" + MAPLE + "'/><filter id='s' x='-50%' y='-50%' width='200%' height='200%'><feGaussianBlur stdDeviation='4'/></filter></defs>" +
+      "<rect width='1600' height='1000' fill='url(#g)'/>" +
+      "<path d='M0 90C220 140 360 200 520 300S760 420 900 470M300 168C320 250 300 320 260 380M640 360C700 340 760 300 800 250' stroke='#5a2e22' stroke-width='14' fill='none' stroke-linecap='round' opacity='.8'/>" +
+      scatter(80, 89, (x, y, r, a, o) => { const c = ['#d6342a', '#e85a1c', '#f29b1d', '#b8202b', '#f5c242'][Math.floor(o * 5)]; return "<use href='#lf' fill='" + c + "' opacity='" + (o * .5 + .5).toFixed(2) + "' transform='translate(" + x + ' ' + y + ') rotate(' + Math.round(a * 360) + ') scale(' + (r * 1.1 + .5).toFixed(2) + ")'" + (r < .2 ? " filter='url(#s)'" : '') + '/>'; }), '#f9cf9b') },
+    { name: '青海波', dir: '7.0-Polaris', file: 'seigaiha', css: svgWall(
+      "<defs><g id='w'>" + [60, 48, 36, 24, 12].map((R, i) => "<circle r='" + R + "' fill='" + (i % 2 ? '#f4f1e8' : '#1f3d73') + "' stroke='#f4f1e8' stroke-width='2.5'/>").join('') + '</g>' +
+      "<linearGradient id='o' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='#0b1a3a' stop-opacity='0'/><stop offset='1' stop-color='#0b1a3a' stop-opacity='.45'/></linearGradient></defs>" +
+      "<rect width='1600' height='1000' fill='#1f3d73'/>" + Array.from({ length: 36 }, (_, row) => Array.from({ length: 15 }, (_, k) => "<use href='#w' x='" + (k * 120 + (row % 2 ? 60 : 0)) + "' y='" + row * 30 + "'/>").join('')).join('') +
+      "<rect width='1600' height='1000' fill='url(#o)'/><circle cx='1180' cy='300' r='120' fill='#d9443a'/>", '#1f3d73') },
+    { name: '夜の街', dir: '7.0-Polaris', file: 'city-night', css: svgWall(
+      "<defs><linearGradient id='g' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#070b1e'/><stop offset='.6' stop-color='#1b1f4a'/><stop offset='1' stop-color='#5b3a6e'/></linearGradient>" +
+      "<linearGradient id='r' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#3a2a5a'/><stop offset='1' stop-color='#05060f'/></linearGradient>" +
+      "<filter id='s' x='-50%' y='-50%' width='200%' height='200%'><feGaussianBlur stdDeviation='30'/></filter></defs>" +
+      "<rect width='1600' height='1000' fill='url(#g)'/>" + stars(90, 480, 97) + "<circle cx='300' cy='180' r='48' fill='#fff6e0'/><circle cx='320' cy='168' r='44' fill='#0d1230'/>" +
+      "<rect y='560' width='1600' height='200' fill='#ff8fb0' opacity='.18' filter='url(#s)'/>" +
+      city(780, 120, 300, '#1a1838', false, 101) + city(800, 60, 220, '#0f0e24', true, 103) +
+      "<rect y='800' width='1600' height='200' fill='url(#r)'/><g opacity='.35'>" + scatter(60, 107, (x, y, r) => "<rect x='" + x + "' y='" + (810 + Math.round(y / 6)) + "' width='" + Math.round(10 + r * 40) + "' height='2' fill='#ffd88a'/>") + '</g>', '#1b1f4a') },
   ];
   // 壁紙の CSS。prefs.wallpaper が 'custom' なら、そのユーザーの ~/.config/wallpaper（画像の data: URL）を使う
   function wallCss(prefs, user) {
@@ -5869,8 +6118,71 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     leave(el);
     if (cancel !== true && list[i] && !list[i].closed) list[i].focus();
   }
+  // ---------- スクリーンショット（7.0）: Alt+Shift+5 か jsh の screenshot。~/Pictures/Screenshots に PNG で保存する
+  //   画面（#os-root）を複製して SVG の foreignObject に入れ、canvas に描いて PNG にする（ブラウザの画面共有の許可は要らない）。
+  //   canvas は画像に置き換え、入力欄の中身・スクロール位置も写す。iframe（hBrowser の中身など）と外部の画像は写らない
+  htui.screenshot = async function (o) {
+    o = o || {};
+    if (!htui.running || !htui.user) throw new Error('デスクトップが動いていません');
+    const root = OS.root, W = root.clientWidth || window.innerWidth, H = root.clientHeight || window.innerHeight, dpr = Math.min(2, window.devicePixelRatio || 1);
+    const clone = root.cloneNode(true), src = root.querySelectorAll('*'), dst = clone.querySelectorAll('*');
+    for (let i = 0; i < src.length; i++) {
+      const a = src[i], b = dst[i]; if (!b) continue;
+      const tag = a.tagName;
+      if (tag === 'CANVAS') {
+        let url = ''; try { url = a.toDataURL('image/png'); } catch (e) { /* 写せない canvas */ }
+        const img = document.createElement('img'); img.src = url; img.className = a.className; img.setAttribute('style', a.getAttribute('style') || '');
+        img.style.width = a.clientWidth + 'px'; img.style.height = a.clientHeight + 'px'; b.replaceWith(img); continue;
+      }
+      if (tag === 'IFRAME' || tag === 'VIDEO' || tag === 'OBJECT' || tag === 'EMBED') {
+        const d = document.createElement('div'); d.className = a.className; d.setAttribute('style', (a.getAttribute('style') || '') + ';background:#2b2d33');
+        d.style.width = a.clientWidth + 'px'; d.style.height = a.clientHeight + 'px'; b.replaceWith(d); continue;
+      }
+      if (tag === 'SCRIPT') { b.remove(); continue; }
+      if (tag === 'INPUT') { if (a.type === 'checkbox' || a.type === 'radio') { if (a.checked) b.setAttribute('checked', ''); else b.removeAttribute('checked'); } else if (a.type !== 'file' && a.type !== 'password') b.setAttribute('value', a.value); else if (a.type === 'password') b.setAttribute('value', a.value.replace(/./g, '•')); }
+      else if (tag === 'TEXTAREA') b.textContent = a.value;
+      else if (tag === 'SELECT') Array.prototype.forEach.call(b.options, (op, k) => { if (k === a.selectedIndex) op.setAttribute('selected', ''); else op.removeAttribute('selected'); });
+      else if (tag === 'IMG' && a.src && !/^(data|blob):/.test(a.src)) b.removeAttribute('src');
+      if ((a.scrollTop || a.scrollLeft) && b.children) Array.prototype.forEach.call(b.children, c => { c.style.translate = (-a.scrollLeft) + 'px ' + (-a.scrollTop) + 'px'; });
+    }
+    clone.style.position = 'relative'; clone.style.top = '0'; clone.style.left = '0'; clone.style.width = W + 'px'; clone.style.height = H + 'px';
+    // blob: の画像（壁紙など）は data: にしておく（SVG の画像からは blob: を読めない）
+    const blobs = clone.querySelectorAll('img[src^="blob:"]');
+    await Promise.all(Array.prototype.map.call(blobs, im => fetch(im.src).then(r => r.blob()).then(bl => new Promise(res => { const fr = new FileReader(); fr.onload = () => { im.src = fr.result; res(); }; fr.onerror = res; fr.readAsDataURL(bl); })).catch(() => {})));
+    // アニメーションは止める（画像の中では最初の場面から描き直されるため、開くアニメーションのウインドウが透明に写ってしまう）
+    const css = Array.prototype.map.call(document.querySelectorAll('style'), s => s.textContent).join('\n') + '\n*,*::before,*::after{animation:none!important;transition:none!important}';
+    const html = document.documentElement, body = document.body;
+    const attrs = el => Array.prototype.map.call(el.attributes, x => x.name + '="' + x.value.replace(/&/g, '&amp;').replace(/"/g, '&quot;') + '"').join(' ');
+    const xs = new XMLSerializer();
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '"><foreignObject x="0" y="0" width="100%" height="100%">' +
+      '<html xmlns="http://www.w3.org/1999/xhtml" ' + attrs(html) + '><head><style>' + xs.serializeToString(document.createTextNode(css)) + '</style></head>' +
+      '<body ' + attrs(body) + ' style="' + (body.getAttribute('style') || '').replace(/"/g, '&quot;') + ';margin:0;width:' + W + 'px;height:' + H + 'px;overflow:hidden">' + xs.serializeToString(clone) + '</body></html></foreignObject></svg>';
+    const img = new Image();
+    await new Promise((res, rej) => { img.onload = res; img.onerror = () => rej(new Error('画面を画像にできませんでした')); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); });
+    const cv = document.createElement('canvas'); cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    const g = cv.getContext('2d'); g.scale(dpr, dpr);
+    g.fillStyle = getComputedStyle(body).backgroundColor || '#000'; g.fillRect(0, 0, W, H);
+    g.drawImage(img, 0, 0, W, H);
+    let url; try { url = cv.toDataURL('image/png'); } catch (e) { throw new Error('このブラウザでは画面を画像にできません（' + e.message + '）'); }
+    const d = new Date(), p2 = n => String(n).padStart(2, '0');
+    const dir = users.home(htui.user) + '/Pictures/Screenshots', name = 'スクリーンショット ' + d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + ' ' + p2(d.getHours()) + '.' + p2(d.getMinutes()) + '.' + p2(d.getSeconds()) + '.png';
+    if (!htui.fs.isDir(dir)) htui.fs.mkdir(dir, { parents: true });
+    const file = dir + '/' + name;
+    htui.fs.write(file, url, { bin: true });
+    if (!o.quiet) {
+      const fl = h('div', { class: 'shot-flash' }); htui.el.append(fl); setTimeout(() => fl.remove(), 600);
+      OS.notify({ app: 'スクリーンショット', icon: 'camera', title: 'スクリーンショットを保存しました', body: '~/Pictures/Screenshots/' + name, silent: false });
+    }
+    return file;
+  };
   function hotkeys(e) {
     if (htui.locked) return; // ロック中はショートカットを使わない
+    // スクリーンショット: Alt+Shift+5（キーの位置で見る。Shift+5 は配列によって % など）
+    if (htui.user && e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && e.code === 'Digit5') {
+      e.preventDefault(); e.stopPropagation();
+      if (!e.repeat) htui.screenshot().catch(err => ui.toast('スクリーンショットを撮れませんでした: ' + err.message));
+      return;
+    }
     // 仮想デスク: Ctrl+Super+←/→ か Ctrl+Alt+PageUp/PageDown。Shift も押すと、使っているウィンドウを連れて移る
     if (htui.user && e.ctrlKey && ((e.metaKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) || (e.altKey && !e.metaKey && (e.key === 'PageUp' || e.key === 'PageDown')))) {
       e.preventDefault(); e.stopPropagation(); superAlone = false;
@@ -6543,6 +6855,152 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       tick();
       // 秒の変わり目にそろえて 1 秒ごと
       ctx.setTimeout(() => { tick(); ctx.setInterval(tick, 1000); }, 1000 - (now() % 1000));
+    }
+  });
+  // =====================================================================
+  // cron（7.0）: 決まった時刻にコマンドを実行する。ユーザーごとの crontab は /var/spool/cron/<ユーザー>
+  //   書き方は一般的な cron と同じ: 「分 時 日 月 曜日 コマンド」（* 、*/n、a-b、a,b、曜日は 0〜7（0 と 7 が日曜）か sun〜sat、月は jan〜dec）
+  //   @reboot @yearly @monthly @weekly @daily @hourly も使える。コマンドは jsh のコマンドで、そのユーザーとして画面なしで実行する（出力はジャーナルへ）
+  // =====================================================================
+  const CRON_DIR = '/var/spool/cron';
+  const CRON_AT = { '@yearly': '0 0 1 1 *', '@annually': '0 0 1 1 *', '@monthly': '0 0 1 * *', '@weekly': '0 0 * * 0', '@daily': '0 0 * * *', '@midnight': '0 0 * * *', '@hourly': '0 * * * *' };
+  const CRON_NAMES = [null, null, null, ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'], ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']];
+  const CRON_RANGE = [[0, 59], [0, 23], [1, 31], [1, 12], [0, 7]];
+  const CRON_LABEL = ['分', '時', '日', '月', '曜日'];
+  function cronField(str, i) {
+    const [lo, hi] = CRON_RANGE[i], set = new Set(), names = CRON_NAMES[i];
+    const num = t => {
+      t = t.toLowerCase();
+      if (names && names.includes(t)) return names.indexOf(t) + (i === 3 ? 1 : 0);
+      if (!/^\d+$/.test(t)) throw new Error(CRON_LABEL[i] + 'の「' + t + '」が読めません');
+      const n = +t; if (n < lo || n > hi) throw new Error(CRON_LABEL[i] + 'は ' + lo + '〜' + hi + ' です（' + t + '）');
+      return n;
+    };
+    for (const part of str.split(',')) {
+      const m = /^(.+?)(?:\/(\d+))?$/.exec(part); if (!m || !part) throw new Error(CRON_LABEL[i] + 'の「' + str + '」が読めません');
+      const step = m[2] ? +m[2] : 1; if (!step) throw new Error(CRON_LABEL[i] + 'の間隔が 0 です');
+      let a, b;
+      if (m[1] === '*') { a = lo; b = hi; } else if (m[1].includes('-')) { const r = m[1].split('-'); a = num(r[0]); b = num(r[1]); } else { a = num(m[1]); b = m[2] ? hi : a; }
+      if (a > b) throw new Error(CRON_LABEL[i] + 'の範囲「' + m[1] + '」が逆です');
+      for (let v = a; v <= b; v += step) set.add(i === 4 && v === 7 ? 0 : v);
+    }
+    return { set: set, any: str === '*' };
+  }
+  // 1 行を読む。コメント・空行は null、環境変数（NAME=値）は { env }
+  function cronParse(line) {
+    line = String(line).trim();
+    if (!line || line[0] === '#') return null;
+    let m = /^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
+    if (m) return { env: m[1], value: m[2] };
+    if (line[0] === '@') {
+      m = /^(@\w+)\s+(.+)$/.exec(line); if (!m) throw new Error('「' + line + '」: コマンドがありません');
+      const at = m[1].toLowerCase();
+      if (at === '@reboot') return { reboot: true, spec: '@reboot', cmd: m[2].trim() };
+      if (!CRON_AT[at]) throw new Error(m[1] + ': 知らない指定です（@reboot @hourly @daily @weekly @monthly @yearly）');
+      return Object.assign(cronParse(CRON_AT[at] + ' ' + m[2]), { spec: at });
+    }
+    const p = line.split(/\s+/);
+    if (p.length < 6) throw new Error('「' + line + '」: 「分 時 日 月 曜日 コマンド」の 6 つが必要です');
+    const f = p.slice(0, 5).map(cronField);
+    return { f: f, spec: p.slice(0, 5).join(' '), cmd: line.replace(/^(\S+\s+){5}/, '').trim() };
+  }
+  function cronMatch(j, d) {
+    if (!j.f) return false;
+    const [mi, ho, dm, mo, dw] = j.f;
+    if (!mi.set.has(d.getMinutes()) || !ho.set.has(d.getHours()) || !mo.set.has(d.getMonth() + 1)) return false;
+    // 日と曜日がどちらも * でないときは、どちらかに合えば実行（一般的な cron と同じ）
+    const a = dm.set.has(d.getDate()), b = dw.set.has(d.getDay());
+    return dm.any && dw.any ? true : dm.any ? b : dw.any ? a : (a || b);
+  }
+  // 次に実行する時刻（最大 1 年先まで探す）
+  function cronNext(j, from) {
+    if (!j.f) return null;
+    const d = new Date(from || now()); d.setSeconds(0, 0); d.setMinutes(d.getMinutes() + 1);
+    for (let i = 0; i < 366 * 24 * 60; i++) {
+      if (!j.f[3].set.has(d.getMonth() + 1)) { d.setMonth(d.getMonth() + 1, 1); d.setHours(0, 0); continue; }
+      if (!j.f[1].set.has(d.getHours())) { d.setHours(d.getHours() + 1, 0); continue; }
+      if (cronMatch(j, d)) return d.getTime();
+      d.setMinutes(d.getMinutes() + 1);
+    }
+    return null;
+  }
+  // 時刻の指定を、人が読める日本語に
+  function cronDescribe(j) {
+    if (j.reboot) return '起動したとき';
+    const s = j.spec.split(/\s+/), [mi, ho, dm, mo, dw] = s;
+    const ev = (x, unit) => /^\*\/(\d+)$/.test(x) ? x.slice(2) + unit + 'ごと' : null;
+    const W = '日月火水木金土';
+    const wd = dw === '*' ? '' : dw.split(',').map(x => /^\d+$/.test(x) ? W[+x % 7] : /^\d+-\d+$/.test(x) ? x.split('-').map(y => W[+y % 7]).join('〜') : x).join('・') + '曜';
+    let t;
+    if (mi === '*' && ho === '*') t = '毎分';
+    else if (ev(mi, '分') && ho === '*') t = ev(mi, '分');
+    else if (/^\d+$/.test(mi) && ho === '*') t = '毎時 ' + mi + ' 分';
+    else if (/^\d+$/.test(mi) && ev(ho, '時間')) t = ev(ho, '時間') + '（' + mi + ' 分）';
+    else if (/^\d+$/.test(mi) && /^\d+$/.test(ho)) t = ho + ':' + z(+mi);
+    else t = '分 ' + mi + '・時 ' + ho;
+    const day = (mo !== '*' ? mo + '月' : '') + (dm !== '*' ? dm + '日' : '');
+    return (day ? '毎年 ' + day + ' ' : wd ? '毎週 ' + wd + ' ' : dm === '*' && mo === '*' && /:/.test(t) ? '毎日 ' : '') + t;
+  }
+  const cron = OS.cron = {
+    dir: CRON_DIR, parse: cronParse, next: cronNext, match: cronMatch, describe: cronDescribe,
+    path: user => CRON_DIR + '/' + user,
+    read(user) { try { return fs.read(CRON_DIR + '/' + user); } catch (e) { return ''; } },
+    // 書く前に全部の行を確かめる（間違いがあれば、何行目かを付けて投げる）
+    check(text) { String(text).split('\n').forEach((l, i) => { try { cronParse(l); } catch (e) { throw new Error((i + 1) + ' 行目: ' + e.message); } }); },
+    write(user, text) {
+      if (!users.get(user)) throw new Error(user + ': そのようなユーザーはいません');
+      text = String(text).replace(/\r\n/g, '\n'); if (text && !text.endsWith('\n')) text += '\n';
+      cron.check(text);
+      if (!fs.exists(CRON_DIR)) fs.mkdir(CRON_DIR, { parents: true });
+      if (text.trim()) fs.write(CRON_DIR + '/' + user, text, { owner: user }); else if (fs.exists(CRON_DIR + '/' + user)) fs.rm(CRON_DIR + '/' + user);
+      try { fs.chmod(CRON_DIR + '/' + user, 0o600); } catch (e) { /* 権限を付けられなくても続ける */ }
+      journal.log('cron.service', user + ' の crontab を更新しました');
+    },
+    // ユーザーのジョブ（行番号つき）
+    jobs(user) {
+      const env = {}, out = [];
+      cron.read(user).split('\n').forEach((l, i) => {
+        let j = null; try { j = cronParse(l); } catch (e) { out.push({ line: i + 1, text: l, error: e.message }); return; }
+        if (!j) return; if (j.env) { env[j.env] = j.value; return; }
+        out.push(Object.assign(j, { line: i + 1, text: l, user: user, env: Object.assign({}, env), next: cronNext(j), desc: cronDescribe(j) }));
+      });
+      return out;
+    },
+    users() { try { return fs.isDir(CRON_DIR) ? fs.list(CRON_DIR).filter(u => users.get(u)) : []; } catch (e) { return []; } },
+    // ジョブを今すぐ（または予定どおりに）実行する
+    async run(job, why) {
+      const unit = 'cron.service', p = proc.spawn({ name: 'cron', cmd: job.cmd, user: job.user, kind: 'service', unit: unit, ppid: cron.pid || 1 });
+      journal.log(unit, '(' + job.user + ') ' + (why ? why + ' ' : '') + 'CMD (' + job.cmd + ')', { pid: p.pid });
+      const sh = headlessShell(unit, job.user, () => p.pid);
+      let code = 0;
+      try {
+        Object.keys(job.env || {}).forEach(k => { try { sh.vars[k] = job.env[k]; } catch (e) { /* 変数を持たないシェル */ } });
+        await sh.exec(job.cmd, true); code = sh.status | 0;
+      } catch (e) { sh._tty.println(e.message || String(e), 'err'); code = 1; }
+      sh._tty.flush();
+      if (code) journal.log(unit, '(' + job.user + ') 終了コード ' + code + ': ' + job.cmd, { pid: p.pid, prio: 4 });
+      try { proc.exit(p.pid, code); } catch (e) { /* もうない */ }
+      cron.last[job.user + ':' + job.line] = { t: now(), code: code };
+      return code;
+    },
+    last: {}, pid: 0
+  };
+  register({
+    name: 'cron.service', desc: '決まった時刻のコマンド実行（cron）', wantedBy: 'multi-user.target', after: 'multi-user.target', restart: 'on-failure',
+    start(ctx) {
+      cron.pid = ctx.pid;
+      const all = () => cron.users().map(u => cron.jobs(u)).flat().filter(j => !j.error);
+      const tick = () => {
+        const d = new Date(); d.setSeconds(0, 0);
+        all().forEach(j => { if (cronMatch(j, d)) cron.run(j); });
+      };
+      // @reboot は OS を起動したときに 1 回だけ（サービスを再起動したときは実行しない）
+      if (!cron.booted) { cron.booted = true; all().filter(j => j.reboot).forEach(j => cron.run(j, '@reboot')); }
+      const n = all().length;
+      ctx.log(n ? n + ' 個のジョブを見ています' : 'ジョブはありません（crontab -e か hCron で追加できます）');
+      // 毎分 0 秒にそろえる
+      ctx.setTimeout(() => { tick(); ctx.setInterval(tick, 60000); }, 60000 - (now() % 60000) + 50);
+      return () => { cron.pid = 0; };
     }
   });
   register({
@@ -7624,6 +8082,8 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         const u = fs.usage(), rows = ['/          ' + (u.disk ? '使用 ' + fmtSize(u.used) + (u.total ? ' / ' + fmtSize(u.total) + '（' + Math.round(u.used / u.total * 100) + '%）' : '（上限なし）') : '使用 ' + fmtSize(u.used) + ' / 約 ' + fmtSize(u.total) + '（' + Math.round(u.used / u.total * 100) + '%）') + ' [' + OS.storeLabel() + ']'];
         if (OS.hdd.mounted) rows.push(OS.hdd.at.padEnd(11) + 'PC のフォルダ「' + OS.hdd.name + '」 [HDD1]');
         else if (OS.hdd.waiting) rows.push(OS.hdd.at.padEnd(11) + '（未接続: 「' + OS.hdd.waiting + '」。mount hdd1 で接続）');
+        if (OS.hdd3 && OS.hdd3.mounted) rows.push(OS.hdd3.at.padEnd(11) + 'PC のフォルダ「' + OS.hdd3.name + '」 [HDD3]');
+        if (OS.raid && OS.raid.active) { const st = OS.raid.status(); rows.push(OS.raid.at.padEnd(11) + '使用 ' + fmtSize(st.used) + ' [md0 ' + st.level.toUpperCase() + ' ' + OS.raid.stateName(st.state) + ']'); }
         return rows.join('\n');
       });
       def('wget', 'wget URL [保存先]', 'URLをhFSにダウンロード', async (url, dest) => {
@@ -7717,7 +8177,40 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         tty.println('===uname===', 'dim'); tty.println(ab.uname());
         tty.println('===クレジット===', 'dim'); ab.credits.forEach(l => tty.println(l));
       });
-      def('neofetch', 'neofetch', 'システム情報をそれっぽく表示', () => {
+      // screenshot（7.0）: 画面を ~/Pictures/Screenshots に保存する（Alt+Shift+5 と同じ）
+      def('screenshot', 'screenshot', '画面のスクリーンショットを撮る（Alt+Shift+5 と同じ）', async () => {
+        if (!OS.htui.running || !OS.htui.user || !OS.htui.screenshot) throw new Error('screenshot: デスクトップ（HTUi）でだけ使えます');
+        return '保存しました: ' + await OS.htui.screenshot();
+      });
+      // crontab（7.0）: 自分の cron のジョブ。root は -u で他のユーザーのものも
+      def('crontab', 'crontab [-u ユーザー] -l | -e | -r | -a "分 時 日 月 曜日 コマンド" | -d 行 | -n | ファイル', 'cron のジョブ（-l 一覧 / -a 追加 / -d 削除 / -e 編集 / -r 全部消す / -n 次の予定）', async (...a) => {
+        if (!OS.cron) throw new Error('crontab: cron がありません');
+        const g = getopts(a, 'uad'), o = g.o;
+        const who = o.u || self.user;
+        if (who !== self.user && !self.root) throw new Error('crontab: ほかのユーザーの crontab は root だけが扱えます');
+        if (!users.get(who)) throw new Error('crontab: ' + who + ': そのようなユーザーはいません');
+        const C = OS.cron, text = C.read(who);
+        if (o.l) return text ? text.replace(/\n$/, '') : who + ' の crontab はありません';
+        if (o.n) {
+          const js = C.jobs(who).filter(j => !j.error);
+          if (!js.length) return who + ' のジョブはありません';
+          return js.map(j => String(j.line).padStart(3) + '  ' + (j.next ? new Date(j.next).toLocaleString('ja-JP') : (j.reboot ? '（起動したとき）' : '-')).padEnd(20) + '  ' + j.desc + '  ' + j.cmd).join('\n');
+        }
+        if (o.r) { C.write(who, ''); return who + ' の crontab を消しました'; }
+        if (o.a) { const line = [o.a].concat(g.rest).join(' '); C.parse(line); C.write(who, text + line + '\n'); return '追加しました: ' + line; }
+        if (o.d) {
+          const n = parseInt(o.d, 10), l = text.split('\n');
+          if (!(n >= 1 && n <= l.length) || !l[n - 1].trim()) throw new Error('crontab: ' + o.d + ' 行目はありません（crontab -l で確かめてください）');
+          const del = l.splice(n - 1, 1)[0]; C.write(who, l.join('\n')); return '消しました: ' + del;
+        }
+        if (o.e) {
+          if (OS.htui.running && OS.htui.user && OS.apps.hcron) { OS.launch('hcron', who); return 'hCron を開きました'; }
+          throw new Error('crontab -e は GUI で hCron を開きます。CUI では crontab -a "*/5 * * * * echo hi" で追加、crontab ファイル で置き換えてください');
+        }
+        if (g.rest.length) { const p = self.abs(String(g.rest[0])); C.write(who, self.fs.read(p)); return p + ' を ' + who + ' の crontab にしました'; }
+        throw new Error('使い方: crontab -l / -a "分 時 日 月 曜日 コマンド" / -d 行番号 / -n / -e / -r / ファイル');
+      });
+      def('neofetch', 'neofetch','システム情報をそれっぽく表示', () => {
         const u = fs.usage(), art = ['  <  / >  ', ' <  /  > ', '<  /   >', ' <  /  > ', '  <  / >  ', '          '];
         const who = self.user + '@' + OS.hostname(), de = OS.htui.running && OS.htui.sessionId ? (OS.sessions[OS.htui.sessionId].full || OS.sessions[OS.htui.sessionId].name) : 'なし（CUI）';
         const info = [who, '-'.repeat(who.length), 'OS: ' + OS.name + ' (' + OS.version + ')' + (OS.live ? ' (Live)' : ''), 'Shell: jsh', 'UI: ' + OS.htui.sdk.full, 'DE: ' + de, 'Disk: ' + fmtSize(u.used) + (u.disk && !u.total ? '' : ' / ' + fmtSize(u.total)) + ' (' + (OS.store.ram ? 'RAM' : OS.storeLabel()) + ')'];
@@ -8226,24 +8719,54 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       });
 
       // ======== ドライブ（HDD1 = File System Access API で選んだ PC のフォルダ）
-      def('mount', 'mount [hdd1] [-p]', 'ドライブの一覧。mount hdd1 で PC のフォルダを /mnt/hdd1 に接続（-p でフォルダを選び直す）', async (...a) => {
+      def('mount', 'mount [hdd1|hdd3] [-p]', 'ドライブの一覧。mount hdd1 / mount hdd3 で PC のフォルダを /mnt/hdd1・/mnt/hdd3 に接続（-p でフォルダを選び直す）', async (...a) => {
         const g = getopts(a), dev = g.rest[0];
+        const line = (id, d) => id + '   ' + d.at.padEnd(12) + (d.mounted ? 'PC のフォルダ「' + d.name + '」' : d.supported ? '未接続' + (d.waiting ? '（「' + d.waiting + '」の許可待ち）' : '') + ' — mount ' + id + ' で接続' : 'このブラウザでは使えません');
         if (!dev) {
           const rows = [OS.hdd.root ? 'hdd1   /           PC のフォルダ「' + OS.hdd.name + '」（ここから起動）' : (OS.store.idb ? 'hdd2' : 'hdd0') + '   /           ' + OS.storeLabel()];
-          if (!OS.hdd.root) rows.push('hdd1   ' + OS.hdd.at.padEnd(12) + (OS.hdd.mounted ? 'PC のフォルダ「' + OS.hdd.name + '」' : OS.hdd.supported ? '未接続' + (OS.hdd.waiting ? '（「' + OS.hdd.waiting + '」の許可待ち）' : '') + ' — mount hdd1 で接続' : 'このブラウザでは使えません'));
+          if (!OS.hdd.root) rows.push(line('hdd1', OS.hdd));
+          if (OS.hdd3 && (OS.hdd3.mounted || OS.hdd3.waiting || (OS.storage && OS.storage.hdd3Use() === 'data'))) rows.push(line('hdd3', OS.hdd3));
+          if (OS.raid) { const st = OS.raid.status(); if (st) rows.push('md0    ' + OS.raid.at.padEnd(12) + st.level.toUpperCase() + '（' + st.members.map(m => m.label).join('・') + '）' + OS.raid.stateName(st.state)); }
           return rows.join('\n');
         }
-        if (dev !== 'hdd1') throw new Error(dev + ': そのようなドライブはありません（使えるのは hdd1 です）');
-        if (g.o.p && OS.hdd.mounted) await OS.hdd.unmount();
-        tty.println('HDD1 を読み込んでいます…', 'dim');
-        const r = await OS.hdd.mount(!!g.o.p);
-        return 'HDD1（PC のフォルダ「' + r.name + '」）を ' + OS.hdd.at + ' に接続しました（' + r.items + ' 項目' + (r.skipped.length ? '。32MB を超える ' + r.skipped.length + ' 個のファイルは読み込んでいません' : '') + '）';
+        const d = dev === 'hdd1' ? OS.hdd : dev === 'hdd3' ? OS.hdd3 : null;
+        if (!d) throw new Error(dev + ': そのようなドライブはありません（使えるのは hdd1・hdd3 です。RAID は raid assemble）');
+        if (dev === 'hdd3' && OS.storage && OS.storage.hdd3Use() === 'raid') throw new Error('HDD3 は RAID 用に設定されています（設定 → ストレージ で「データ置き場」にできます）');
+        if (g.o.p && d.mounted) await d.unmount();
+        tty.println(d.label + ' を読み込んでいます…', 'dim');
+        const r = await d.mount(!!g.o.p);
+        return d.label + '（PC のフォルダ「' + r.name + '」）を ' + d.at + ' に接続しました（' + r.items + ' 項目' + (r.skipped.length ? '。32MB を超える ' + r.skipped.length + ' 個のファイルは読み込んでいません' : '') + '）';
       });
-      def('umount', 'umount hdd1', 'HDD1 を切り離す（PC のフォルダの中身はそのまま）', async dev => {
-        if (dev != null && dev !== 'hdd1' && dev !== OS.hdd.at) throw new Error(dev + ': そのようなドライブはありません');
-        await OS.hdd.unmount();
-        if (self.cwd === OS.hdd.at || self.cwd.startsWith(OS.hdd.at + '/')) self.cwd = self.home;
-        return 'HDD1 を切り離しました';
+      def('umount', 'umount hdd1|hdd3', 'HDD1・HDD3 を切り離す（PC のフォルダの中身はそのまま）', async dev => {
+        const d = dev === 'hdd3' || dev === (OS.hdd3 && OS.hdd3.at) ? OS.hdd3 : (dev == null || dev === 'hdd1' || dev === OS.hdd.at) ? OS.hdd : null;
+        if (!d) throw new Error(dev + ': そのようなドライブはありません');
+        await d.unmount();
+        if (self.cwd === d.at || self.cwd.startsWith(d.at + '/')) self.cwd = self.home;
+        return d.label + ' を切り離しました';
+      });
+      // raid（7.0）: mdadm にあたる。RAID0 / 1 / 5（RAID5 は HDD3 が必要）
+      def('raid', 'raid [status] | create 0|1|5 ドライブ... | assemble | rebuild | stop | destroy', 'RAID（md0）の状態と操作。ドライブは hdd1・hdd2・hdd3', async (...a) => {
+        const R = OS.raid; if (!R) throw new Error('raid: RAID がありません');
+        const sub = a[0] || 'status';
+        if (sub === 'status') {
+          const st = R.status();
+          if (!st) return 'RAID はありません。作り方: raid create 1 hdd1 hdd2（RAID5 は raid create 5 hdd1 hdd2 hdd3。HDD3 を先にセットアップ）';
+          return ['md0 : ' + R.levels[st.level].name + '  ' + R.stateName(st.state) + (st.reason ? '（' + st.reason + '）' : ''),
+            '  ドライブ: ' + st.members.map(m => m.label + (m.name ? '（' + m.name + '）' : '') + (m.ok ? ' [U]' : ' [_]')).join('  '),
+            '  場所: ' + st.at + (st.files != null ? '   項目: ' + st.files + '   使用: ' + fmtSize(st.used) + '   世代: ' + st.gen : ''),
+            '  容量: ' + R.capacityNote(st.level, st.members.length)].join('\n');
+        }
+        if (sub !== 'status') needAdmin();
+        if (sub === 'create') { const st = await R.create(a[1], a.slice(2)); return R.levels[st.level].name + ' を作り、' + st.at + ' に接続しました'; }
+        if (sub === 'assemble') { const st = await R.assemble({ ask: true }); return 'md0 を組み立てました（' + R.stateName(st.state) + '）'; }
+        if (sub === 'rebuild') { await R.rebuild({ ask: true }); return '再構築が終わりました'; }
+        if (sub === 'stop') return (await R.stop()) ? 'md0 を止めました' : 'md0 は動いていません';
+        if (sub === 'destroy') {
+          const yes = await tty.read('RAID（md0）のデータをすべてのドライブから消します。元に戻せません。続けるには yes と入力: ');
+          if (yes !== 'yes') return 'やめました';
+          await R.destroy(); return 'md0 を削除しました';
+        }
+        throw new Error('raid status | create 0|1|5 ドライブ... | assemble | rebuild | stop | destroy');
       });
 
       // ======== システム情報・シェル
@@ -8482,6 +9005,10 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 
   const ICONS = {
     pin: '<path d="M9 3h6l-1 6 4 4H6l4-4zM12 13v8"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    camera: '<path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/>',
+    raid: '<rect x="3" y="4" width="18" height="5" rx="1"/><rect x="3" y="10" width="18" height="5" rx="1"/><rect x="3" y="16" width="18" height="4" rx="1"/><path d="M7 6.5h.01M7 12.5h.01M7 18h.01"/>',
     music: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
     desks: '<rect x="3" y="6" width="13" height="11" rx="2"/><path d="M8 3h11a2 2 0 0 1 2 2v9"/>',
     battery: '<rect x="2" y="7" width="17" height="10" rx="2"/><path d="M22 11v2M6 10v4M10 10v4"/>',
@@ -9217,51 +9744,69 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   // ---------- HDD1（File System Access API で選んだ PC のフォルダ）
   //   htmlOS を LocalStorage から起動しているときは /mnt/hdd1 に接続（マウント）する。
   //   HDD1 から起動しているときは HDD1 が / そのものなので、/mnt/hdd1 には何もつながない
+  //   7.0: HDD3 も同じ仕組み（もう 1 つの PC のフォルダ。/mnt/hdd3）。ドライブを /mnt に付ける OS.mountStore も（RAID が使う）
   const HDD_AT = '/mnt/hdd1', HD = BOOT.hdd || { supported: false };
-  const hdd = OS.hdd = {
-    at: HDD_AT,
-    get supported() { return !!HD.supported; },
-    get root() { return !!base.disk; },
-    get mounted() { return mounts.some(m => m.at === HDD_AT); },
-    get name() { const m = mounts.find(x => x.at === HDD_AT); return m ? m.s.name : base.disk ? base.name : null; },
-    waiting: null, // 前に使ったフォルダ（許可を待っている）の名前
-    // 接続する。pick=true なら別のフォルダを選び直す。ボタンやコマンドなど、ユーザーの操作の中で呼ぶこと
-    async mount(pick, progress) {
-      if (base.disk) throw new Error('htmlOS は HDD1 から起動しています（HDD1 は / そのものです）');
-      if (!HD.supported) throw new Error('このブラウザは File System Access API（showDirectoryPicker）に対応していません。パソコンの Chrome・Edge などで使えます');
-      if (hdd.mounted) throw new Error('HDD1 はすでに ' + HDD_AT + ' に接続されています');
-      let dir = pick ? null : await HD.saved();
-      if (!dir) dir = await HD.pick();
-      if (!(await HD.allowed(dir, true))) throw new Error('フォルダを使う許可がもらえませんでした');
-      return attach(dir, progress);
-    },
-    async unmount() {
-      const i = mounts.findIndex(m => m.at === HDD_AT);
-      if (i < 0) throw new Error('HDD1 は接続されていません');
-      await mounts[i].s.flush();
-      mounts.splice(i, 1); changed(HDD_AT); changed('/mnt');
-    },
-    // 覚えているフォルダを忘れる（PC のフォルダの中身は消さない）
-    async forget() { if (hdd.mounted) await hdd.unmount(); hdd.waiting = null; await HD.forget(); },
-    // 起動したとき: 前に使ったフォルダがあって、許可が残っていれば自動で接続する
-    async auto() {
-      if (base.disk || !HD.supported || hdd.mounted) return null;
-      const dir = await HD.saved(); if (!dir) return null;
-      if (!(await HD.allowed(dir, false))) { hdd.waiting = dir.name; return null; }
-      return attach(dir);
-    },
-    flush: () => Promise.all(mounts.map(m => m.s.flush()))
-  };
-  async function attach(dir, progress) {
-    const s = await HD.open(dir, HDD_AT, progress);
-    s.onerror = (what, e) => { if (OS.notify && OS.htui && OS.htui.user) OS.notify({ app: 'HDD1', icon: 'archive', title: 'HDD1 に書き込めませんでした', body: what + ': ' + ((e && e.message) || e) }); };
+  OS.mountStore = function (at, s) {
+    if (mounts.some(m => m.at === at)) throw new Error(at + ' にはもう別のドライブがつながっています');
     if (!base.get(K('/mnt'))) base.set(K('/mnt'), JSON.stringify({ t: 'd', m: Date.now(), o: 'root' }));
-    mounts.push({ at: HDD_AT, key: K(HDD_AT), s: s });
-    hdd.waiting = null;
-    await HD.save(dir);
-    changed('/mnt'); changed(HDD_AT);
+    mounts.push({ at: at, key: K(at), s: s }); changed('/mnt'); changed(at);
+  };
+  OS.unmountStore = async function (at) {
+    const i = mounts.findIndex(m => m.at === at); if (i < 0) return false;
+    await mounts[i].s.flush(); mounts.splice(i, 1); changed(at); changed('/mnt'); return true;
+  };
+  OS.mounts = () => mounts.map(m => ({ at: m.at, name: m.s.name, label: m.s.label || null }));
+  // id: 'hdd1' / 'hdd3'（フォルダのハンドルを IndexedDB に覚える名前）、label: 表示名、at: つなぐ場所
+  function folderDrive(id, label, at) {
+    const d = {
+      id: id, label: label, at: at,
+      get supported() { return !!HD.supported; },
+      get root() { return id === 'hdd1' && !!base.disk; },
+      get mounted() { return mounts.some(m => m.at === at); },
+      get name() { const m = mounts.find(x => x.at === at); return m ? m.s.name : d.root ? base.name : null; },
+      waiting: null, // 前に使ったフォルダ（許可を待っている）の名前
+      // 接続する。pick=true なら別のフォルダを選び直す。ボタンやコマンドなど、ユーザーの操作の中で呼ぶこと
+      async mount(pick, progress) {
+        if (d.root) throw new Error('htmlOS は HDD1 から起動しています（HDD1 は / そのものです）');
+        if (!HD.supported) throw new Error('このブラウザは File System Access API（showDirectoryPicker）に対応していません。パソコンの Chrome・Edge などで使えます');
+        if (d.mounted) throw new Error(label + ' はすでに ' + at + ' に接続されています');
+        let dir = pick ? null : await d.handle();
+        if (!dir) dir = await HD.pick(id);
+        if (!(await HD.allowed(dir, true))) throw new Error('フォルダを使う許可がもらえませんでした');
+        return attach(d, dir, progress);
+      },
+      async unmount() {
+        if (!d.mounted) throw new Error(label + ' は接続されていません');
+        await OS.unmountStore(at);
+      },
+      // 覚えているフォルダを忘れる（PC のフォルダの中身は消さない）
+      async forget() { if (d.mounted) await d.unmount(); d.waiting = null; await HD.forget(id); },
+      handle: () => HD.saved ? HD.saved(id) : Promise.resolve(null),
+      // フォルダを選んで覚えるだけ（つながない。RAID 用など）
+      async pick() { const dir = await HD.pick(id); if (!(await HD.allowed(dir, true))) throw new Error('フォルダを使う許可がもらえませんでした'); await HD.save(dir, id); d.waiting = null; return dir; },
+      // 許可を確かめて（ask なら求めて）ハンドルを返す。なければ null
+      async access(ask) { const dir = await d.handle(); if (!dir) return null; return (await HD.allowed(dir, !!ask)) ? dir : null; },
+      // 起動したとき: 前に使ったフォルダがあって、許可が残っていれば自動で接続する
+      async auto() {
+        if (d.root || !HD.supported || d.mounted) return null;
+        const dir = await d.handle(); if (!dir) return null;
+        if (!(await HD.allowed(dir, false))) { d.waiting = dir.name; return null; }
+        return attach(d, dir);
+      },
+      flush: () => Promise.all(mounts.map(m => m.s.flush()))
+    };
+    return d;
+  }
+  async function attach(d, dir, progress) {
+    const s = await HD.open(dir, d.at, progress);
+    s.onerror = (what, e) => { if (OS.notify && OS.htui && OS.htui.user) OS.notify({ app: d.label, icon: 'archive', title: d.label + ' に書き込めませんでした', body: what + ': ' + ((e && e.message) || e) }); };
+    OS.mountStore(d.at, s);
+    d.waiting = null;
+    await HD.save(dir, d.id);
     return { name: dir.name, items: s.count() - 1, skipped: s.skipped };
   }
+  const hdd = OS.hdd = folderDrive('hdd1', 'HDD1', HDD_AT);
+  OS.hdd3 = folderDrive('hdd3', 'HDD3', '/mnt/hdd3');
   // 書き出しが終わっていないうちにページを閉じようとしたら止める
   window.addEventListener('beforeunload', e => { if ([base].concat(mounts.map(m => m.s)).some(s => s.pending && s.pending())) { e.preventDefault(); e.returnValue = ''; } });
 
@@ -9963,7 +10508,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     if (OS.imode) apps = apps.filter(n => I_APPS.includes(n));
     const pkgs = OS.safe || OS.imode ? [] : OS.pkg.list();
     try { OS.build = (JSON.parse(store.get('meta')) || {}).build || BOOT.build || '?'; } catch (e) { OS.build = BOOT.build || '?'; }
-    const core = ['/sys/init.js', '/sys/ipc.js', '/sys/cursor.js', '/sys/jsh.js', '/sys/htui.js', '/sys/hdm.js', '/sys/shells.js'];
+    const core = ['/sys/init.js', '/sys/ipc.js', '/sys/raid.js', '/sys/cursor.js', '/sys/jsh.js', '/sys/htui.js', '/sys/hdm.js', '/sys/shells.js'];
     const total = 2 + core.length + apps.length + pkgs.length; let done = 0;
     const step = async (s, failed) => {
       if (OS.klog) OS.klog(s, failed ? 3 : 6); else (OS._klog = OS._klog || []).push({ t: Date.now(), msg: s, prio: failed ? 3 : 6 });
@@ -9992,6 +10537,11 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       try { const r = await hdd.auto(); if (r) await step('HDD1（' + r.name + '）を ' + HDD_AT + ' にマウントしました'); else if (hdd.waiting) await step('HDD1（' + hdd.waiting + '）: 使う許可を待っています（hFile の HDD1 か、jsh の mount hdd1 で接続）'); }
       catch (e) { await step('HDD1: ' + e.message, true); }
     }
+    // HDD3・RAID（7.0）
+    if (OS.storage && !OS.imode && !OS.live) {
+      try { for (const r of await OS.storage.boot()) await step(r.msg, r.fail); }
+      catch (e) { await step('ストレージ: ' + e.message, true); }
+    }
     OS.mode = mode;
     // init（PID 1）: マルチユーザーのターゲットまでサービスを順に起動する（GUI のサービスは HTUi を出したあと）
     if (OS.init) {
@@ -10014,6 +10564,353 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   };
 })();
 </script>
+<script type="text/x-htmlos" data-path="/sys/raid.js">
+/* htmlOS ストレージ管理（7.0 Polaris）— HDD3 と RAID
+   ・HDD3: HDD1 と同じく File System Access API で選ぶ PC のフォルダ。用途は「データ置き場」（/mnt/hdd3 につなぐ）か「RAID 用」
+   ・RAID: HDD1（PC のフォルダ）・HDD2（IndexedDB）・HDD3（PC のフォルダ）を組み合わせて 1 つのドライブ（md0）にし、/mnt/raid につなぐ
+       RAID0（ストライピング）: 2 台以上。データを 64KB ずつ交互に置く。容量は合計、1 台でも欠けると読めない
+       RAID1（ミラーリング）  : 2 台以上。全部に同じものを書く。1 台残っていれば読める
+       RAID5（パリティ）      : 3 台（HDD1・HDD2・HDD3）。2 台分のデータと 1 台分のパリティ（XOR）を行ごとに入れ替えて置く。1 台欠けても読め、戻ってきたら再構築する
+     各ドライブの中の置き場所: PC のフォルダは .htmlos-raid/<uuid>/ （htmlOS のファイルとしては見えない）、HDD2 は IndexedDB の htmlos-raid
+     中身: index（全ドライブに同じものを置く。世代 gen つき）と、ファイルごとのかたまり o<id>.<行>
+   ・設定は /etc/raid.json（アレイ）と /etc/storage.json（HDD3 の用途）。起動のときに自動で組み立てる（フォルダの許可が要るときは待つ） */
+(function () {
+  'use strict';
+  const OS = window.OS, fs = OS.fs, BOOT = window.BOOT;
+  const RAID_DIR = '.htmlos-raid', CH = 64 * 1024, AT = '/mnt/raid', CONF = '/etc/raid.json', SCONF = '/etc/storage.json';
+  const DEVS = { hdd1: 'HDD1', hdd2: 'HDD2', hdd3: 'HDD3' };
+  const enc = new TextEncoder(), dec = new TextDecoder();
+  const log = (m, prio) => { if (OS.journal) OS.journal.log('raid', m, { prio: prio == null ? 6 : prio }); };
+  const readJSON = p => { try { return JSON.parse(fs.read(p)); } catch (e) { return null; } };
+  const fmt = n => n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : n < 1073741824 ? (n / 1048576).toFixed(1) + ' MB' : (n / 1073741824).toFixed(2) + ' GB';
+
+  // ---------------------------------------------------------------- 設定
+  const storage = OS.storage = {
+    conf() { return readJSON(SCONF) || {}; },
+    setConf(c) { fs.write(SCONF, JSON.stringify(c, null, 1)); },
+    // HDD3 の用途: 'data'（/mnt/hdd3 につなぐ）か 'raid'（RAID だけに使う）
+    hdd3Use() { return storage.conf().hdd3 === 'raid' ? 'raid' : 'data'; },
+    async setHdd3Use(u) {
+      const c = storage.conf(); c.hdd3 = u === 'raid' ? 'raid' : 'data'; storage.setConf(c);
+      if (c.hdd3 === 'raid' && OS.hdd3.mounted) await OS.hdd3.unmount();
+    },
+    // HDD3 をセットアップする（フォルダを選んで覚える。用途が data ならつなぐ）。ユーザーの操作の中で呼ぶ
+    async setupHdd3(use, progress) {
+      if (!OS.hdd3.supported) throw new Error('このブラウザは File System Access API に対応していません（パソコンの Chrome・Edge などで使えます）');
+      if (OS.hdd3.mounted) await OS.hdd3.unmount();
+      const dir = await OS.hdd3.pick();
+      const h1 = await OS.hdd.handle();
+      if (h1 && h1.isSameEntry && await h1.isSameEntry(dir)) { await OS.hdd3.forget(); throw new Error('HDD1 と同じフォルダは HDD3 にできません。別のフォルダを選んでください'); }
+      if (BOOT.store.handle && BOOT.store.handle.isSameEntry && await BOOT.store.handle.isSameEntry(dir)) { await OS.hdd3.forget(); throw new Error('起動しているフォルダ（HDD1）は HDD3 にできません'); }
+      await storage.setHdd3Use(use);
+      log('HDD3 にフォルダ「' + dir.name + '」を設定しました（' + (use === 'raid' ? 'RAID 用' : 'データ置き場') + '）');
+      if (use !== 'raid') await OS.hdd3.mount(false, progress);
+      return dir.name;
+    },
+    async forgetHdd3() {
+      const c = raid.config();
+      if (c && c.members.includes('hdd3')) throw new Error('HDD3 は RAID（' + c.level.toUpperCase() + '）に使われています。先に RAID を削除してください');
+      await OS.hdd3.forget(); log('HDD3 の設定を外しました');
+    },
+    // 起動のとき: HDD3（データ置き場）と RAID を自動でつなぐ。ログの行を返す
+    async boot() {
+      const out = [];
+      if (OS.hdd3.supported && storage.hdd3Use() === 'data') {
+        try { const r = await OS.hdd3.auto(); if (r) out.push({ msg: 'HDD3（' + r.name + '）を ' + OS.hdd3.at + ' にマウントしました' }); else if (OS.hdd3.waiting) out.push({ msg: 'HDD3（' + OS.hdd3.waiting + '）: 使う許可を待っています（設定 → ストレージ か mount hdd3 で接続）' }); }
+        catch (e) { out.push({ msg: 'HDD3: ' + e.message, fail: true }); }
+      }
+      if (raid.config()) {
+        try { const r = await raid.assemble({ ask: false }); out.push({ msg: 'RAID（md0・' + r.level.toUpperCase() + '）を ' + AT + ' にマウントしました' + (r.state !== 'clean' ? '（' + raid.stateName(r.state) + '）' : '') }); }
+        catch (e) { raid.waiting = e.message; out.push({ msg: 'RAID（md0）: ' + e.message, fail: !e.waiting }); }
+      }
+      return out;
+    }
+  };
+
+  // ---------------------------------------------------------------- ドライブ（RAID のメンバー）
+  // HDD2: IndexedDB のデータベース htmlos-raid（HDD2 のシステムのデータとは別）
+  let rdb = null;
+  function raidDB() {
+    if (rdb) return rdb;
+    rdb = new Promise((res, rej) => {
+      if (!window.indexedDB) { rej(new Error('IndexedDB が使えません')); return; }
+      const r = indexedDB.open('htmlos-raid', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('blocks');
+      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+    });
+    rdb.catch(() => { rdb = null; });
+    return rdb;
+  }
+  const tx = (db, mode, fn) => new Promise((res, rej) => { const t = db.transaction('blocks', mode), q = fn(t.objectStore('blocks')); t.oncomplete = () => res(q && q.result); t.onerror = t.onabort = () => rej(t.error || new Error('IndexedDB に書けませんでした')); });
+  async function idbMember(uuid) {
+    const db = await raidDB(), K = k => uuid + '/' + k;
+    return {
+      dev: 'hdd2', label: 'HDD2', name: 'IndexedDB',
+      async get(k) { const v = await tx(db, 'readonly', s => s.get(K(k))); return v == null ? null : new Uint8Array(v); },
+      put: (k, u) => tx(db, 'readwrite', s => s.put(u, K(k))),
+      del: k => tx(db, 'readwrite', s => s.delete(K(k))),
+      destroy: () => tx(db, 'readwrite', s => s.delete(IDBKeyRange.bound(uuid + '/', uuid + '/￿')))
+    };
+  }
+  // HDD1・HDD3: PC のフォルダの .htmlos-raid/<uuid>/
+  async function folderMember(dev, uuid, ask) {
+    const drive = dev === 'hdd1' ? OS.hdd : OS.hdd3;
+    let dir = drive.root ? BOOT.store.handle : await drive.access(ask);
+    if (!dir) {
+      const h = await drive.handle();
+      const e = new Error(h ? DEVS[dev] + '（' + h.name + '）を使う許可を待っています' : DEVS[dev] + ' のフォルダが設定されていません');
+      e.waiting = !!h; throw e;
+    }
+    const top = await dir.getDirectoryHandle(RAID_DIR, { create: true }), ad = await top.getDirectoryHandle(uuid, { create: true });
+    return {
+      dev: dev, label: DEVS[dev], name: dir.name,
+      async get(k) { try { return new Uint8Array(await (await (await ad.getFileHandle(k)).getFile()).arrayBuffer()); } catch (e) { if (e.name === 'NotFoundError') return null; throw e; } },
+      async put(k, u) { const w = await (await ad.getFileHandle(k, { create: true })).createWritable(); await w.write(u); await w.close(); },
+      async del(k) { try { await ad.removeEntry(k); } catch (e) { if (e.name !== 'NotFoundError') throw e; } },
+      async destroy() { try { await top.removeEntry(uuid, { recursive: true }); } catch (e) { if (e.name !== 'NotFoundError') throw e; } }
+    };
+  }
+  const openMember = (dev, uuid, ask) => dev === 'hdd2' ? idbMember(uuid) : folderMember(dev, uuid, ask);
+
+  // ---------------------------------------------------------------- 並べ方（ストライプ・パリティ）
+  const xor = (a, b) => { const o = new Uint8Array(Math.max(a.length, b.length)); o.set(a); for (let i = 0; i < b.length; i++) o[i] ^= b[i]; return o; };
+  const chunkOf = (bytes, c) => bytes.subarray(c * CH, Math.min(bytes.length, (c + 1) * CH));
+  const chunkLen = (len, c) => Math.max(0, Math.min(CH, len - c * CH));
+  // 行の数
+  function rowsOf(level, n, len) {
+    if (!len) return 0;
+    if (level === 'raid1') return 1;
+    return Math.ceil(len / CH / (level === 'raid5' ? n - 1 : n));
+  }
+  // RAID5: 行 r のパリティを置くドライブと、データ（q 番目）を置くドライブ
+  const parityOf = (n, r) => (n - 1) - (r % n);
+  const dataMember = (n, r, q) => { const p = parityOf(n, r); return q < p ? q : q + 1; };
+  // 1 つのファイル（ノードの JSON のバイト列）を、使えるドライブに書く。oldLen より短くなったら余った行を消す
+  async function writeObj(A, id, bytes, oldLen) {
+    const { level, n } = A.idx, ms = A.members, rows = rowsOf(level, n, bytes.length), old = rowsOf(level, n, oldLen || 0), jobs = [];
+    const put = (i, k, u) => { if (ms[i]) jobs.push(ms[i].put(k, u)); }, del = (i, k) => { if (ms[i]) jobs.push(ms[i].del(k)); };
+    if (level === 'raid1') { for (let i = 0; i < n; i++) put(i, 'o' + id, bytes); }
+    else if (level === 'raid0') {
+      for (let r = 0; r < Math.max(rows, old); r++) for (let i = 0; i < n; i++) {
+        const c = r * n + i;
+        if (r < rows && c * CH < bytes.length) put(i, 'o' + id + '.' + r, chunkOf(bytes, c)); else del(i, 'o' + id + '.' + r);
+      }
+    } else {
+      const d = n - 1;
+      for (let r = 0; r < Math.max(rows, old); r++) {
+        if (r >= rows) { for (let i = 0; i < n; i++) del(i, 'o' + id + '.' + r); continue; }
+        let par = new Uint8Array(0);
+        for (let q = 0; q < d; q++) { const ch = chunkOf(bytes, r * d + q); par = xor(par, ch); put(dataMember(n, r, q), 'o' + id + '.' + r, ch); }
+        put(parityOf(n, r), 'o' + id + '.' + r, par);
+      }
+    }
+    await Promise.all(jobs);
+  }
+  async function delObj(A, id, len) {
+    const { level, n } = A.idx, jobs = [];
+    A.members.forEach(m => { if (!m) return; if (level === 'raid1') jobs.push(m.del('o' + id)); else for (let r = 0; r < rowsOf(level, n, len); r++) jobs.push(m.del('o' + id + '.' + r)); });
+    await Promise.all(jobs);
+  }
+  // 読む（RAID5 で 1 台欠けていたら、パリティから作り直す）
+  async function readObj(A, id, len) {
+    const { level, n } = A.idx, ms = A.members;
+    if (!len) return new Uint8Array(0);
+    if (level === 'raid1') {
+      for (const m of ms) { if (!m) continue; const u = await m.get('o' + id); if (u && u.length === len) return u; }
+      throw new Error('o' + id + ' がどのドライブにもありません');
+    }
+    const out = new Uint8Array(len), rows = rowsOf(level, n, len);
+    if (level === 'raid0') {
+      for (let r = 0; r < rows; r++) for (let i = 0; i < n; i++) {
+        const c = r * n + i, L = chunkLen(len, c); if (!L) continue;
+        const u = await ms[i].get('o' + id + '.' + r); if (!u || u.length !== L) throw new Error('o' + id + ' の ' + (c + 1) + ' 個目のかたまりが ' + ms[i].label + ' にありません');
+        out.set(u, c * CH);
+      }
+      return out;
+    }
+    const d = n - 1;
+    for (let r = 0; r < rows; r++) {
+      const got = await Promise.all(ms.map(m => m ? m.get('o' + id + '.' + r) : null));
+      for (let q = 0; q < d; q++) {
+        const c = r * d + q, L = chunkLen(len, c); if (!L) continue;
+        let u = got[dataMember(n, r, q)];
+        if (!u || u.length !== L) {
+          // パリティと、ほかのデータから作り直す
+          let x = got[parityOf(n, r)]; if (!x) throw new Error('o' + id + ' の行 ' + r + ' を作り直せません（2 台以上が欠けています）');
+          for (let q2 = 0; q2 < d; q2++) { if (q2 === q) continue; const v = got[dataMember(n, r, q2)]; if (!v && chunkLen(len, r * d + q2)) throw new Error('o' + id + ' の行 ' + r + ' を作り直せません'); if (v) x = xor(x, v); }
+          u = x.subarray(0, L);
+        }
+        out.set(u, c * CH);
+      }
+    }
+    return out;
+  }
+
+  // ---------------------------------------------------------------- アレイ（/mnt/raid のストレージ）
+  // 中身はメモリに全部読み込んで、読み書きはすぐに返す。ドライブへは裏で書き出す（HDD1 と同じ考え方）
+  function arrayStore(A) {
+    const map = A.map, dirty = new Set(); let busy = null, used = 0;
+    map.forEach(v => { used += v.length; });
+    const st = { ram: false, raid: true, name: 'md0（' + A.idx.level.toUpperCase() + '）', label: 'RAID', errors: [], skipped: [], onerror: null };
+    function report(what, e) {
+      st.errors.push(what + ': ' + ((e && e.message) || e)); log(what + ': ' + ((e && e.message) || e), 3);
+      if (OS.notify && OS.htui && OS.htui.user) OS.notify({ app: 'RAID', icon: 'raid', title: 'RAID に書き込めませんでした', body: what + ': ' + ((e && e.message) || e) });
+    }
+    async function writeIndex() {
+      A.idx.gen++; const u = enc.encode(JSON.stringify(A.idx));
+      await Promise.all(A.members.map(m => m && m.put('index', u)));
+    }
+    function kick() {
+      if (!busy) busy = (async () => {
+        await null;
+        while (dirty.size) {
+          const list = Array.from(dirty); dirty.clear();
+          for (const k of list) {
+            const v = map.get(k), ent = A.idx.files[k];
+            try {
+              if (v == null) { if (ent) { delete A.idx.files[k]; await delObj(A, ent[0], ent[1]); } }
+              else { const b = enc.encode(v), id = ent ? ent[0] : A.idx.next++; await writeObj(A, id, b, ent ? ent[1] : 0); A.idx.files[k] = [id, b.length]; }
+            } catch (e) { report(k.slice(2), e); }
+          }
+          try { await writeIndex(); } catch (e) { report('index', e); }
+        }
+        busy = null;
+      })();
+      return busy;
+    }
+    st.get = k => { const v = map.get(k); return v === undefined ? null : v; };
+    st.set = (k, v) => { if (k.indexOf('f:') !== 0) return; v = String(v); const o = map.get(k); used += v.length - (o ? o.length : 0); map.set(k, v); dirty.add(k); kick(); };
+    st.del = k => { if (k === 'f:' + AT) return; const o = map.get(k); if (o == null) return; used -= o.length; map.delete(k); dirty.add(k); kick(); };
+    st.keys = pre => { pre = pre || ''; const out = []; map.forEach((v, k) => { if (k.indexOf(pre) === 0) out.push(k); }); return out; };
+    st.wipe = () => st.keys().forEach(k => st.del(k));
+    st.flush = () => busy || Promise.resolve();
+    st.pending = () => !!busy || dirty.size > 0;
+    st.count = () => map.size;
+    st.used = () => used;
+    st.quota = () => 0;
+    // 全部を書き直す（欠けていたドライブが戻ってきたときの再構築）
+    st.resyncAll = async progress => { const keys = Array.from(map.keys()); let i = 0; for (const k of keys) { const ent = A.idx.files[k], b = enc.encode(map.get(k)); const id = ent ? ent[0] : A.idx.next++; await writeObj(A, id, b, ent ? ent[1] : 0); A.idx.files[k] = [id, b.length]; if (progress && ++i % 20 === 0) progress(i, keys.length); } await writeIndex(); };
+    return st;
+  }
+
+  // ---------------------------------------------------------------- RAID の操作
+  const raid = OS.raid = {
+    at: AT, CH: CH, devs: DEVS, active: null, waiting: null,
+    config: () => readJSON(CONF),
+    stateName: s => ({ clean: '正常', degraded: '縮退（1 台欠けています）', rebuilding: '再構築中', waiting: '待機中' })[s] || s,
+    levels: { raid0: { name: 'RAID0（ストライピング）', min: 2, tol: 0 }, raid1: { name: 'RAID1（ミラーリング）', min: 2, tol: Infinity }, raid5: { name: 'RAID5（パリティ）', min: 3, tol: 1 } },
+    // 使えるドライブ（hdd2 は IndexedDB があれば、hdd1・hdd3 はフォルダが設定されていれば）
+    async available() {
+      const out = {};
+      out.hdd2 = !!window.indexedDB;
+      out.hdd1 = OS.hdd.root || !!(await OS.hdd.handle());
+      out.hdd3 = !!(await OS.hdd3.handle()) && storage.hdd3Use() === 'raid';
+      return out;
+    },
+    // 容量の目安（使い方の説明に出す）
+    capacityNote(level, n) { return level === 'raid0' ? 'すべてのドライブの合計（' + n + ' 台）' : level === 'raid1' ? 'いちばん小さいドライブと同じ（' + n + ' 台に同じものを書きます）' : 'いちばん小さいドライブの ' + (n - 1) + ' 台分（1 台分はパリティ）'; },
+    status() {
+      const A = raid.active, c = raid.config();
+      if (!c) return null;
+      if (!A) return { level: c.level, members: c.members.map(d => ({ dev: d, label: DEVS[d], ok: false })), state: 'waiting', reason: raid.waiting, at: AT, created: c.created };
+      return { level: A.idx.level, members: A.idx.members.map((d, i) => ({ dev: d, label: DEVS[d], name: A.members[i] ? A.members[i].name : null, ok: !!A.members[i] })), state: A.state, at: AT, files: Object.keys(A.idx.files).length, used: A.store.used(), gen: A.idx.gen, created: c.created };
+    },
+    // 新しく作る（中身は空）。ask: フォルダの許可を求める（ボタンを押したときなど）
+    async create(level, devs, o) {
+      o = o || {};
+      level = String(level).toLowerCase().replace(/^(\d)$/, 'raid$1');
+      const L = raid.levels[level]; if (!L) throw new Error('RAID のレベルは 0・1・5 です');
+      devs = Array.from(new Set(devs.map(d => String(d).toLowerCase())));
+      devs.forEach(d => { if (!DEVS[d]) throw new Error(d + ': そのようなドライブはありません（hdd1・hdd2・hdd3）'); });
+      if (raid.config()) throw new Error('RAID（md0）はもうあります。作り直すときは先に削除してください');
+      if (devs.length < L.min) throw new Error(L.name + ' には ' + L.min + ' 台以上のドライブが必要です');
+      if (level === 'raid5') {
+        if (!devs.includes('hdd3')) throw new Error('RAID5 は HDD3 をセットアップしてから使えます（HDD1・HDD2・HDD3 の 3 台）');
+        if (devs.length !== 3) throw new Error('RAID5 は HDD1・HDD2・HDD3 の 3 台で作ります');
+      }
+      if (devs.includes('hdd3') && !(await OS.hdd3.handle())) throw new Error('HDD3 がセットアップされていません（設定 → ストレージ）');
+      if (devs.includes('hdd3') && storage.hdd3Use() !== 'raid') await storage.setHdd3Use('raid');
+      const uuid = (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2)).replace(/-/g, '').slice(0, 16);
+      const ms = [];
+      for (const d of devs) ms.push(await openMember(d, uuid, o.ask !== false));
+      const idx = { format: 'htmlos-raid', version: 1, uuid: uuid, level: level, n: devs.length, members: devs, chunk: CH, gen: 0, next: 1, files: {}, created: Date.now() };
+      const A = { idx: idx, members: ms, map: new Map(), state: 'clean' };
+      A.map.set('f:' + AT, JSON.stringify({ t: 'd', m: Date.now(), o: 'root', p: 0o777 }));
+      A.store = arrayStore(A);
+      A.store.set('f:' + AT, A.map.get('f:' + AT));
+      await A.store.flush();
+      fs.write(CONF, JSON.stringify({ uuid: uuid, level: level, members: devs, created: idx.created }, null, 1));
+      raid.active = A; raid.waiting = null;
+      OS.mountStore(AT, A.store);
+      log(L.name + ' を作りました（' + devs.map(d => DEVS[d]).join('・') + '）');
+      return raid.status();
+    },
+    // 組み立てて /mnt/raid につなぐ
+    async assemble(o) {
+      o = o || {};
+      const c = raid.config(); if (!c) throw new Error('RAID はありません（raid create で作れます）');
+      if (raid.active) return raid.status();
+      const L = raid.levels[c.level];
+      const errs = [], ms = await Promise.all(c.members.map(d => openMember(d, c.uuid, o.ask).catch(e => { errs.push(e); return null; })));
+      // それぞれの index を読み、いちばん新しい世代を使う
+      const idxs = await Promise.all(ms.map(m => m ? m.get('index').then(u => { try { return u && JSON.parse(dec.decode(u)); } catch (e) { return null; } }).catch(() => null) : null));
+      let best = null; idxs.forEach(x => { if (x && x.uuid === c.uuid && (!best || x.gen > best.gen)) best = x; });
+      if (!best) { const e = new Error(errs.length ? errs.map(x => x.message).join('、') : 'RAID のデータが見つかりません'); e.waiting = errs.some(x => x.waiting); throw e; }
+      // 古い世代のドライブは、読むのには使わず、あとで書き直す
+      const stale = [];
+      const readMs = ms.map((m, i) => { if (m && idxs[i] && idxs[i].gen === best.gen) return m; if (m) stale.push(i); return null; });
+      const missing = readMs.filter(m => !m).length;
+      if (missing > L.tol) {
+        const e = new Error(L.name + ' を組み立てられません: ' + missing + ' 台が使えません' + (errs.length ? '（' + errs.map(x => x.message).join('、') + '）' : ''));
+        e.waiting = errs.some(x => x.waiting); throw e;
+      }
+      const A = { idx: best, members: readMs, map: new Map(), state: missing ? 'degraded' : 'clean' };
+      const keys = Object.keys(best.files); let i = 0;
+      for (const k of keys) {
+        const ent = best.files[k];
+        try { A.map.set(k, dec.decode(await readObj(A, ent[0], ent[1]))); }
+        catch (e) { log(k.slice(2) + ' を読めませんでした: ' + e.message, 3); }
+        if (o.progress && ++i % 20 === 0) o.progress(i, keys.length);
+      }
+      if (!A.map.has('f:' + AT)) A.map.set('f:' + AT, JSON.stringify({ t: 'd', m: Date.now(), o: 'root', p: 0o777 }));
+      A.store = arrayStore(A);
+      raid.active = A; raid.waiting = null;
+      OS.mountStore(AT, A.store);
+      log(L.name + ' を組み立てました（' + raid.stateName(A.state) + '、' + keys.length + ' 項目）', missing ? 4 : 6);
+      if (stale.length) {
+        stale.forEach(j => { A.members[j] = ms[j]; });
+        if (A.members.every(Boolean)) await raid.rebuild({ ask: false }).catch(e => log('再構築できませんでした: ' + e.message, 3));
+      }
+      else if (missing && OS.notify) OS.notify({ app: 'RAID', icon: 'raid', title: 'RAID が縮退しています', body: errs.map(x => x.message).join('、') || '1 台が使えません' });
+      return raid.status();
+    },
+    // 欠けていたドライブを戻して全部を書き直す。ask: フォルダの許可を求める
+    async rebuild(o) {
+      o = o || {};
+      const A = raid.active; if (!A) throw new Error('RAID が組み立てられていません');
+      for (let i = 0; i < A.members.length; i++) if (!A.members[i]) A.members[i] = await openMember(A.idx.members[i], A.idx.uuid, o.ask !== false);
+      A.state = 'rebuilding'; log('再構築を始めました');
+      await A.store.flush();
+      await A.store.resyncAll(o.progress);
+      A.state = 'clean'; log('再構築が終わりました');
+      if (OS.notify) OS.notify({ app: 'RAID', icon: 'raid', title: 'RAID の再構築が終わりました' });
+      return raid.status();
+    },
+    async stop() {
+      if (!raid.active) return false;
+      await raid.active.store.flush(); await OS.unmountStore(AT); raid.active = null; log('RAID を止めました'); return true;
+    },
+    // 削除: 止めて、各ドライブの RAID のデータを消す（元に戻せない）
+    async destroy(o) {
+      const c = raid.config(); if (!c) throw new Error('RAID はありません');
+      await raid.stop();
+      for (const d of c.members) { try { const m = await openMember(d, c.uuid, !(o && o.ask === false)); await m.destroy(); } catch (e) { log(DEVS[d] + ' の RAID のデータを消せませんでした: ' + e.message, 4); } }
+      fs.rm(CONF); raid.waiting = null; log('RAID（md0）を削除しました');
+    },
+    fmt: fmt
+  };
+})();
+</script>
 <script type="text/x-htmlos" data-path="/sys/shells.js">
 /* デスクトップ環境（セッション）
    htui  … HTUi       上にパネル、左にデスクトップアイコン（標準）。タッチでは下にナビが出る
@@ -10021,6 +10918,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
    gnome … hShell     GNOME 風。トップバー、アクティビティ画面とドック、カレンダーと通知センター
    wm    … hwc        Labwc 風。パネルなしのウィンドウマネージャだけ。右クリックでメニュー
    mac   … hAqua      macOS 風。メニューバーとドック。タブレットは iPadOS 風、スマートフォンは iOS 風
+   droid … hDroid     Android 風（7.0）。ステータスバーと通知シェード、ホーム画面とアプリドロワー、戻る・ホーム・履歴のナビゲーションバー
    どれも OS.registerSession({ id, name, desc, build(kit), ... }) で登録している。
    環境が持てるフック: onStart / onStop / onApps / onActive(win) / onFocus(win) / onMode / onNotify(n) / onKey(e) / onSuper() / freeWindows() */
 (function () {
@@ -11492,6 +12390,246 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       // タッチ: Esc（キーボードの戻る）でホームへ
       if (OS.touch && e.key === 'Escape' && !htui.el.querySelector('.modal-ov,.menu:not(.leaving),.mc-cc:not(.leaving),.mc-nc:not(.leaving),.mc-spot:not(.leaving),.mc-lpad:not(.leaving),.ios-sw:not(.leaving)')) {
         const a = document.activeElement; if (htui.active() && (!a || !/^(INPUT|TEXTAREA)$/.test(a.tagName))) { this.goHome(htui.active()); return true; }
+      }
+    }
+  });
+  // ======================================================== hDroid（Android 風。htmlOS 7.0）
+  //   上にステータスバー（押す・下へ引くと通知シェード: クイック設定と通知）、下にナビゲーションバー（戻る・ホーム・履歴）。
+  //   ホーム画面: 時計とアプリのアイコン、ドック、検索バー。上へスワイプ（またはナビの「すべてのアプリ」）でアプリドロワー。
+  //   タブレット・スマートフォンではアプリは全画面。マウス（デスクトップモード）では Android のデスクトップのように
+  //   ふつうのウィンドウになり、ナビゲーションバーにタスクバー（固定したアプリと起動中のアプリ）が出る
+  const AD_NAV = {
+    back: "<path d='M17 5.5v13L6 12z' fill='none' stroke='currentColor' stroke-width='2' stroke-linejoin='round'/>",
+    home: "<circle cx='12' cy='12' r='6.5' fill='none' stroke='currentColor' stroke-width='2'/>",
+    recents: "<rect x='6' y='6' width='12' height='12' rx='2.5' fill='none' stroke='currentColor' stroke-width='2'/>",
+    wifi: "<path d='M12 19.5L1.8 8.6a14.6 14.6 0 0 1 20.4 0z' fill='currentColor'/>",
+    batt: "<rect x='8' y='3.5' width='8' height='18' rx='2' fill='none' stroke='currentColor' stroke-width='1.8'/><rect x='10' y='1.6' width='4' height='2.2' rx='.8' fill='currentColor'/><rect x='10' y='9' width='4' height='10.5' rx='.6' fill='currentColor'/>"
+  };
+  const adGlyph = (k, size) => { const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('width', size || 22); s.setAttribute('height', size || 22); s.setAttribute('aria-hidden', 'true'); s.innerHTML = AD_NAV[k]; return s; };
+  OS.registerSession({
+    id: 'droid', name: 'hDroid（Android 風）', pins: ['hbrowser', 'hfile', 'terminal', 'hedit', 'settings'], pinWhere: 'ホーム画面のドック',
+    desc: '上にステータスバー（引き下ろすと通知とクイック設定）、下に戻る・ホーム・履歴のナビゲーションバーがある Android 風の環境です。ホーム画面を上へスワイプするとすべてのアプリ。マウスではウィンドウとタスクバーも使えます。',
+    build(k) {
+      const self = this, el = htui.el;
+      // ---- ステータスバー
+      this.batt = h('span', { class: 'ad-batt', hidden: true });
+      if (navigator.getBattery) navigator.getBattery().then(b => { const upd = () => { self.batt.hidden = false; self.batt.textContent = Math.round(b.level * 100) + '%'; }; upd(); b.addEventListener('levelchange', upd); }).catch(() => {});
+      this.dot = h('span', { class: 'ad-sdot', hidden: true, 'aria-hidden': 'true' }, OS.icon('bell', 13));
+      const status = h('div', { class: 'ad-status', role: 'button', tabindex: '0', 'aria-label': '通知とクイック設定', onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); self.shade(); } } },
+        k.clock(h('b', { class: 'ad-time' }), d => d.getHours() + ':' + pad(d.getMinutes())), this.dot,
+        h('span', { class: 'ad-grow' }), h('span', { class: 'ad-sicons' }, adGlyph('wifi', 15), adGlyph('batt', 15), this.batt));
+      dragOn(status, (dx, dy, tap) => { if (tap || dy > 30) self.shade(); });
+      // ---- ホーム画面
+      this.grid = h('div', { class: 'ad-grid' });
+      this.dockRow = h('div', { class: 'ad-dock' });
+      const glance = h('div', { class: 'ad-glance' },
+        k.clock(h('b'), d => (d.getMonth() + 1) + '月' + d.getDate() + '日（' + WEEK[d.getDay()] + '）'),
+        k.clock(h('span', { class: 'ad-bigclock' }), d => pad(d.getHours()) + ':' + pad(d.getMinutes())));
+      const search = h('button', { class: 'ad-search', type: 'button', onclick: () => self.drawer(true) }, OS.icon('search', 20), h('span', null, 'アプリを検索'));
+      this.home = h('div', { class: 'ad-home' }, glance, this.grid, h('span', { class: 'ad-grow' }), this.dockRow, search);
+      swipe(this.home, (dx, dy) => { if (dy < -60 && Math.abs(dy) > Math.abs(dx)) self.drawer(); else if (dy > 60 && Math.abs(dy) > Math.abs(dx)) self.shade(); else return false; });
+      this.home.addEventListener('contextmenu', e => { if (e.target.closest('.ad-app')) return; e.preventDefault(); e.stopPropagation(); k.menuAt(e.clientX, e.clientY, [
+        { label: '壁紙とスタイル', icon: 'image', act: () => k.run('settings', 'look') },
+        { label: 'ホームの設定', icon: 'gear', act: () => k.run('settings') }]); });
+      const desk = k.desk(false);
+      desk.prepend(this.home);
+      // ---- ナビゲーションバー（とデスクトップモードのタスクバー）
+      this.tasks = h('div', { class: 'ad-tasks', role: 'toolbar', 'aria-label': 'タスクバー' });
+      const nb = (key, label, fn) => h('button', { class: 'ad-nbtn ad-k-' + key, type: 'button', title: label, 'aria-label': label, onclick: fn }, adGlyph(key, 22));
+      const nav = h('div', { class: 'ad-nav' },
+        h('button', { class: 'ad-nbtn ad-all', type: 'button', title: 'すべてのアプリ', 'aria-label': 'すべてのアプリ', onclick: () => self.drawer() }, OS.icon('grid', 20)),
+        this.tasks,
+        h('div', { class: 'ad-keys' }, nb('back', '戻る', () => self.back()), nb('home', 'ホーム', () => self.goHome()), nb('recents', '履歴（開いているアプリ）', () => self.recents())),
+        h('span', { class: 'ad-tray' }, k.modeButton('ad-nbtn')));
+      dragOn(nav, (dx, dy) => { if (dy < -40) self.recents(); }, true);
+      el.append(status, desk, nav);
+      el.classList.add('ad-home-on');
+    },
+    onStart() { this.onApps(); this.onActive(htui.active()); },
+    onStop() { this.grid = null; this.tasks = null; this._sig = null; },
+    freeWindows() { return false; },
+
+    // ---- ホーム・ドック・タスクバーを作り直す
+    onApps() {
+      if (!this.grid) return;
+      const k = htui.kit, self = this;
+      const sig = [OS.uiMode, htui.pins.list().join(), Object.keys(OS.apps).join(), htui.wins.map(w => w.app + (w.el.classList.contains('hidden') ? '-' : '+')).join('|'), (htui.active() || {}).app].join('#');
+      if (sig === this._sig) return;
+      this._sig = sig;
+      const tile = (a, label) => h('button', { class: 'ad-app', type: 'button', title: a.desc || a.name, 'data-app': a.id, onclick: () => self.openApp(a.id) }, k.appIcon(a, 26), label === false ? null : h('span', null, a.name));
+      const pins = htui.pins.list();
+      this.grid.textContent = ''; this.dockRow.textContent = '';
+      // ホーム: ドックにないアプリから最大 OS.uiMode ごとの数だけ（残りはドロワー）
+      const max = OS.uiMode === 'phone' ? 12 : 24;
+      k.apps().filter(a => !pins.includes(a.id)).slice(0, max).forEach((a, i) => { const t = tile(a); t.style.setProperty('--i', i); this.grid.append(t); });
+      pins.forEach(id => this.dockRow.append(tile(OS.apps[id], false)));
+      // タスクバー（デスクトップ・タブレット）: 固定したアプリ、起動中のアプリ
+      this.tasks.textContent = '';
+      const act = htui.active(), extra = [...new Set(htui.wins.map(w => w.app))].filter(id => OS.apps[id] && !pins.includes(id));
+      pins.concat(extra).forEach(id => {
+        const a = OS.apps[id], run = htui.wins.some(w => w.app === id);
+        this.tasks.append(h('button', { class: 'ad-tk' + (run ? ' run' : '') + (act && act.app === id ? ' on' : ''), type: 'button', title: a.name, 'aria-label': a.name, 'data-app': id, onclick: () => self.openApp(id, true) }, k.appIcon(a, 18)));
+      });
+    },
+    // アプリを開く。もう開いているならそのウィンドウへ。toggle=true（タスクバー）なら、手前にあるときはしまう
+    openApp(id, toggle) {
+      htui.closeMenus();
+      const top = byZ().find(x => x.app === id);
+      if (top) { if (toggle && top === htui.active()) top.minimize(); else top.focus(); return; }
+      htui.el.classList.remove('ad-home-on');
+      htui.kit.run(id);
+    },
+    goHome() {
+      htui.closeMenus();
+      ['.ad-drawer', '.ad-shade', '.ad-recents'].forEach(q => { const x = htui.el.querySelector(q + ':not(.leaving)'); if (x && x._close) x._close(); });
+      htui.wins.forEach(w => { if (visible(w)) w.minimize(); });
+      htui.el.classList.add('ad-home-on');
+    },
+    // 戻る: ダイアログ → メニュー → シェードなど → アプリ（しまってホームへ）の順に閉じる
+    back() {
+      const el = htui.el;
+      const modal = el.querySelector('.modal-ov');
+      if (modal) { modal.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return; }
+      if (el.querySelector('.menu:not(.leaving)')) { htui.closeMenus(); return; }
+      const pop = el.querySelector('.ad-drawer:not(.leaving),.ad-shade:not(.leaving),.ad-recents:not(.leaving)');
+      if (pop && pop._close) { pop._close(); return; }
+      const w = htui.active();
+      // タッチではアプリをしまってホームへ（Android と同じ）。マウスではそのウィンドウだけしまう
+      if (w) { if (OS.touch) this.goHome(); else w.minimize(); }
+    },
+    onFocus() { htui.el.classList.remove('ad-home-on'); },
+    onActive(w) {
+      if (!this.grid) return;
+      htui.el.classList.toggle('ad-home-on', !w || (!OS.touch && !htui.wins.some(x => visible(x) && x.zone === 'max')));
+      this.onApps();
+    },
+    onMode() { this.onActive(htui.active()); },
+    onSuper() { this.drawer(); },
+
+    // ---- アプリドロワー（すべてのアプリ）
+    drawer(focusSearch) {
+      const old = htui.el.querySelector('.ad-drawer:not(.leaving)'); if (old) { old._close(); return; }
+      const k = htui.kit, self = this;
+      const list = h('div', { class: 'ad-dgrid' });
+      const q = h('input', { class: 'inp ad-dq', id: 'ad-dq', placeholder: 'アプリを検索', 'aria-label': 'アプリを検索', autocomplete: 'off', spellcheck: 'false' });
+      const fill = () => {
+        const t = q.value.trim().toLowerCase(); list.textContent = '';
+        const apps = k.apps().filter(a => !t || (a.name + ' ' + a.id + ' ' + (a.desc || '')).toLowerCase().includes(t)).sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+        if (!apps.length) list.append(h('p', { class: 'ad-empty' }, '見つかりません'));
+        apps.forEach(a => list.append(h('button', { class: 'ad-app', type: 'button', title: a.desc || a.name, 'data-app': a.id, onclick: () => { close(); self.openApp(a.id); } }, k.appIcon(a, 26), h('span', null, a.name))));
+      };
+      q.addEventListener('input', fill);
+      q.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); const b = list.querySelector('.ad-app'); if (b) b.click(); } });
+      const box = h('div', { class: 'ad-drawer', role: 'dialog', 'aria-label': 'すべてのアプリ' }, h('div', { class: 'ad-grip', 'aria-hidden': 'true' }), h('div', { class: 'ad-dsearch' }, OS.icon('search', 18), q), list);
+      // いちばん上までスクロールしているときに下へ引くと閉じる
+      swipe(box, (dx, dy) => { if (dy > 80 && list.scrollTop <= 0 && Math.abs(dy) > Math.abs(dx)) close(); else return false; });
+      fill();
+      const close = popup(box, null);
+      if (focusSearch || !OS.touch) setTimeout(() => q.focus(), 60);
+    },
+
+    // ---- 通知シェード（クイック設定と通知）
+    shade() {
+      const old = htui.el.querySelector('.ad-shade:not(.leaving)'); if (old) { old._close(); return; }
+      const k = htui.kit, self = this, d = new Date();
+      const list = h('div', { class: 'ad-nlist' });
+      const fill = () => {
+        list.textContent = '';
+        if (!htui.notices.length) list.append(h('p', { class: 'ad-empty' }, '通知はありません'));
+        htui.notices.forEach(n => list.append(h('div', { class: 'ad-note' }, h('span', { class: 'ad-nico' }, OS.icon(n.icon || 'bell', 18)),
+          h('span', { class: 'ad-ntext' }, h('small', null, (n.app || 'htmlOS') + ' ・ ' + new Date(n.time).getHours() + ':' + pad(new Date(n.time).getMinutes())), h('b', null, n.title), n.body ? h('span', null, n.body) : null),
+          h('button', { class: 'ad-nx', type: 'button', 'aria-label': n.title + ' を消す', onclick: () => { htui.notices = htui.notices.filter(x => x !== n); fill(); self.syncDot(); } }, OS.icon('x', 14)))));
+        htui.notices.forEach(n => { n.unread = false; }); self.syncDot();
+      };
+      const tileBtn = (icon, label, sub, fn, on) => h('button', { class: 'ad-qt' + (on ? ' on' : ''), type: 'button', onclick: fn }, OS.icon(icon, 20), h('span', null, h('b', null, label), sub ? h('small', null, sub) : null));
+      const again = () => { close(); self.shade(); };
+      const box = h('div', { class: 'ad-shade', role: 'dialog', 'aria-label': '通知とクイック設定' },
+        h('div', { class: 'ad-shead' }, h('b', null, pad(d.getHours()) + ':' + pad(d.getMinutes())), h('span', null, (d.getMonth() + 1) + '月' + d.getDate() + '日（' + WEEK[d.getDay()] + '）'),
+          h('span', { class: 'ad-grow' }),
+          h('button', { class: 'ad-sbtn', type: 'button', title: '電源', 'aria-label': '電源', onclick: e => k.menu(e.currentTarget, k.powerItems(), true) }, OS.icon('power', 18)),
+          h('button', { class: 'ad-sbtn', type: 'button', title: '設定', 'aria-label': '設定', onclick: () => { close(); self.openApp('settings'); } }, OS.icon('gear', 18))),
+        h('div', { class: 'ad-qgrid' },
+          tileBtn(OS.modeIcons[OS.uiMode], '画面モード', OS.modeNames[OS.uiMode], e => k.menu(e.currentTarget, k.modeItems())),
+          tileBtn('bell', 'サイレント', htui.prefs.dnd ? 'オン' : 'オフ', () => { htui.setPrefs({ dnd: !htui.prefs.dnd }); again(); }, htui.prefs.dnd),
+          tileBtn('music', 'BGM', k.bgmLabel(), () => { k.bgmToggle(); again(); }, k.bgmOn()),
+          tileBtn('camera', 'スクリーンショット', 'Alt+Shift+5', () => { close(); setTimeout(() => htui.screenshot && htui.screenshot(), 350); }),
+          tileBtn('desks', '仮想デスク', (htui.ws ? htui.ws.cur + 1 : 1) + ' 番目', () => { close(); htui.wsView(); }),
+          tileBtn('user', htui.user, 'ユーザー', e => k.menu(e.currentTarget, k.powerItems(), true))),
+        h('div', { class: 'ad-nhead' }, h('span', null, '通知'), h('button', { class: 'ad-clear', type: 'button', onclick: () => { htui.notices = []; fill(); } }, 'すべて消去')),
+        list, h('div', { class: 'ad-grip', 'aria-hidden': 'true' }));
+      dragOn(box, (dx, dy) => { if (dy < -60) close(); }, true);
+      fill();
+      const close = popup(box, null);
+    },
+    syncDot() { if (this.dot) this.dot.hidden = !htui.notices.some(n => n.unread); },
+    // 届いた通知: 上にヘッドアップ通知
+    onNotify(n) {
+      this.syncDot();
+      if (n.silent || htui.prefs.dnd) return;
+      const old = htui.el.querySelector('.ad-heads'); if (old) old.remove();
+      const t = h('button', { class: 'ad-heads', type: 'button', onclick: () => { t.remove(); this.shade(); } }, h('span', { class: 'ad-nico' }, OS.icon(n.icon || 'bell', 18)),
+        h('span', { class: 'ad-ntext' }, h('small', null, n.app || 'htmlOS'), h('b', null, n.title), n.body ? h('span', null, n.body) : null));
+      swipe(t, (dx, dy) => { if (dy < -30 || Math.abs(dx) > 60) t.remove(); });
+      htui.el.append(t);
+      setTimeout(() => t.remove(), 5000);
+    },
+
+    // ---- 履歴（開いているアプリ）。カードを押すと切り替え、上へはじくと閉じる
+    recents() {
+      const old = htui.el.querySelector('.ad-recents:not(.leaving)'); if (old) { old._close(); return; }
+      const row = h('div', { class: 'ad-rrow' }), self = this;
+      const box = h('div', { class: 'ad-recents', role: 'dialog', 'aria-label': '履歴' }, row);
+      const fill = () => {
+        row.textContent = '';
+        const wins = byZ();
+        if (!wins.length) { row.append(h('p', { class: 'ad-empty' }, '最近のアイテムはありません')); return; }
+        wins.forEach(w => {
+          const a = OS.apps[w.app] || {};
+          const card = h('div', { class: 'ad-card' },
+            h('div', { class: 'ad-chead' }, htui.kit.appIcon(a.icon ? a : { icon: 'file' }, 14), h('span', null, w.title)),
+            h('button', { class: 'ad-cthumb', type: 'button', style: '--c:' + (a.color || '#5e5c64'), 'aria-label': w.title + ' に切り替え', onclick: () => { close(); w.focus(); } }, self.snap(w) || OS.icon(a.icon || 'file', 56)));
+          card.addEventListener('pointerdown', e => {
+            if (e.button > 0) return;
+            const y0 = e.clientY; let dy = 0;
+            const mv = ev => { dy = Math.min(0, ev.clientY - y0); if (dy < -8) { card.style.transition = 'none'; card.style.transform = 'translateY(' + dy + 'px)'; card.style.opacity = String(1 + dy / 400); } };
+            const up = async () => {
+              document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up);
+              card.style.transition = ''; card.style.transform = ''; card.style.opacity = '';
+              if (dy < -90) { card.addEventListener('click', ev => ev.stopPropagation(), { capture: true, once: true }); if (await w.close()) { fill(); if (!htui.wins.length) close(); } }
+            };
+            document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
+          });
+          row.append(card);
+        });
+      };
+      box.append(h('button', { class: 'ad-rclear', type: 'button', onclick: async () => { for (const w of htui.wins.slice()) { if ((await w.close()) === false) break; } fill(); if (!htui.wins.length) { close(); self.goHome(); } } }, 'すべてクリア'));
+      box.addEventListener('click', e => { if (e.target === box || e.target === row) { close(); } });
+      fill();
+      const close = popup(box, null);
+    },
+
+    // 履歴のカードに入れる、ウィンドウの縮小コピー（中身は押せない）
+    snap(w) {
+      const d = htui.desk; if (!d) return null;
+      const W = w.el.offsetWidth || d.clientWidth, H = w.el.offsetHeight || d.clientHeight; if (!W || !H) return null;
+      const c = w.el.cloneNode(true);
+      c.classList.remove('hidden', 'minimizing', 'active'); c.removeAttribute('id');
+      c.querySelectorAll('[id]').forEach(x => x.removeAttribute('id'));
+      c.querySelectorAll('iframe,video,canvas,script').forEach(x => x.replaceWith(h('div', { class: 'ad-ph' })));
+      c.style.cssText += ';position:absolute;left:0;top:0;width:' + W + 'px;height:' + H + 'px;transform:none;animation:none;transition:none;margin:0';
+      const box = h('div', { class: 'ad-snap', 'aria-hidden': 'true', inert: '' }, c);
+      // 大きさはカードに入ってから合わせる
+      requestAnimationFrame(() => { const p = box.parentNode; if (p) p.style.aspectRatio = W + ' / ' + H; requestAnimationFrame(() => { c.style.transform = 'scale(' + (box.clientWidth / W) + ')'; c.style.transformOrigin = '0 0'; }); });
+      return box;
+    },
+    onContext(e) {
+      const b = e.target.closest('.ad-app,.ad-tk'); if (!b) return null;
+      return appItems(b.dataset.app, id => this.openApp(id));
+    },
+    onKey(e) {
+      // Esc（キーボードの戻る）: タッチではアプリをしまってホームへ
+      if (e.key === 'Escape' && OS.touch && !htui.el.querySelector('.modal-ov,.menu:not(.leaving),.ad-drawer:not(.leaving),.ad-shade:not(.leaving),.ad-recents:not(.leaving)')) {
+        const a = document.activeElement; if (htui.active() && (!a || !/^(INPUT|TEXTAREA)$/.test(a.tagName))) { this.back(); return true; }
       }
     }
   });
@@ -13278,6 +14416,138 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 .rv-cell.can::after{content:'';position:absolute;width:24%;height:24%;border-radius:50%;background:rgba(255,255,255,.28)}
 .rv-cell.can:hover::after{background:rgba(255,255,255,.55)}
 .rv-cell.last::before{content:'';position:absolute;z-index:1;width:12%;height:12%;border-radius:50%;background:#ff5a5a}
+/* ---- hCron（7.0） */
+.cr{display:flex;flex-direction:column;height:100%;min-height:0;padding:10px 12px;gap:8px;box-sizing:border-box}
+.cr-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.cr-bar .btn{display:inline-flex;align-items:center;gap:4px}
+.cr-who{margin-left:auto;color:var(--ink-2);font-size:13px}
+.cr-stat{font-size:12px;color:#26a269}.cr-stat.bad{color:#c01c28}
+.cr-list{flex:1;min-height:80px;overflow:auto}
+.cr-tbl td{vertical-align:top}
+.cr-tbl td small{display:block;color:var(--ink-2);font-family:monospace}
+.cr-tbl code{font-size:12px;overflow-wrap:anywhere}
+.cr-err td{color:#c01c28}
+.cr-empty{color:var(--ink-2)}
+.cr-logh{font-size:12px;color:var(--ink-2)}
+.cr-log{margin:0;height:110px;overflow:auto;padding:6px 8px;border-radius:8px;background:rgba(127,127,127,.12);font-size:11.5px;white-space:pre-wrap}
+.cr-form{display:flex;flex-direction:column;gap:8px}
+.cr-f{display:flex;align-items:center;gap:8px}
+.cr-f>span{width:7.5em;flex:none;color:var(--ink-2);font-size:13px}
+.cr-f .inp{flex:1;min-width:0}
+.cr-f .cr-num{flex:none;width:6em}
+.cr-f[hidden]{display:none}
+.cr-prev{margin:0;font-size:13px;color:var(--ink)}.cr-prev.bad{color:#c01c28}
+.cr-ta{min-height:200px;font-family:monospace;font-size:12.5px}
+/* ---- スクリーンショット（7.0） */
+.shot-flash{position:fixed;inset:0;z-index:99999;background:#fff;pointer-events:none;animation:shotFlash .5s ease-out forwards}
+@keyframes shotFlash{from{opacity:.75}to{opacity:0}}
+/* ---- 設定のストレージ（7.0） */
+.st-list{display:flex;flex-direction:column;gap:8px}
+.st-drive>svg{flex:none;color:var(--ink-2)}
+.st-note{color:var(--ink-2);font-size:12.5px;white-space:pre-wrap}.st-note.bad{color:#c01c28}
+.st-raid{display:flex;flex-direction:column;gap:8px}
+.st-opts{display:flex;gap:6px 14px;flex-wrap:wrap}
+.st-opt{display:inline-flex;align-items:center;gap:6px}
+.st-opt.off{opacity:.55}
+
+/* ---- hDroid（Android 風。7.0） */
+.de-droid{display:flex;flex-direction:column}
+.de-droid .desk{order:1}
+.ad-status{order:0;flex:none;display:flex;align-items:center;gap:8px;height:30px;padding:0 18px;color:#fff;font-size:13.5px;font-variant-numeric:tabular-nums;z-index:97000;cursor:pointer;user-select:none;touch-action:none;text-shadow:0 1px 2px rgba(0,0,0,.35);background:rgba(0,0,0,.18)}
+.de-droid:not(.ad-home-on) .ad-status{background:var(--surface);color:var(--ink);text-shadow:none}
+.ad-status .ad-time{font-weight:600}
+.ad-sicons{display:flex;align-items:center;gap:5px}
+.ad-sdot{display:inline-flex;opacity:.85}
+.ad-grow{flex:1}
+.ad-nav{order:2;flex:none;display:flex;align-items:center;gap:8px;height:48px;padding:0 10px;z-index:97000;color:#fff;background:rgba(0,0,0,.28);touch-action:none}
+.de-droid:not(.ad-home-on) .ad-nav{background:var(--surface);color:var(--ink);border-top:1px solid var(--line)}
+.ad-keys{display:flex;gap:28px;position:absolute;left:50%;transform:translateX(-50%)}
+.ad-nbtn{display:inline-flex;align-items:center;justify-content:center;width:46px;height:40px;border:0;border-radius:20px;background:none;color:inherit;cursor:pointer}
+.ad-nbtn:hover,.ad-nbtn:focus-visible{background:rgba(127,127,127,.22)}
+.ad-tasks{display:flex;gap:4px;align-items:center;min-width:0;overflow:hidden;max-width:calc(50% - 150px)}
+.ad-tk{position:relative;display:inline-flex;padding:5px;border:0;border-radius:12px;background:none;cursor:pointer}
+.ad-tk:hover{background:rgba(127,127,127,.22)}
+.ad-tk.run::after{content:'';position:absolute;left:50%;bottom:1px;width:6px;height:3px;margin-left:-3px;border-radius:2px;background:currentColor;opacity:.6}
+.ad-tk.on::after{width:16px;margin-left:-8px;opacity:1;background:var(--accent)}
+.ad-tk .app-ico{width:30px;height:30px;border-radius:50%}
+.ad-tray{margin-left:auto;display:flex}
+.phone .ad-tasks,.phone .ad-all,.phone .ad-tray{display:none}
+.phone .ad-nav{height:52px}
+.phone .ad-keys{gap:56px}
+/* ホーム画面 */
+.ad-home{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;padding:28px 32px 18px;gap:20px;overflow:hidden;touch-action:pan-x;color:#fff}
+.de-droid:not(.ad-home-on) .ad-home{visibility:hidden}
+.ad-glance{align-self:stretch;display:flex;flex-direction:column;gap:2px;text-shadow:0 1px 3px rgba(0,0,0,.4)}
+.ad-glance b{font-size:17px;font-weight:600}
+.ad-bigclock{font-size:64px;font-weight:300;line-height:1.05;letter-spacing:-1px;font-variant-numeric:tabular-nums}
+.ad-grid{display:grid;grid-template-columns:repeat(auto-fill,88px);justify-content:center;gap:14px 10px;align-self:stretch;align-content:start;overflow:auto}
+.ad-app{display:flex;flex-direction:column;align-items:center;gap:6px;padding:6px 2px;border:0;border-radius:16px;background:none;color:inherit;font-size:12px;cursor:pointer;min-width:0}
+.ad-app span{max-width:84px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-shadow:0 1px 3px rgba(0,0,0,.5)}
+.ad-app .app-ico{width:54px;height:54px;border-radius:50%;box-shadow:0 2px 6px rgba(0,0,0,.25)}
+.ad-app:hover .app-ico,.ad-app:focus-visible .app-ico{filter:brightness(1.12)}
+.ad-dock{display:flex;gap:18px;padding:10px 22px;border-radius:30px;background:rgba(255,255,255,.18);backdrop-filter:blur(14px)}
+.ad-dock .ad-app{padding:0}
+.ad-search{display:flex;align-items:center;gap:10px;width:min(560px,100%);height:50px;padding:0 20px;border:0;border-radius:25px;background:rgba(255,255,255,.88);color:#3c4043;font-size:15px;cursor:text;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+.phone .ad-home{padding:20px 16px 12px}
+.phone .ad-grid{grid-template-columns:repeat(4,1fr)}
+.phone .ad-bigclock{font-size:52px}
+.phone .ad-dock{gap:10px;padding:8px 14px}
+/* ドロワー */
+.ad-drawer{position:absolute;left:0;right:0;bottom:48px;top:15%;z-index:98000;display:flex;flex-direction:column;gap:12px;padding:8px 24px 16px;border-radius:28px 28px 0 0;background:var(--surface);color:var(--ink);box-shadow:0 -6px 30px rgba(0,0,0,.3);animation:ad-up .22s cubic-bezier(.2,.8,.2,1)}
+.ad-drawer.leaving{animation:ad-down .18s ease-in forwards}
+.ad-drawer .ad-app span{text-shadow:none}
+.ad-drawer .ad-app .app-ico{box-shadow:none}
+.ad-grip{align-self:center;flex:none;width:40px;height:4px;border-radius:2px;background:currentColor;opacity:.3}
+.ad-dsearch{display:flex;align-items:center;gap:10px;height:48px;padding:0 18px;border-radius:24px;background:var(--hover,rgba(127,127,127,.12))}
+.ad-dsearch .inp{flex:1;border:0;background:none;box-shadow:none;font-size:15px;padding:0}
+.ad-dgrid{flex:1;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,92px);justify-content:center;align-content:start;gap:12px 8px}
+.phone .ad-dgrid{grid-template-columns:repeat(4,1fr)}
+.phone .ad-drawer{top:6%;padding:8px 12px 12px}
+@keyframes ad-up{from{transform:translateY(100%)}}
+@keyframes ad-down{to{transform:translateY(100%)}}
+/* 通知シェード */
+.ad-shade{position:absolute;left:50%;top:0;width:min(560px,100%);transform:translateX(-50%);max-height:calc(100% - 48px);z-index:98000;display:flex;flex-direction:column;gap:12px;padding:16px 18px 8px;border-radius:0 0 28px 28px;background:var(--surface);color:var(--ink);box-shadow:0 8px 30px rgba(0,0,0,.35);animation:ad-shin .22s cubic-bezier(.2,.8,.2,1);touch-action:none}
+.ad-shade.leaving{animation:ad-shout .16s ease-in forwards}
+@keyframes ad-shin{from{transform:translate(-50%,-100%)}}
+@keyframes ad-shout{to{transform:translate(-50%,-100%)}}
+.ad-shead{display:flex;align-items:center;gap:10px}
+.ad-shead b{font-size:22px;font-weight:500}
+.ad-sbtn{display:inline-flex;padding:8px;border:0;border-radius:50%;background:none;color:inherit;cursor:pointer}
+.ad-sbtn:hover{background:rgba(127,127,127,.18)}
+.ad-qgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.ad-qt{display:flex;align-items:center;gap:12px;min-height:56px;padding:8px 16px;border:0;border-radius:28px;background:rgba(127,127,127,.16);color:inherit;text-align:left;cursor:pointer;min-width:0}
+.ad-qt span{display:flex;flex-direction:column;min-width:0}
+.ad-qt b,.ad-qt small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ad-qt b{font-size:13.5px;font-weight:600}
+.ad-qt small{font-size:12px;opacity:.75}
+.ad-qt.on{background:var(--accent);color:#fff}
+.ad-nhead{display:flex;align-items:center;justify-content:space-between;font-size:13px;opacity:.85;padding:0 4px}
+.ad-clear{border:0;background:none;color:var(--accent);font-weight:600;cursor:pointer}
+.ad-nlist{display:flex;flex-direction:column;gap:6px;overflow:auto;min-height:0}
+.ad-note,.ad-heads{display:flex;align-items:flex-start;gap:12px;padding:12px 14px;border-radius:20px;background:rgba(127,127,127,.12)}
+.ad-nico{display:inline-flex;align-items:center;justify-content:center;flex:none;width:32px;height:32px;border-radius:50%;background:var(--accent);color:#fff}
+.ad-ntext{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1;font-size:13px;text-align:left}
+.ad-ntext small{font-size:11.5px;opacity:.7}
+.ad-ntext span{opacity:.85;overflow-wrap:anywhere}
+.ad-nx{border:0;background:none;color:inherit;opacity:.6;cursor:pointer;padding:4px}
+.ad-empty{opacity:.65;text-align:center;padding:14px;font-size:13px}
+.ad-heads{position:absolute;left:50%;top:36px;transform:translateX(-50%);width:min(480px,calc(100% - 24px));z-index:99000;border:0;background:var(--surface);color:var(--ink);box-shadow:0 6px 24px rgba(0,0,0,.3);cursor:pointer;animation:ad-hin .25s cubic-bezier(.2,.8,.2,1)}
+@keyframes ad-hin{from{transform:translate(-50%,-140%)}}
+/* 履歴 */
+.ad-recents{position:absolute;inset:30px 0 48px;z-index:98000;display:flex;align-items:center;background:rgba(0,0,0,.55);backdrop-filter:blur(10px);animation:ad-fade .18s}
+.ad-recents.leaving{animation:ad-fadeout .15s forwards}
+@keyframes ad-fade{from{opacity:0}}
+@keyframes ad-fadeout{to{opacity:0}}
+.ad-rrow{flex:1;display:flex;align-items:center;gap:20px;overflow-x:auto;padding:20px 40px;height:100%;scroll-snap-type:x mandatory}
+.ad-card{flex:none;width:min(260px,62vw);display:flex;flex-direction:column;gap:8px;scroll-snap-align:center;touch-action:pan-x;transition:transform .2s,opacity .2s}
+.ad-chead{display:flex;align-items:center;gap:8px;color:#fff;font-size:13px;white-space:nowrap;overflow:hidden}
+.ad-chead .app-ico{width:24px;height:24px;border-radius:50%}
+.ad-cthumb{position:relative;overflow:hidden;padding:0;aspect-ratio:9/16;max-height:62vh;border:0;border-radius:24px;background:linear-gradient(160deg,var(--c),color-mix(in srgb,var(--c) 55%,#000));color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.ad-rclear{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);padding:10px 20px;border:0;border-radius:22px;background:rgba(255,255,255,.9);color:#222;font-weight:600;cursor:pointer;white-space:nowrap}
+.ad-recents .ad-empty{flex:1;color:#fff}
+.ad-snap{position:absolute;inset:0;pointer-events:none;background:var(--surface)}
+.ad-snap>.win{border-radius:0;box-shadow:none}
+.ad-ph{background:#222;width:100%;height:100%}
 </script>
 <script>
 /* ============================================================
@@ -13289,7 +14559,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 (function () {
   'use strict';
   // コードネーム: htmlOS は恒星の名前（3.2 = Sirius、4.0 = Vega）、描画エンジン HTUi SDK は惑星の名前（2 = Jupiter、3.0 = Venus）
-  var MEDIA_VERSION = '6.2.3', MEDIA_BUILD = '61', MEDIA_CODENAME = 'Deneb';
+  var MEDIA_VERSION = '7.0.0', MEDIA_BUILD = '62', MEDIA_CODENAME = 'Polaris';
   var BOOT = window.BOOT = {};
   var P = 'htmlos:';
 
@@ -13341,7 +14611,8 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   //   持ち主・シンボリックリンク・ファイル以外のキー（meta など）は、フォルダの .htmlos.json に入れる。
   //   選んだフォルダ（ハンドル）は IndexedDB に覚えておく。ブラウザの決まりで、開き直したあとは使う許可をもう一度もらう必要がある
   var HDD = { supported: typeof window.showDirectoryPicker === 'function' && !!window.indexedDB };
-  var HDD_META = '.htmlos.json', HDD_MAX = 32 * 1024 * 1024;
+  var HDD_META = '.htmlos.json', HDD_MAX = 32 * 1024 * 1024, RAID_DIR = '.htmlos-raid'; // RAID_DIR: RAID（7.0）のデータ。ファイルとしては見せない
+  HDD.RAID_DIR = RAID_DIR;
   var HDD_BIN = /^(png|jpe?g|gif|webp|bmp|ico|avif|mp3|wav|ogg|oga|m4a|flac|aac|opus|mp4|webm|ogv|mov|m4v|zip|gz|7z|rar|pdf|exe|bin|uf2|elf|woff2?|ttf|otf)$/;
   var HDD_MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif', mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', oga: 'audio/ogg', m4a: 'audio/mp4', flac: 'audio/flac', aac: 'audio/aac', opus: 'audio/ogg', mp4: 'video/mp4', webm: 'video/webm', ogv: 'video/ogg', mov: 'video/quicktime', m4v: 'video/mp4', pdf: 'application/pdf', zip: 'application/zip' };
   function idb(mode, fn) {
@@ -13356,13 +14627,14 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       };
     });
   }
-  HDD.saved = function () { return HDD.supported ? idb('readonly', function (s) { return s.get('hdd1'); }).catch(function () { return null; }) : Promise.resolve(null); };
-  HDD.save = function (h) { return idb('readwrite', function (s) { return s.put(h, 'hdd1'); }); };
-  HDD.forget = function () { return idb('readwrite', function (s) { return s.delete('hdd1'); }); };
+  // name: 覚える名前（'hdd1'。7.0 から HDD3 は 'hdd3'）
+  HDD.saved = function (name) { return HDD.supported ? idb('readonly', function (s) { return s.get(name || 'hdd1'); }).catch(function () { return null; }) : Promise.resolve(null); };
+  HDD.save = function (h, name) { return idb('readwrite', function (s) { return s.put(h, name || 'hdd1'); }); };
+  HDD.forget = function (name) { return idb('readwrite', function (s) { return s.delete(name || 'hdd1'); }); };
   // フォルダを選んでもらう（ボタンを押したときなど、ユーザーの操作の中で呼ぶ）
   HDD.pick = function () {
     if (!HDD.supported) return Promise.reject(new Error('このブラウザは File System Access API に対応していません（パソコンの Chrome・Edge などで使えます）'));
-    return window.showDirectoryPicker({ id: 'htmlos-hdd1', mode: 'readwrite' });
+    return window.showDirectoryPicker({ id: 'htmlos-' + (typeof arguments[0] === 'string' ? arguments[0] : 'hdd1'), mode: 'readwrite' });
   };
   // 読み書きの許可。ask=true なら、まだのときに許可を求める（これもユーザーの操作の中で呼ぶ）
   HDD.allowed = async function (h, ask) {
@@ -13374,7 +14646,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   // フォルダの様子: 空か、htmlOS が入っているか
   HDD.inspect = async function (h) {
     var empty = true, hasOS = false;
-    for await (var e of h.values()) { if (e.name !== HDD_META) { empty = false; break; } }
+    for await (var e of h.values()) { if (e.name !== HDD_META && e.name !== RAID_DIR) { empty = false; break; } }
     try { await (await h.getDirectoryHandle('sys')).getFileHandle('kernel.js'); hasOS = true; } catch (e2) { /* 入っていない */ }
     return { empty: empty, hasOS: hasOS };
   };
@@ -13416,7 +14688,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     async function walk(dh, rel) {
       for await (var e of dh.values()) {
         var r = rel + '/' + e.name;
-        if (!rel && e.name === HDD_META) continue;
+        if (!rel && (e.name === HDD_META || e.name === RAID_DIR)) continue;
         if (e.kind === 'directory') { map.set(K(r), JSON.stringify(withMeta({ t: 'd', m: Date.now(), o: meta.o[r] || 'root' }, r))); await walk(e, r); continue; }
         var f = await e.getFile();
         if (f.size > HDD_MAX) { st.skipped.push(r); continue; }
@@ -13503,6 +14775,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       var rel = relOf(k);
       if (rel == null) throw new Error(k.slice(2) + ': HDD1 の外のパスです');
       if (rel === '/' + HDD_META) throw new Error(HDD_META + ' は htmlOS が使う名前なので使えません');
+      if (rel === '/' + RAID_DIR || rel.indexOf('/' + RAID_DIR + '/') === 0) throw new Error(RAID_DIR + ' は htmlOS（RAID）が使う名前なので使えません');
       var node = null; try { node = JSON.parse(v); } catch (e) { /* 壊れたノードもそのまま */ }
       var ns = sizeOf(node), os = sizes.get(rel) || 0;
       if (meta.q && ns > os && used - os + ns > meta.q) throw new Error('HDD1 の容量の上限（' + fmtBytes(meta.q) + '）を超えるため書き込めません（使用中 ' + fmtBytes(used) + '）');
@@ -14279,6 +15552,8 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         line('  HDD1 : ' + (hd1 ? 'PC Folder "' + hd1.name + '" [File System Access API]' : 'PC Folder (not registered)') + '   ');
         line(cfg.boot === 'hdd1' ? 'Boot device\n' : 'Data\n', cfg.boot === 'hdd1' ? 'ok' : 'dim'); await sleep(140 * k);
       }
+      var hd3 = await HDD.saved('hdd3');
+      if (hd3) { line('  HDD3 : PC Folder "' + hd3.name + '" [File System Access API]   '); line('Data / RAID\n', 'dim'); await sleep(140 * k); }
       line('  CD0  : htmlOS.html (install media)   ');
       line('htmlOS ' + MEDIA_VERSION + '\n\n', 'ok'); await sleep(160 * k);
       line('POST completed.  ' + (hdd2.ram ? '1 warning: IndexedDB が使えません（' + hdd2.failed + '。再読み込みで消えます）' : '0 errors') + '\n', hdd2.ram ? 'warn' : '');

@@ -489,6 +489,152 @@
       ctx.setTimeout(() => { tick(); ctx.setInterval(tick, 1000); }, 1000 - (now() % 1000));
     }
   });
+  // =====================================================================
+  // cron（7.0）: 決まった時刻にコマンドを実行する。ユーザーごとの crontab は /var/spool/cron/<ユーザー>
+  //   書き方は一般的な cron と同じ: 「分 時 日 月 曜日 コマンド」（* 、*/n、a-b、a,b、曜日は 0〜7（0 と 7 が日曜）か sun〜sat、月は jan〜dec）
+  //   @reboot @yearly @monthly @weekly @daily @hourly も使える。コマンドは jsh のコマンドで、そのユーザーとして画面なしで実行する（出力はジャーナルへ）
+  // =====================================================================
+  const CRON_DIR = '/var/spool/cron';
+  const CRON_AT = { '@yearly': '0 0 1 1 *', '@annually': '0 0 1 1 *', '@monthly': '0 0 1 * *', '@weekly': '0 0 * * 0', '@daily': '0 0 * * *', '@midnight': '0 0 * * *', '@hourly': '0 * * * *' };
+  const CRON_NAMES = [null, null, null, ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'], ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']];
+  const CRON_RANGE = [[0, 59], [0, 23], [1, 31], [1, 12], [0, 7]];
+  const CRON_LABEL = ['分', '時', '日', '月', '曜日'];
+  function cronField(str, i) {
+    const [lo, hi] = CRON_RANGE[i], set = new Set(), names = CRON_NAMES[i];
+    const num = t => {
+      t = t.toLowerCase();
+      if (names && names.includes(t)) return names.indexOf(t) + (i === 3 ? 1 : 0);
+      if (!/^\d+$/.test(t)) throw new Error(CRON_LABEL[i] + 'の「' + t + '」が読めません');
+      const n = +t; if (n < lo || n > hi) throw new Error(CRON_LABEL[i] + 'は ' + lo + '〜' + hi + ' です（' + t + '）');
+      return n;
+    };
+    for (const part of str.split(',')) {
+      const m = /^(.+?)(?:\/(\d+))?$/.exec(part); if (!m || !part) throw new Error(CRON_LABEL[i] + 'の「' + str + '」が読めません');
+      const step = m[2] ? +m[2] : 1; if (!step) throw new Error(CRON_LABEL[i] + 'の間隔が 0 です');
+      let a, b;
+      if (m[1] === '*') { a = lo; b = hi; } else if (m[1].includes('-')) { const r = m[1].split('-'); a = num(r[0]); b = num(r[1]); } else { a = num(m[1]); b = m[2] ? hi : a; }
+      if (a > b) throw new Error(CRON_LABEL[i] + 'の範囲「' + m[1] + '」が逆です');
+      for (let v = a; v <= b; v += step) set.add(i === 4 && v === 7 ? 0 : v);
+    }
+    return { set: set, any: str === '*' };
+  }
+  // 1 行を読む。コメント・空行は null、環境変数（NAME=値）は { env }
+  function cronParse(line) {
+    line = String(line).trim();
+    if (!line || line[0] === '#') return null;
+    let m = /^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/.exec(line);
+    if (m) return { env: m[1], value: m[2] };
+    if (line[0] === '@') {
+      m = /^(@\w+)\s+(.+)$/.exec(line); if (!m) throw new Error('「' + line + '」: コマンドがありません');
+      const at = m[1].toLowerCase();
+      if (at === '@reboot') return { reboot: true, spec: '@reboot', cmd: m[2].trim() };
+      if (!CRON_AT[at]) throw new Error(m[1] + ': 知らない指定です（@reboot @hourly @daily @weekly @monthly @yearly）');
+      return Object.assign(cronParse(CRON_AT[at] + ' ' + m[2]), { spec: at });
+    }
+    const p = line.split(/\s+/);
+    if (p.length < 6) throw new Error('「' + line + '」: 「分 時 日 月 曜日 コマンド」の 6 つが必要です');
+    const f = p.slice(0, 5).map(cronField);
+    return { f: f, spec: p.slice(0, 5).join(' '), cmd: line.replace(/^(\S+\s+){5}/, '').trim() };
+  }
+  function cronMatch(j, d) {
+    if (!j.f) return false;
+    const [mi, ho, dm, mo, dw] = j.f;
+    if (!mi.set.has(d.getMinutes()) || !ho.set.has(d.getHours()) || !mo.set.has(d.getMonth() + 1)) return false;
+    // 日と曜日がどちらも * でないときは、どちらかに合えば実行（一般的な cron と同じ）
+    const a = dm.set.has(d.getDate()), b = dw.set.has(d.getDay());
+    return dm.any && dw.any ? true : dm.any ? b : dw.any ? a : (a || b);
+  }
+  // 次に実行する時刻（最大 1 年先まで探す）
+  function cronNext(j, from) {
+    if (!j.f) return null;
+    const d = new Date(from || now()); d.setSeconds(0, 0); d.setMinutes(d.getMinutes() + 1);
+    for (let i = 0; i < 366 * 24 * 60; i++) {
+      if (!j.f[3].set.has(d.getMonth() + 1)) { d.setMonth(d.getMonth() + 1, 1); d.setHours(0, 0); continue; }
+      if (!j.f[1].set.has(d.getHours())) { d.setHours(d.getHours() + 1, 0); continue; }
+      if (cronMatch(j, d)) return d.getTime();
+      d.setMinutes(d.getMinutes() + 1);
+    }
+    return null;
+  }
+  // 時刻の指定を、人が読める日本語に
+  function cronDescribe(j) {
+    if (j.reboot) return '起動したとき';
+    const s = j.spec.split(/\s+/), [mi, ho, dm, mo, dw] = s;
+    const ev = (x, unit) => /^\*\/(\d+)$/.test(x) ? x.slice(2) + unit + 'ごと' : null;
+    const W = '日月火水木金土';
+    const wd = dw === '*' ? '' : dw.split(',').map(x => /^\d+$/.test(x) ? W[+x % 7] : /^\d+-\d+$/.test(x) ? x.split('-').map(y => W[+y % 7]).join('〜') : x).join('・') + '曜';
+    let t;
+    if (mi === '*' && ho === '*') t = '毎分';
+    else if (ev(mi, '分') && ho === '*') t = ev(mi, '分');
+    else if (/^\d+$/.test(mi) && ho === '*') t = '毎時 ' + mi + ' 分';
+    else if (/^\d+$/.test(mi) && ev(ho, '時間')) t = ev(ho, '時間') + '（' + mi + ' 分）';
+    else if (/^\d+$/.test(mi) && /^\d+$/.test(ho)) t = ho + ':' + z(+mi);
+    else t = '分 ' + mi + '・時 ' + ho;
+    const day = (mo !== '*' ? mo + '月' : '') + (dm !== '*' ? dm + '日' : '');
+    return (day ? '毎年 ' + day + ' ' : wd ? '毎週 ' + wd + ' ' : dm === '*' && mo === '*' && /:/.test(t) ? '毎日 ' : '') + t;
+  }
+  const cron = OS.cron = {
+    dir: CRON_DIR, parse: cronParse, next: cronNext, match: cronMatch, describe: cronDescribe,
+    path: user => CRON_DIR + '/' + user,
+    read(user) { try { return fs.read(CRON_DIR + '/' + user); } catch (e) { return ''; } },
+    // 書く前に全部の行を確かめる（間違いがあれば、何行目かを付けて投げる）
+    check(text) { String(text).split('\n').forEach((l, i) => { try { cronParse(l); } catch (e) { throw new Error((i + 1) + ' 行目: ' + e.message); } }); },
+    write(user, text) {
+      if (!users.get(user)) throw new Error(user + ': そのようなユーザーはいません');
+      text = String(text).replace(/\r\n/g, '\n'); if (text && !text.endsWith('\n')) text += '\n';
+      cron.check(text);
+      if (!fs.exists(CRON_DIR)) fs.mkdir(CRON_DIR, { parents: true });
+      if (text.trim()) fs.write(CRON_DIR + '/' + user, text, { owner: user }); else if (fs.exists(CRON_DIR + '/' + user)) fs.rm(CRON_DIR + '/' + user);
+      try { fs.chmod(CRON_DIR + '/' + user, 0o600); } catch (e) { /* 権限を付けられなくても続ける */ }
+      journal.log('cron.service', user + ' の crontab を更新しました');
+    },
+    // ユーザーのジョブ（行番号つき）
+    jobs(user) {
+      const env = {}, out = [];
+      cron.read(user).split('\n').forEach((l, i) => {
+        let j = null; try { j = cronParse(l); } catch (e) { out.push({ line: i + 1, text: l, error: e.message }); return; }
+        if (!j) return; if (j.env) { env[j.env] = j.value; return; }
+        out.push(Object.assign(j, { line: i + 1, text: l, user: user, env: Object.assign({}, env), next: cronNext(j), desc: cronDescribe(j) }));
+      });
+      return out;
+    },
+    users() { try { return fs.isDir(CRON_DIR) ? fs.list(CRON_DIR).filter(u => users.get(u)) : []; } catch (e) { return []; } },
+    // ジョブを今すぐ（または予定どおりに）実行する
+    async run(job, why) {
+      const unit = 'cron.service', p = proc.spawn({ name: 'cron', cmd: job.cmd, user: job.user, kind: 'service', unit: unit, ppid: cron.pid || 1 });
+      journal.log(unit, '(' + job.user + ') ' + (why ? why + ' ' : '') + 'CMD (' + job.cmd + ')', { pid: p.pid });
+      const sh = headlessShell(unit, job.user, () => p.pid);
+      let code = 0;
+      try {
+        Object.keys(job.env || {}).forEach(k => { try { sh.vars[k] = job.env[k]; } catch (e) { /* 変数を持たないシェル */ } });
+        await sh.exec(job.cmd, true); code = sh.status | 0;
+      } catch (e) { sh._tty.println(e.message || String(e), 'err'); code = 1; }
+      sh._tty.flush();
+      if (code) journal.log(unit, '(' + job.user + ') 終了コード ' + code + ': ' + job.cmd, { pid: p.pid, prio: 4 });
+      try { proc.exit(p.pid, code); } catch (e) { /* もうない */ }
+      cron.last[job.user + ':' + job.line] = { t: now(), code: code };
+      return code;
+    },
+    last: {}, pid: 0
+  };
+  register({
+    name: 'cron.service', desc: '決まった時刻のコマンド実行（cron）', wantedBy: 'multi-user.target', after: 'multi-user.target', restart: 'on-failure',
+    start(ctx) {
+      cron.pid = ctx.pid;
+      const all = () => cron.users().map(u => cron.jobs(u)).flat().filter(j => !j.error);
+      const tick = () => {
+        const d = new Date(); d.setSeconds(0, 0);
+        all().forEach(j => { if (cronMatch(j, d)) cron.run(j); });
+      };
+      // @reboot は OS を起動したときに 1 回だけ（サービスを再起動したときは実行しない）
+      if (!cron.booted) { cron.booted = true; all().filter(j => j.reboot).forEach(j => cron.run(j, '@reboot')); }
+      const n = all().length;
+      ctx.log(n ? n + ' 個のジョブを見ています' : 'ジョブはありません（crontab -e か hCron で追加できます）');
+      // 毎分 0 秒にそろえる
+      ctx.setTimeout(() => { tick(); ctx.setInterval(tick, 60000); }, 60000 - (now() % 60000) + 50);
+      return () => { cron.pid = 0; };
+    }
+  });
   register({
     name: 'htui.service', desc: 'HTUi（デスクトップ）', wantedBy: 'graphical.target', after: 'multi-user.target', cmd: '/sys/htui.js',
     start(ctx) {

@@ -230,6 +230,64 @@
               } }, '接続テスト')),
             res);
         }],
+        // ストレージ（7.0）: HDD1・HDD2・HDD3 と RAID
+        storage: ['ストレージ', 'drive', () => {
+          const admin = !!me().admin, R = OS.raid, S = OS.storage, u = OS.fs.usage();
+          const busy = async (b, fn) => { b.disabled = true; try { await fn(); } catch (e) { if (e.name !== 'AbortError') err(e); } finally { b.disabled = false; if (win.curPage === 'storage') show('storage'); } };
+          const btn = (label, fn, o) => { const b = h('button', { class: 'btn' + (o && o.primary ? ' primary' : '') + (o && o.danger ? ' danger' : ''), type: 'button', id: o && o.id, disabled: o && o.disabled, onclick: () => busy(b, fn) }, label); return b; };
+          const card = (icon, title, sub, ...btns) => h('div', { class: 'st-card st-drive' }, OS.icon(icon, 22), h('div', { class: 'who' }, h('b', null, title), h('small', null, sub)), ...btns);
+          const drive = d => d.root ? 'ここから起動しています（/）' : d.mounted ? d.at + ' に接続中（フォルダ「' + d.name + '」）' : d.waiting ? '許可を待っています（フォルダ「' + d.waiting + '」）' : '未接続';
+          page.append(h('h2', null, 'ストレージ'),
+            h('h3', null, 'ドライブ'),
+            h('div', { class: 'st-list' },
+              card('drive', 'HDD2（IndexedDB）', (OS.store.idb ? 'システムのドライブ（/）・' + fmtSize(u.used) + ' / ' + fmtSize(u.total) : 'このブラウザの IndexedDB') + '。RAID のメンバーにもなれます'),
+              card('drive', 'HDD1（PC のフォルダ）', OS.hdd.supported ? drive(OS.hdd) : 'このブラウザでは使えません',
+                OS.hdd.supported && !OS.hdd.root ? (OS.hdd.mounted ? btn('切り離す', () => OS.hdd.unmount()) : btn('接続', () => OS.hdd.mount(false))) : null),
+              h('div', { id: 'st-hdd3' }, card('drive', 'HDD3（PC のフォルダ）', !OS.hdd3.supported ? 'このブラウザでは使えません' : S.hdd3Use() === 'raid' ? 'RAID 用' + (OS.hdd3.waiting ? '（許可待ち）' : '') : drive(OS.hdd3),
+                ...(!OS.hdd3.supported ? [] : [
+                  S.hdd3Use() === 'data' && !OS.hdd3.mounted && OS.hdd3.waiting ? btn('接続', () => OS.hdd3.mount(false)) : null,
+                  S.hdd3Use() === 'data' && OS.hdd3.mounted ? btn('切り離す', () => OS.hdd3.unmount()) : null,
+                  btn('セットアップ…', setupHdd3, { id: 'st-hdd3-setup', disabled: !admin })])))),
+            h('p', { class: 'st-note' }, 'HDD3 は、HDD1 とは別の PC のフォルダです。「データ置き場」にすると ' + OS.hdd3.at + ' に、「RAID 用」にすると RAID5 などのメンバーになります。'),
+            h('h3', null, 'RAID（md0）'),
+            raidBox(),
+            adminNote());
+          async function setupHdd3() {
+            const use = await ui.modal({ title: 'HDD3 のセットアップ', body: h('div', null, h('p', null, 'HDD3 にする PC のフォルダを選びます（HDD1 とは別のフォルダ）。何に使いますか？'),
+              h('p', { class: 'st-note' }, 'データ置き場: ' + OS.hdd3.at + ' に接続して、ふつうのファイル置き場にします。\nRAID 用: RAID（RAID5 なら HDD1・HDD2・HDD3 の 3 台）のメンバーにします。')),
+              buttons: [{ label: 'キャンセル', cancel: true, value: null }, { label: 'RAID 用', value: 'raid' }, { label: 'データ置き場', primary: true, value: 'data' }] });
+            if (!use) return;
+            const name = await S.setupHdd3(use);
+            ui.toast('HDD3 にフォルダ「' + name + '」を設定しました');
+          }
+          function raidBox() {
+            const st = R.status();
+            if (st) {
+              return h('div', { class: 'st-raid', id: 'st-raid' },
+                card('raid', 'md0 — ' + R.levels[st.level].name, R.stateName(st.state) + (st.reason ? '（' + st.reason + '）' : '') + ' ・ ' + st.members.map(m => m.label + (m.ok ? '' : '（欠け）')).join('・') + (st.files != null ? ' ・ ' + R.at + ' ・ 使用 ' + fmtSize(st.used) : ''),
+                  st.state === 'waiting' ? btn('組み立てる', () => R.assemble({ ask: true }), { primary: true, id: 'st-raid-asm', disabled: !admin }) : null,
+                  st.state === 'degraded' ? btn('再構築', () => R.rebuild({ ask: true }), { primary: true, disabled: !admin }) : null,
+                  st.state !== 'waiting' ? btn('止める', () => R.stop(), { disabled: !admin }) : null,
+                  btn('削除…', async () => { if (await ui.confirm('RAID（md0）を削除して、各ドライブの RAID のデータ（' + R.at + ' の中身）を消します。元に戻せません。', { ok: '削除', danger: true, title: 'RAID を削除' })) await R.destroy(); }, { danger: true, disabled: !admin })),
+                h('p', { class: 'st-note' }, '容量: ' + R.capacityNote(st.level, st.members.length) + '。' + (st.level === 'raid0' ? '1 台でも使えなくなると読めません。' : st.level === 'raid1' ? '1 台残っていれば読めます。' : '1 台欠けても読め、戻ってきたら再構築します。')));
+            }
+            const sel = { level: 'raid1', devs: { hdd1: false, hdd2: true, hdd3: false } }, box = h('div', { class: 'st-raid', id: 'st-raid' });
+            const draw = av => {
+              box.textContent = '';
+              const L = R.levels[sel.level], picked = Object.keys(sel.devs).filter(d => sel.devs[d] && av[d]);
+              const why = sel.level === 'raid5' && !av.hdd3 ? 'RAID5 は HDD3 をセットアップ（RAID 用）してから使えます' : picked.length < L.min ? L.min + ' 台以上選んでください' : sel.level === 'raid5' && picked.length !== 3 ? 'RAID5 は HDD1・HDD2・HDD3 の 3 台で作ります' : '';
+              box.append(
+                h('div', { class: 'st-opts' }, Object.keys(R.levels).map(k => h('label', { class: 'st-opt' }, h('input', { type: 'radio', name: 'st-raid-lv', id: 'st-raid-' + k, checked: sel.level === k, onchange: () => { sel.level = k; if (k === 'raid5') sel.devs = { hdd1: true, hdd2: true, hdd3: true }; draw(av); } }), R.levels[k].name))),
+                h('div', { class: 'st-opts' }, Object.keys(R.devs).map(d => h('label', { class: 'st-opt' + (av[d] ? '' : ' off') }, h('input', { type: 'checkbox', id: 'st-raid-' + d, checked: sel.devs[d] && av[d], disabled: !av[d], onchange: e => { sel.devs[d] = e.target.checked; draw(av); } }),
+                  R.devs[d] + (av[d] ? '' : d === 'hdd3' ? '（未セットアップ・RAID 用でない）' : '（未設定）')))),
+                h('p', { class: 'st-note' }, '容量: ' + R.capacityNote(sel.level, Math.max(picked.length, L.min)) + '。' + (why ? '' : '作ると ' + R.at + ' につながります。')),
+                why ? h('p', { class: 'st-note bad' }, why) : null,
+                h('div', { class: 'st-row' }, btn('RAID を作る', () => R.create(sel.level, picked, { ask: true }), { primary: true, id: 'st-raid-create', disabled: !admin || !!why })));
+            };
+            R.available().then(draw);
+            return box;
+          }
+        }],
         system: ['システム', 'gear', () => {
           const admin = !!me().admin, u = OS.fs.usage(), meta = window.BOOT.getMeta() || {};
           const d = ms => ms ? new Date(ms).toLocaleString('ja-JP') : '-';
@@ -269,6 +327,7 @@
       const btns = {};
       Object.keys(pages).forEach(k => { btns[k] = h('button', { class: 'hf-place', type: 'button', onclick: () => show(k) }, OS.icon(pages[k][1], 16), h('span', null, pages[k][0])); nav.append(btns[k]); });
       function show(k) {
+        win.curPage = k;
         page.textContent = '';
         Object.keys(btns).forEach(x => btns[x].classList.toggle('on', x === k));
         win.setTitle(pages[k][0] + ' — Settings');

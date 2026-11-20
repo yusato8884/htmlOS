@@ -4,6 +4,7 @@
    gnome … hShell     GNOME 風。トップバー、アクティビティ画面とドック、カレンダーと通知センター
    wm    … hwc        Labwc 風。パネルなしのウィンドウマネージャだけ。右クリックでメニュー
    mac   … hAqua      macOS 風。メニューバーとドック。タブレットは iPadOS 風、スマートフォンは iOS 風
+   droid … hDroid     Android 風（7.0）。ステータスバーと通知シェード、ホーム画面とアプリドロワー、戻る・ホーム・履歴のナビゲーションバー
    どれも OS.registerSession({ id, name, desc, build(kit), ... }) で登録している。
    環境が持てるフック: onStart / onStop / onApps / onActive(win) / onFocus(win) / onMode / onNotify(n) / onKey(e) / onSuper() / freeWindows() */
 (function () {
@@ -1475,6 +1476,246 @@
       // タッチ: Esc（キーボードの戻る）でホームへ
       if (OS.touch && e.key === 'Escape' && !htui.el.querySelector('.modal-ov,.menu:not(.leaving),.mc-cc:not(.leaving),.mc-nc:not(.leaving),.mc-spot:not(.leaving),.mc-lpad:not(.leaving),.ios-sw:not(.leaving)')) {
         const a = document.activeElement; if (htui.active() && (!a || !/^(INPUT|TEXTAREA)$/.test(a.tagName))) { this.goHome(htui.active()); return true; }
+      }
+    }
+  });
+  // ======================================================== hDroid（Android 風。htmlOS 7.0）
+  //   上にステータスバー（押す・下へ引くと通知シェード: クイック設定と通知）、下にナビゲーションバー（戻る・ホーム・履歴）。
+  //   ホーム画面: 時計とアプリのアイコン、ドック、検索バー。上へスワイプ（またはナビの「すべてのアプリ」）でアプリドロワー。
+  //   タブレット・スマートフォンではアプリは全画面。マウス（デスクトップモード）では Android のデスクトップのように
+  //   ふつうのウィンドウになり、ナビゲーションバーにタスクバー（固定したアプリと起動中のアプリ）が出る
+  const AD_NAV = {
+    back: "<path d='M17 5.5v13L6 12z' fill='none' stroke='currentColor' stroke-width='2' stroke-linejoin='round'/>",
+    home: "<circle cx='12' cy='12' r='6.5' fill='none' stroke='currentColor' stroke-width='2'/>",
+    recents: "<rect x='6' y='6' width='12' height='12' rx='2.5' fill='none' stroke='currentColor' stroke-width='2'/>",
+    wifi: "<path d='M12 19.5L1.8 8.6a14.6 14.6 0 0 1 20.4 0z' fill='currentColor'/>",
+    batt: "<rect x='8' y='3.5' width='8' height='18' rx='2' fill='none' stroke='currentColor' stroke-width='1.8'/><rect x='10' y='1.6' width='4' height='2.2' rx='.8' fill='currentColor'/><rect x='10' y='9' width='4' height='10.5' rx='.6' fill='currentColor'/>"
+  };
+  const adGlyph = (k, size) => { const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('width', size || 22); s.setAttribute('height', size || 22); s.setAttribute('aria-hidden', 'true'); s.innerHTML = AD_NAV[k]; return s; };
+  OS.registerSession({
+    id: 'droid', name: 'hDroid（Android 風）', pins: ['hbrowser', 'hfile', 'terminal', 'hedit', 'settings'], pinWhere: 'ホーム画面のドック',
+    desc: '上にステータスバー（引き下ろすと通知とクイック設定）、下に戻る・ホーム・履歴のナビゲーションバーがある Android 風の環境です。ホーム画面を上へスワイプするとすべてのアプリ。マウスではウィンドウとタスクバーも使えます。',
+    build(k) {
+      const self = this, el = htui.el;
+      // ---- ステータスバー
+      this.batt = h('span', { class: 'ad-batt', hidden: true });
+      if (navigator.getBattery) navigator.getBattery().then(b => { const upd = () => { self.batt.hidden = false; self.batt.textContent = Math.round(b.level * 100) + '%'; }; upd(); b.addEventListener('levelchange', upd); }).catch(() => {});
+      this.dot = h('span', { class: 'ad-sdot', hidden: true, 'aria-hidden': 'true' }, OS.icon('bell', 13));
+      const status = h('div', { class: 'ad-status', role: 'button', tabindex: '0', 'aria-label': '通知とクイック設定', onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); self.shade(); } } },
+        k.clock(h('b', { class: 'ad-time' }), d => d.getHours() + ':' + pad(d.getMinutes())), this.dot,
+        h('span', { class: 'ad-grow' }), h('span', { class: 'ad-sicons' }, adGlyph('wifi', 15), adGlyph('batt', 15), this.batt));
+      dragOn(status, (dx, dy, tap) => { if (tap || dy > 30) self.shade(); });
+      // ---- ホーム画面
+      this.grid = h('div', { class: 'ad-grid' });
+      this.dockRow = h('div', { class: 'ad-dock' });
+      const glance = h('div', { class: 'ad-glance' },
+        k.clock(h('b'), d => (d.getMonth() + 1) + '月' + d.getDate() + '日（' + WEEK[d.getDay()] + '）'),
+        k.clock(h('span', { class: 'ad-bigclock' }), d => pad(d.getHours()) + ':' + pad(d.getMinutes())));
+      const search = h('button', { class: 'ad-search', type: 'button', onclick: () => self.drawer(true) }, OS.icon('search', 20), h('span', null, 'アプリを検索'));
+      this.home = h('div', { class: 'ad-home' }, glance, this.grid, h('span', { class: 'ad-grow' }), this.dockRow, search);
+      swipe(this.home, (dx, dy) => { if (dy < -60 && Math.abs(dy) > Math.abs(dx)) self.drawer(); else if (dy > 60 && Math.abs(dy) > Math.abs(dx)) self.shade(); else return false; });
+      this.home.addEventListener('contextmenu', e => { if (e.target.closest('.ad-app')) return; e.preventDefault(); e.stopPropagation(); k.menuAt(e.clientX, e.clientY, [
+        { label: '壁紙とスタイル', icon: 'image', act: () => k.run('settings', 'look') },
+        { label: 'ホームの設定', icon: 'gear', act: () => k.run('settings') }]); });
+      const desk = k.desk(false);
+      desk.prepend(this.home);
+      // ---- ナビゲーションバー（とデスクトップモードのタスクバー）
+      this.tasks = h('div', { class: 'ad-tasks', role: 'toolbar', 'aria-label': 'タスクバー' });
+      const nb = (key, label, fn) => h('button', { class: 'ad-nbtn ad-k-' + key, type: 'button', title: label, 'aria-label': label, onclick: fn }, adGlyph(key, 22));
+      const nav = h('div', { class: 'ad-nav' },
+        h('button', { class: 'ad-nbtn ad-all', type: 'button', title: 'すべてのアプリ', 'aria-label': 'すべてのアプリ', onclick: () => self.drawer() }, OS.icon('grid', 20)),
+        this.tasks,
+        h('div', { class: 'ad-keys' }, nb('back', '戻る', () => self.back()), nb('home', 'ホーム', () => self.goHome()), nb('recents', '履歴（開いているアプリ）', () => self.recents())),
+        h('span', { class: 'ad-tray' }, k.modeButton('ad-nbtn')));
+      dragOn(nav, (dx, dy) => { if (dy < -40) self.recents(); }, true);
+      el.append(status, desk, nav);
+      el.classList.add('ad-home-on');
+    },
+    onStart() { this.onApps(); this.onActive(htui.active()); },
+    onStop() { this.grid = null; this.tasks = null; this._sig = null; },
+    freeWindows() { return false; },
+
+    // ---- ホーム・ドック・タスクバーを作り直す
+    onApps() {
+      if (!this.grid) return;
+      const k = htui.kit, self = this;
+      const sig = [OS.uiMode, htui.pins.list().join(), Object.keys(OS.apps).join(), htui.wins.map(w => w.app + (w.el.classList.contains('hidden') ? '-' : '+')).join('|'), (htui.active() || {}).app].join('#');
+      if (sig === this._sig) return;
+      this._sig = sig;
+      const tile = (a, label) => h('button', { class: 'ad-app', type: 'button', title: a.desc || a.name, 'data-app': a.id, onclick: () => self.openApp(a.id) }, k.appIcon(a, 26), label === false ? null : h('span', null, a.name));
+      const pins = htui.pins.list();
+      this.grid.textContent = ''; this.dockRow.textContent = '';
+      // ホーム: ドックにないアプリから最大 OS.uiMode ごとの数だけ（残りはドロワー）
+      const max = OS.uiMode === 'phone' ? 12 : 24;
+      k.apps().filter(a => !pins.includes(a.id)).slice(0, max).forEach((a, i) => { const t = tile(a); t.style.setProperty('--i', i); this.grid.append(t); });
+      pins.forEach(id => this.dockRow.append(tile(OS.apps[id], false)));
+      // タスクバー（デスクトップ・タブレット）: 固定したアプリ、起動中のアプリ
+      this.tasks.textContent = '';
+      const act = htui.active(), extra = [...new Set(htui.wins.map(w => w.app))].filter(id => OS.apps[id] && !pins.includes(id));
+      pins.concat(extra).forEach(id => {
+        const a = OS.apps[id], run = htui.wins.some(w => w.app === id);
+        this.tasks.append(h('button', { class: 'ad-tk' + (run ? ' run' : '') + (act && act.app === id ? ' on' : ''), type: 'button', title: a.name, 'aria-label': a.name, 'data-app': id, onclick: () => self.openApp(id, true) }, k.appIcon(a, 18)));
+      });
+    },
+    // アプリを開く。もう開いているならそのウィンドウへ。toggle=true（タスクバー）なら、手前にあるときはしまう
+    openApp(id, toggle) {
+      htui.closeMenus();
+      const top = byZ().find(x => x.app === id);
+      if (top) { if (toggle && top === htui.active()) top.minimize(); else top.focus(); return; }
+      htui.el.classList.remove('ad-home-on');
+      htui.kit.run(id);
+    },
+    goHome() {
+      htui.closeMenus();
+      ['.ad-drawer', '.ad-shade', '.ad-recents'].forEach(q => { const x = htui.el.querySelector(q + ':not(.leaving)'); if (x && x._close) x._close(); });
+      htui.wins.forEach(w => { if (visible(w)) w.minimize(); });
+      htui.el.classList.add('ad-home-on');
+    },
+    // 戻る: ダイアログ → メニュー → シェードなど → アプリ（しまってホームへ）の順に閉じる
+    back() {
+      const el = htui.el;
+      const modal = el.querySelector('.modal-ov');
+      if (modal) { modal.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return; }
+      if (el.querySelector('.menu:not(.leaving)')) { htui.closeMenus(); return; }
+      const pop = el.querySelector('.ad-drawer:not(.leaving),.ad-shade:not(.leaving),.ad-recents:not(.leaving)');
+      if (pop && pop._close) { pop._close(); return; }
+      const w = htui.active();
+      // タッチではアプリをしまってホームへ（Android と同じ）。マウスではそのウィンドウだけしまう
+      if (w) { if (OS.touch) this.goHome(); else w.minimize(); }
+    },
+    onFocus() { htui.el.classList.remove('ad-home-on'); },
+    onActive(w) {
+      if (!this.grid) return;
+      htui.el.classList.toggle('ad-home-on', !w || (!OS.touch && !htui.wins.some(x => visible(x) && x.zone === 'max')));
+      this.onApps();
+    },
+    onMode() { this.onActive(htui.active()); },
+    onSuper() { this.drawer(); },
+
+    // ---- アプリドロワー（すべてのアプリ）
+    drawer(focusSearch) {
+      const old = htui.el.querySelector('.ad-drawer:not(.leaving)'); if (old) { old._close(); return; }
+      const k = htui.kit, self = this;
+      const list = h('div', { class: 'ad-dgrid' });
+      const q = h('input', { class: 'inp ad-dq', id: 'ad-dq', placeholder: 'アプリを検索', 'aria-label': 'アプリを検索', autocomplete: 'off', spellcheck: 'false' });
+      const fill = () => {
+        const t = q.value.trim().toLowerCase(); list.textContent = '';
+        const apps = k.apps().filter(a => !t || (a.name + ' ' + a.id + ' ' + (a.desc || '')).toLowerCase().includes(t)).sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+        if (!apps.length) list.append(h('p', { class: 'ad-empty' }, '見つかりません'));
+        apps.forEach(a => list.append(h('button', { class: 'ad-app', type: 'button', title: a.desc || a.name, 'data-app': a.id, onclick: () => { close(); self.openApp(a.id); } }, k.appIcon(a, 26), h('span', null, a.name))));
+      };
+      q.addEventListener('input', fill);
+      q.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); const b = list.querySelector('.ad-app'); if (b) b.click(); } });
+      const box = h('div', { class: 'ad-drawer', role: 'dialog', 'aria-label': 'すべてのアプリ' }, h('div', { class: 'ad-grip', 'aria-hidden': 'true' }), h('div', { class: 'ad-dsearch' }, OS.icon('search', 18), q), list);
+      // いちばん上までスクロールしているときに下へ引くと閉じる
+      swipe(box, (dx, dy) => { if (dy > 80 && list.scrollTop <= 0 && Math.abs(dy) > Math.abs(dx)) close(); else return false; });
+      fill();
+      const close = popup(box, null);
+      if (focusSearch || !OS.touch) setTimeout(() => q.focus(), 60);
+    },
+
+    // ---- 通知シェード（クイック設定と通知）
+    shade() {
+      const old = htui.el.querySelector('.ad-shade:not(.leaving)'); if (old) { old._close(); return; }
+      const k = htui.kit, self = this, d = new Date();
+      const list = h('div', { class: 'ad-nlist' });
+      const fill = () => {
+        list.textContent = '';
+        if (!htui.notices.length) list.append(h('p', { class: 'ad-empty' }, '通知はありません'));
+        htui.notices.forEach(n => list.append(h('div', { class: 'ad-note' }, h('span', { class: 'ad-nico' }, OS.icon(n.icon || 'bell', 18)),
+          h('span', { class: 'ad-ntext' }, h('small', null, (n.app || 'htmlOS') + ' ・ ' + new Date(n.time).getHours() + ':' + pad(new Date(n.time).getMinutes())), h('b', null, n.title), n.body ? h('span', null, n.body) : null),
+          h('button', { class: 'ad-nx', type: 'button', 'aria-label': n.title + ' を消す', onclick: () => { htui.notices = htui.notices.filter(x => x !== n); fill(); self.syncDot(); } }, OS.icon('x', 14)))));
+        htui.notices.forEach(n => { n.unread = false; }); self.syncDot();
+      };
+      const tileBtn = (icon, label, sub, fn, on) => h('button', { class: 'ad-qt' + (on ? ' on' : ''), type: 'button', onclick: fn }, OS.icon(icon, 20), h('span', null, h('b', null, label), sub ? h('small', null, sub) : null));
+      const again = () => { close(); self.shade(); };
+      const box = h('div', { class: 'ad-shade', role: 'dialog', 'aria-label': '通知とクイック設定' },
+        h('div', { class: 'ad-shead' }, h('b', null, pad(d.getHours()) + ':' + pad(d.getMinutes())), h('span', null, (d.getMonth() + 1) + '月' + d.getDate() + '日（' + WEEK[d.getDay()] + '）'),
+          h('span', { class: 'ad-grow' }),
+          h('button', { class: 'ad-sbtn', type: 'button', title: '電源', 'aria-label': '電源', onclick: e => k.menu(e.currentTarget, k.powerItems(), true) }, OS.icon('power', 18)),
+          h('button', { class: 'ad-sbtn', type: 'button', title: '設定', 'aria-label': '設定', onclick: () => { close(); self.openApp('settings'); } }, OS.icon('gear', 18))),
+        h('div', { class: 'ad-qgrid' },
+          tileBtn(OS.modeIcons[OS.uiMode], '画面モード', OS.modeNames[OS.uiMode], e => k.menu(e.currentTarget, k.modeItems())),
+          tileBtn('bell', 'サイレント', htui.prefs.dnd ? 'オン' : 'オフ', () => { htui.setPrefs({ dnd: !htui.prefs.dnd }); again(); }, htui.prefs.dnd),
+          tileBtn('music', 'BGM', k.bgmLabel(), () => { k.bgmToggle(); again(); }, k.bgmOn()),
+          tileBtn('camera', 'スクリーンショット', 'Alt+Shift+5', () => { close(); setTimeout(() => htui.screenshot && htui.screenshot(), 350); }),
+          tileBtn('desks', '仮想デスク', (htui.ws ? htui.ws.cur + 1 : 1) + ' 番目', () => { close(); htui.wsView(); }),
+          tileBtn('user', htui.user, 'ユーザー', e => k.menu(e.currentTarget, k.powerItems(), true))),
+        h('div', { class: 'ad-nhead' }, h('span', null, '通知'), h('button', { class: 'ad-clear', type: 'button', onclick: () => { htui.notices = []; fill(); } }, 'すべて消去')),
+        list, h('div', { class: 'ad-grip', 'aria-hidden': 'true' }));
+      dragOn(box, (dx, dy) => { if (dy < -60) close(); }, true);
+      fill();
+      const close = popup(box, null);
+    },
+    syncDot() { if (this.dot) this.dot.hidden = !htui.notices.some(n => n.unread); },
+    // 届いた通知: 上にヘッドアップ通知
+    onNotify(n) {
+      this.syncDot();
+      if (n.silent || htui.prefs.dnd) return;
+      const old = htui.el.querySelector('.ad-heads'); if (old) old.remove();
+      const t = h('button', { class: 'ad-heads', type: 'button', onclick: () => { t.remove(); this.shade(); } }, h('span', { class: 'ad-nico' }, OS.icon(n.icon || 'bell', 18)),
+        h('span', { class: 'ad-ntext' }, h('small', null, n.app || 'htmlOS'), h('b', null, n.title), n.body ? h('span', null, n.body) : null));
+      swipe(t, (dx, dy) => { if (dy < -30 || Math.abs(dx) > 60) t.remove(); });
+      htui.el.append(t);
+      setTimeout(() => t.remove(), 5000);
+    },
+
+    // ---- 履歴（開いているアプリ）。カードを押すと切り替え、上へはじくと閉じる
+    recents() {
+      const old = htui.el.querySelector('.ad-recents:not(.leaving)'); if (old) { old._close(); return; }
+      const row = h('div', { class: 'ad-rrow' }), self = this;
+      const box = h('div', { class: 'ad-recents', role: 'dialog', 'aria-label': '履歴' }, row);
+      const fill = () => {
+        row.textContent = '';
+        const wins = byZ();
+        if (!wins.length) { row.append(h('p', { class: 'ad-empty' }, '最近のアイテムはありません')); return; }
+        wins.forEach(w => {
+          const a = OS.apps[w.app] || {};
+          const card = h('div', { class: 'ad-card' },
+            h('div', { class: 'ad-chead' }, htui.kit.appIcon(a.icon ? a : { icon: 'file' }, 14), h('span', null, w.title)),
+            h('button', { class: 'ad-cthumb', type: 'button', style: '--c:' + (a.color || '#5e5c64'), 'aria-label': w.title + ' に切り替え', onclick: () => { close(); w.focus(); } }, self.snap(w) || OS.icon(a.icon || 'file', 56)));
+          card.addEventListener('pointerdown', e => {
+            if (e.button > 0) return;
+            const y0 = e.clientY; let dy = 0;
+            const mv = ev => { dy = Math.min(0, ev.clientY - y0); if (dy < -8) { card.style.transition = 'none'; card.style.transform = 'translateY(' + dy + 'px)'; card.style.opacity = String(1 + dy / 400); } };
+            const up = async () => {
+              document.removeEventListener('pointermove', mv); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up);
+              card.style.transition = ''; card.style.transform = ''; card.style.opacity = '';
+              if (dy < -90) { card.addEventListener('click', ev => ev.stopPropagation(), { capture: true, once: true }); if (await w.close()) { fill(); if (!htui.wins.length) close(); } }
+            };
+            document.addEventListener('pointermove', mv); document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
+          });
+          row.append(card);
+        });
+      };
+      box.append(h('button', { class: 'ad-rclear', type: 'button', onclick: async () => { for (const w of htui.wins.slice()) { if ((await w.close()) === false) break; } fill(); if (!htui.wins.length) { close(); self.goHome(); } } }, 'すべてクリア'));
+      box.addEventListener('click', e => { if (e.target === box || e.target === row) { close(); } });
+      fill();
+      const close = popup(box, null);
+    },
+
+    // 履歴のカードに入れる、ウィンドウの縮小コピー（中身は押せない）
+    snap(w) {
+      const d = htui.desk; if (!d) return null;
+      const W = w.el.offsetWidth || d.clientWidth, H = w.el.offsetHeight || d.clientHeight; if (!W || !H) return null;
+      const c = w.el.cloneNode(true);
+      c.classList.remove('hidden', 'minimizing', 'active'); c.removeAttribute('id');
+      c.querySelectorAll('[id]').forEach(x => x.removeAttribute('id'));
+      c.querySelectorAll('iframe,video,canvas,script').forEach(x => x.replaceWith(h('div', { class: 'ad-ph' })));
+      c.style.cssText += ';position:absolute;left:0;top:0;width:' + W + 'px;height:' + H + 'px;transform:none;animation:none;transition:none;margin:0';
+      const box = h('div', { class: 'ad-snap', 'aria-hidden': 'true', inert: '' }, c);
+      // 大きさはカードに入ってから合わせる
+      requestAnimationFrame(() => { const p = box.parentNode; if (p) p.style.aspectRatio = W + ' / ' + H; requestAnimationFrame(() => { c.style.transform = 'scale(' + (box.clientWidth / W) + ')'; c.style.transformOrigin = '0 0'; }); });
+      return box;
+    },
+    onContext(e) {
+      const b = e.target.closest('.ad-app,.ad-tk'); if (!b) return null;
+      return appItems(b.dataset.app, id => this.openApp(id));
+    },
+    onKey(e) {
+      // Esc（キーボードの戻る）: タッチではアプリをしまってホームへ
+      if (e.key === 'Escape' && OS.touch && !htui.el.querySelector('.modal-ov,.menu:not(.leaving),.ad-drawer:not(.leaving),.ad-shade:not(.leaving),.ad-recents:not(.leaving)')) {
+        const a = document.activeElement; if (htui.active() && (!a || !/^(INPUT|TEXTAREA)$/.test(a.tagName))) { this.back(); return true; }
       }
     }
   });

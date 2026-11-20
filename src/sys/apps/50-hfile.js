@@ -33,6 +33,10 @@
       // HDD1（PC のフォルダ）。HDD1 から起動しているときは / そのものなので出さない
       const hddOk = OS.hdd.supported && !OS.hdd.root, inHdd = p => p === OS.hdd.at || p.startsWith(OS.hdd.at + '/');
       if (hddOk) places.splice(7, 0, ['HDD1', OS.hdd.at, 'drive']);
+      // 7.0: HDD3（データ置き場としてつないでいるとき）と RAID（md0）
+      let at = hddOk ? 8 : 7;
+      if (OS.hdd3 && OS.hdd3.mounted) places.splice(at++, 0, ['HDD3', OS.hdd3.at, 'drive']);
+      if (OS.raid && OS.raid.active) places.splice(at++, 0, ['RAID', OS.raid.at, 'raid']);
       const placeBtns = places.map(p => { const b = h('button', { class: 'hf-place', type: 'button', title: p[1], onclick: () => go(p[1]) }, OS.icon(p[2], 16), h('span', null, p[0])); side.append(b); return b; });
 
       const err = e => ui.alert(e.message);

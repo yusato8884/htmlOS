@@ -56,6 +56,10 @@
 
   const ICONS = {
     pin: '<path d="M9 3h6l-1 6 4 4H6l4-4zM12 13v8"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    camera: '<path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/>',
+    raid: '<rect x="3" y="4" width="18" height="5" rx="1"/><rect x="3" y="10" width="18" height="5" rx="1"/><rect x="3" y="16" width="18" height="4" rx="1"/><path d="M7 6.5h.01M7 12.5h.01M7 18h.01"/>',
     music: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
     desks: '<rect x="3" y="6" width="13" height="11" rx="2"/><path d="M8 3h11a2 2 0 0 1 2 2v9"/>',
     battery: '<rect x="2" y="7" width="17" height="10" rx="2"/><path d="M22 11v2M6 10v4M10 10v4"/>',
@@ -791,51 +795,69 @@
   // ---------- HDD1（File System Access API で選んだ PC のフォルダ）
   //   htmlOS を LocalStorage から起動しているときは /mnt/hdd1 に接続（マウント）する。
   //   HDD1 から起動しているときは HDD1 が / そのものなので、/mnt/hdd1 には何もつながない
+  //   7.0: HDD3 も同じ仕組み（もう 1 つの PC のフォルダ。/mnt/hdd3）。ドライブを /mnt に付ける OS.mountStore も（RAID が使う）
   const HDD_AT = '/mnt/hdd1', HD = BOOT.hdd || { supported: false };
-  const hdd = OS.hdd = {
-    at: HDD_AT,
-    get supported() { return !!HD.supported; },
-    get root() { return !!base.disk; },
-    get mounted() { return mounts.some(m => m.at === HDD_AT); },
-    get name() { const m = mounts.find(x => x.at === HDD_AT); return m ? m.s.name : base.disk ? base.name : null; },
-    waiting: null, // 前に使ったフォルダ（許可を待っている）の名前
-    // 接続する。pick=true なら別のフォルダを選び直す。ボタンやコマンドなど、ユーザーの操作の中で呼ぶこと
-    async mount(pick, progress) {
-      if (base.disk) throw new Error('htmlOS は HDD1 から起動しています（HDD1 は / そのものです）');
-      if (!HD.supported) throw new Error('このブラウザは File System Access API（showDirectoryPicker）に対応していません。パソコンの Chrome・Edge などで使えます');
-      if (hdd.mounted) throw new Error('HDD1 はすでに ' + HDD_AT + ' に接続されています');
-      let dir = pick ? null : await HD.saved();
-      if (!dir) dir = await HD.pick();
-      if (!(await HD.allowed(dir, true))) throw new Error('フォルダを使う許可がもらえませんでした');
-      return attach(dir, progress);
-    },
-    async unmount() {
-      const i = mounts.findIndex(m => m.at === HDD_AT);
-      if (i < 0) throw new Error('HDD1 は接続されていません');
-      await mounts[i].s.flush();
-      mounts.splice(i, 1); changed(HDD_AT); changed('/mnt');
-    },
-    // 覚えているフォルダを忘れる（PC のフォルダの中身は消さない）
-    async forget() { if (hdd.mounted) await hdd.unmount(); hdd.waiting = null; await HD.forget(); },
-    // 起動したとき: 前に使ったフォルダがあって、許可が残っていれば自動で接続する
-    async auto() {
-      if (base.disk || !HD.supported || hdd.mounted) return null;
-      const dir = await HD.saved(); if (!dir) return null;
-      if (!(await HD.allowed(dir, false))) { hdd.waiting = dir.name; return null; }
-      return attach(dir);
-    },
-    flush: () => Promise.all(mounts.map(m => m.s.flush()))
-  };
-  async function attach(dir, progress) {
-    const s = await HD.open(dir, HDD_AT, progress);
-    s.onerror = (what, e) => { if (OS.notify && OS.htui && OS.htui.user) OS.notify({ app: 'HDD1', icon: 'archive', title: 'HDD1 に書き込めませんでした', body: what + ': ' + ((e && e.message) || e) }); };
+  OS.mountStore = function (at, s) {
+    if (mounts.some(m => m.at === at)) throw new Error(at + ' にはもう別のドライブがつながっています');
     if (!base.get(K('/mnt'))) base.set(K('/mnt'), JSON.stringify({ t: 'd', m: Date.now(), o: 'root' }));
-    mounts.push({ at: HDD_AT, key: K(HDD_AT), s: s });
-    hdd.waiting = null;
-    await HD.save(dir);
-    changed('/mnt'); changed(HDD_AT);
+    mounts.push({ at: at, key: K(at), s: s }); changed('/mnt'); changed(at);
+  };
+  OS.unmountStore = async function (at) {
+    const i = mounts.findIndex(m => m.at === at); if (i < 0) return false;
+    await mounts[i].s.flush(); mounts.splice(i, 1); changed(at); changed('/mnt'); return true;
+  };
+  OS.mounts = () => mounts.map(m => ({ at: m.at, name: m.s.name, label: m.s.label || null }));
+  // id: 'hdd1' / 'hdd3'（フォルダのハンドルを IndexedDB に覚える名前）、label: 表示名、at: つなぐ場所
+  function folderDrive(id, label, at) {
+    const d = {
+      id: id, label: label, at: at,
+      get supported() { return !!HD.supported; },
+      get root() { return id === 'hdd1' && !!base.disk; },
+      get mounted() { return mounts.some(m => m.at === at); },
+      get name() { const m = mounts.find(x => x.at === at); return m ? m.s.name : d.root ? base.name : null; },
+      waiting: null, // 前に使ったフォルダ（許可を待っている）の名前
+      // 接続する。pick=true なら別のフォルダを選び直す。ボタンやコマンドなど、ユーザーの操作の中で呼ぶこと
+      async mount(pick, progress) {
+        if (d.root) throw new Error('htmlOS は HDD1 から起動しています（HDD1 は / そのものです）');
+        if (!HD.supported) throw new Error('このブラウザは File System Access API（showDirectoryPicker）に対応していません。パソコンの Chrome・Edge などで使えます');
+        if (d.mounted) throw new Error(label + ' はすでに ' + at + ' に接続されています');
+        let dir = pick ? null : await d.handle();
+        if (!dir) dir = await HD.pick(id);
+        if (!(await HD.allowed(dir, true))) throw new Error('フォルダを使う許可がもらえませんでした');
+        return attach(d, dir, progress);
+      },
+      async unmount() {
+        if (!d.mounted) throw new Error(label + ' は接続されていません');
+        await OS.unmountStore(at);
+      },
+      // 覚えているフォルダを忘れる（PC のフォルダの中身は消さない）
+      async forget() { if (d.mounted) await d.unmount(); d.waiting = null; await HD.forget(id); },
+      handle: () => HD.saved ? HD.saved(id) : Promise.resolve(null),
+      // フォルダを選んで覚えるだけ（つながない。RAID 用など）
+      async pick() { const dir = await HD.pick(id); if (!(await HD.allowed(dir, true))) throw new Error('フォルダを使う許可がもらえませんでした'); await HD.save(dir, id); d.waiting = null; return dir; },
+      // 許可を確かめて（ask なら求めて）ハンドルを返す。なければ null
+      async access(ask) { const dir = await d.handle(); if (!dir) return null; return (await HD.allowed(dir, !!ask)) ? dir : null; },
+      // 起動したとき: 前に使ったフォルダがあって、許可が残っていれば自動で接続する
+      async auto() {
+        if (d.root || !HD.supported || d.mounted) return null;
+        const dir = await d.handle(); if (!dir) return null;
+        if (!(await HD.allowed(dir, false))) { d.waiting = dir.name; return null; }
+        return attach(d, dir);
+      },
+      flush: () => Promise.all(mounts.map(m => m.s.flush()))
+    };
+    return d;
+  }
+  async function attach(d, dir, progress) {
+    const s = await HD.open(dir, d.at, progress);
+    s.onerror = (what, e) => { if (OS.notify && OS.htui && OS.htui.user) OS.notify({ app: d.label, icon: 'archive', title: d.label + ' に書き込めませんでした', body: what + ': ' + ((e && e.message) || e) }); };
+    OS.mountStore(d.at, s);
+    d.waiting = null;
+    await HD.save(dir, d.id);
     return { name: dir.name, items: s.count() - 1, skipped: s.skipped };
   }
+  const hdd = OS.hdd = folderDrive('hdd1', 'HDD1', HDD_AT);
+  OS.hdd3 = folderDrive('hdd3', 'HDD3', '/mnt/hdd3');
   // 書き出しが終わっていないうちにページを閉じようとしたら止める
   window.addEventListener('beforeunload', e => { if ([base].concat(mounts.map(m => m.s)).some(s => s.pending && s.pending())) { e.preventDefault(); e.returnValue = ''; } });
 
@@ -1537,7 +1559,7 @@
     if (OS.imode) apps = apps.filter(n => I_APPS.includes(n));
     const pkgs = OS.safe || OS.imode ? [] : OS.pkg.list();
     try { OS.build = (JSON.parse(store.get('meta')) || {}).build || BOOT.build || '?'; } catch (e) { OS.build = BOOT.build || '?'; }
-    const core = ['/sys/init.js', '/sys/ipc.js', '/sys/cursor.js', '/sys/jsh.js', '/sys/htui.js', '/sys/hdm.js', '/sys/shells.js'];
+    const core = ['/sys/init.js', '/sys/ipc.js', '/sys/raid.js', '/sys/cursor.js', '/sys/jsh.js', '/sys/htui.js', '/sys/hdm.js', '/sys/shells.js'];
     const total = 2 + core.length + apps.length + pkgs.length; let done = 0;
     const step = async (s, failed) => {
       if (OS.klog) OS.klog(s, failed ? 3 : 6); else (OS._klog = OS._klog || []).push({ t: Date.now(), msg: s, prio: failed ? 3 : 6 });
@@ -1565,6 +1587,11 @@
     if (!base.disk && HD.supported) {
       try { const r = await hdd.auto(); if (r) await step('HDD1（' + r.name + '）を ' + HDD_AT + ' にマウントしました'); else if (hdd.waiting) await step('HDD1（' + hdd.waiting + '）: 使う許可を待っています（hFile の HDD1 か、jsh の mount hdd1 で接続）'); }
       catch (e) { await step('HDD1: ' + e.message, true); }
+    }
+    // HDD3・RAID（7.0）
+    if (OS.storage && !OS.imode && !OS.live) {
+      try { for (const r of await OS.storage.boot()) await step(r.msg, r.fail); }
+      catch (e) { await step('ストレージ: ' + e.message, true); }
     }
     OS.mode = mode;
     // init（PID 1）: マルチユーザーのターゲットまでサービスを順に起動する（GUI のサービスは HTUi を出したあと）

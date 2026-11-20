@@ -139,7 +139,8 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   //   持ち主・シンボリックリンク・ファイル以外のキー（meta など）は、フォルダの .htmlos.json に入れる。
   //   選んだフォルダ（ハンドル）は IndexedDB に覚えておく。ブラウザの決まりで、開き直したあとは使う許可をもう一度もらう必要がある
   var HDD = { supported: typeof window.showDirectoryPicker === 'function' && !!window.indexedDB };
-  var HDD_META = '.htmlos.json', HDD_MAX = 32 * 1024 * 1024;
+  var HDD_META = '.htmlos.json', HDD_MAX = 32 * 1024 * 1024, RAID_DIR = '.htmlos-raid'; // RAID_DIR: RAID（7.0）のデータ。ファイルとしては見せない
+  HDD.RAID_DIR = RAID_DIR;
   var HDD_BIN = /^(png|jpe?g|gif|webp|bmp|ico|avif|mp3|wav|ogg|oga|m4a|flac|aac|opus|mp4|webm|ogv|mov|m4v|zip|gz|7z|rar|pdf|exe|bin|uf2|elf|woff2?|ttf|otf)$/;
   var HDD_MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif', mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', oga: 'audio/ogg', m4a: 'audio/mp4', flac: 'audio/flac', aac: 'audio/aac', opus: 'audio/ogg', mp4: 'video/mp4', webm: 'video/webm', ogv: 'video/ogg', mov: 'video/quicktime', m4v: 'video/mp4', pdf: 'application/pdf', zip: 'application/zip' };
   function idb(mode, fn) {
@@ -154,13 +155,14 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       };
     });
   }
-  HDD.saved = function () { return HDD.supported ? idb('readonly', function (s) { return s.get('hdd1'); }).catch(function () { return null; }) : Promise.resolve(null); };
-  HDD.save = function (h) { return idb('readwrite', function (s) { return s.put(h, 'hdd1'); }); };
-  HDD.forget = function () { return idb('readwrite', function (s) { return s.delete('hdd1'); }); };
+  // name: 覚える名前（'hdd1'。7.0 から HDD3 は 'hdd3'）
+  HDD.saved = function (name) { return HDD.supported ? idb('readonly', function (s) { return s.get(name || 'hdd1'); }).catch(function () { return null; }) : Promise.resolve(null); };
+  HDD.save = function (h, name) { return idb('readwrite', function (s) { return s.put(h, name || 'hdd1'); }); };
+  HDD.forget = function (name) { return idb('readwrite', function (s) { return s.delete(name || 'hdd1'); }); };
   // フォルダを選んでもらう（ボタンを押したときなど、ユーザーの操作の中で呼ぶ）
   HDD.pick = function () {
     if (!HDD.supported) return Promise.reject(new Error('このブラウザは File System Access API に対応していません（パソコンの Chrome・Edge などで使えます）'));
-    return window.showDirectoryPicker({ id: 'htmlos-hdd1', mode: 'readwrite' });
+    return window.showDirectoryPicker({ id: 'htmlos-' + (typeof arguments[0] === 'string' ? arguments[0] : 'hdd1'), mode: 'readwrite' });
   };
   // 読み書きの許可。ask=true なら、まだのときに許可を求める（これもユーザーの操作の中で呼ぶ）
   HDD.allowed = async function (h, ask) {
@@ -172,7 +174,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   // フォルダの様子: 空か、htmlOS が入っているか
   HDD.inspect = async function (h) {
     var empty = true, hasOS = false;
-    for await (var e of h.values()) { if (e.name !== HDD_META) { empty = false; break; } }
+    for await (var e of h.values()) { if (e.name !== HDD_META && e.name !== RAID_DIR) { empty = false; break; } }
     try { await (await h.getDirectoryHandle('sys')).getFileHandle('kernel.js'); hasOS = true; } catch (e2) { /* 入っていない */ }
     return { empty: empty, hasOS: hasOS };
   };
@@ -214,7 +216,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     async function walk(dh, rel) {
       for await (var e of dh.values()) {
         var r = rel + '/' + e.name;
-        if (!rel && e.name === HDD_META) continue;
+        if (!rel && (e.name === HDD_META || e.name === RAID_DIR)) continue;
         if (e.kind === 'directory') { map.set(K(r), JSON.stringify(withMeta({ t: 'd', m: Date.now(), o: meta.o[r] || 'root' }, r))); await walk(e, r); continue; }
         var f = await e.getFile();
         if (f.size > HDD_MAX) { st.skipped.push(r); continue; }
@@ -301,6 +303,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       var rel = relOf(k);
       if (rel == null) throw new Error(k.slice(2) + ': HDD1 の外のパスです');
       if (rel === '/' + HDD_META) throw new Error(HDD_META + ' は htmlOS が使う名前なので使えません');
+      if (rel === '/' + RAID_DIR || rel.indexOf('/' + RAID_DIR + '/') === 0) throw new Error(RAID_DIR + ' は htmlOS（RAID）が使う名前なので使えません');
       var node = null; try { node = JSON.parse(v); } catch (e) { /* 壊れたノードもそのまま */ }
       var ns = sizeOf(node), os = sizes.get(rel) || 0;
       if (meta.q && ns > os && used - os + ns > meta.q) throw new Error('HDD1 の容量の上限（' + fmtBytes(meta.q) + '）を超えるため書き込めません（使用中 ' + fmtBytes(used) + '）');
@@ -1077,6 +1080,8 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         line('  HDD1 : ' + (hd1 ? 'PC Folder "' + hd1.name + '" [File System Access API]' : 'PC Folder (not registered)') + '   ');
         line(cfg.boot === 'hdd1' ? 'Boot device\n' : 'Data\n', cfg.boot === 'hdd1' ? 'ok' : 'dim'); await sleep(140 * k);
       }
+      var hd3 = await HDD.saved('hdd3');
+      if (hd3) { line('  HDD3 : PC Folder "' + hd3.name + '" [File System Access API]   '); line('Data / RAID\n', 'dim'); await sleep(140 * k); }
       line('  CD0  : htmlOS.html (install media)   ');
       line('htmlOS ' + MEDIA_VERSION + '\n\n', 'ok'); await sleep(160 * k);
       line('POST completed.  ' + (hdd2.ram ? '1 warning: IndexedDB が使えません（' + hdd2.failed + '。再読み込みで消えます）' : '0 errors') + '\n', hdd2.ram ? 'warn' : '');

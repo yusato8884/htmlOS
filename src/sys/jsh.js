@@ -664,6 +664,8 @@
         const u = fs.usage(), rows = ['/          ' + (u.disk ? '使用 ' + fmtSize(u.used) + (u.total ? ' / ' + fmtSize(u.total) + '（' + Math.round(u.used / u.total * 100) + '%）' : '（上限なし）') : '使用 ' + fmtSize(u.used) + ' / 約 ' + fmtSize(u.total) + '（' + Math.round(u.used / u.total * 100) + '%）') + ' [' + OS.storeLabel() + ']'];
         if (OS.hdd.mounted) rows.push(OS.hdd.at.padEnd(11) + 'PC のフォルダ「' + OS.hdd.name + '」 [HDD1]');
         else if (OS.hdd.waiting) rows.push(OS.hdd.at.padEnd(11) + '（未接続: 「' + OS.hdd.waiting + '」。mount hdd1 で接続）');
+        if (OS.hdd3 && OS.hdd3.mounted) rows.push(OS.hdd3.at.padEnd(11) + 'PC のフォルダ「' + OS.hdd3.name + '」 [HDD3]');
+        if (OS.raid && OS.raid.active) { const st = OS.raid.status(); rows.push(OS.raid.at.padEnd(11) + '使用 ' + fmtSize(st.used) + ' [md0 ' + st.level.toUpperCase() + ' ' + OS.raid.stateName(st.state) + ']'); }
         return rows.join('\n');
       });
       def('wget', 'wget URL [保存先]', 'URLをhFSにダウンロード', async (url, dest) => {
@@ -757,7 +759,40 @@
         tty.println('===uname===', 'dim'); tty.println(ab.uname());
         tty.println('===クレジット===', 'dim'); ab.credits.forEach(l => tty.println(l));
       });
-      def('neofetch', 'neofetch', 'システム情報をそれっぽく表示', () => {
+      // screenshot（7.0）: 画面を ~/Pictures/Screenshots に保存する（Alt+Shift+5 と同じ）
+      def('screenshot', 'screenshot', '画面のスクリーンショットを撮る（Alt+Shift+5 と同じ）', async () => {
+        if (!OS.htui.running || !OS.htui.user || !OS.htui.screenshot) throw new Error('screenshot: デスクトップ（HTUi）でだけ使えます');
+        return '保存しました: ' + await OS.htui.screenshot();
+      });
+      // crontab（7.0）: 自分の cron のジョブ。root は -u で他のユーザーのものも
+      def('crontab', 'crontab [-u ユーザー] -l | -e | -r | -a "分 時 日 月 曜日 コマンド" | -d 行 | -n | ファイル', 'cron のジョブ（-l 一覧 / -a 追加 / -d 削除 / -e 編集 / -r 全部消す / -n 次の予定）', async (...a) => {
+        if (!OS.cron) throw new Error('crontab: cron がありません');
+        const g = getopts(a, 'uad'), o = g.o;
+        const who = o.u || self.user;
+        if (who !== self.user && !self.root) throw new Error('crontab: ほかのユーザーの crontab は root だけが扱えます');
+        if (!users.get(who)) throw new Error('crontab: ' + who + ': そのようなユーザーはいません');
+        const C = OS.cron, text = C.read(who);
+        if (o.l) return text ? text.replace(/\n$/, '') : who + ' の crontab はありません';
+        if (o.n) {
+          const js = C.jobs(who).filter(j => !j.error);
+          if (!js.length) return who + ' のジョブはありません';
+          return js.map(j => String(j.line).padStart(3) + '  ' + (j.next ? new Date(j.next).toLocaleString('ja-JP') : (j.reboot ? '（起動したとき）' : '-')).padEnd(20) + '  ' + j.desc + '  ' + j.cmd).join('\n');
+        }
+        if (o.r) { C.write(who, ''); return who + ' の crontab を消しました'; }
+        if (o.a) { const line = [o.a].concat(g.rest).join(' '); C.parse(line); C.write(who, text + line + '\n'); return '追加しました: ' + line; }
+        if (o.d) {
+          const n = parseInt(o.d, 10), l = text.split('\n');
+          if (!(n >= 1 && n <= l.length) || !l[n - 1].trim()) throw new Error('crontab: ' + o.d + ' 行目はありません（crontab -l で確かめてください）');
+          const del = l.splice(n - 1, 1)[0]; C.write(who, l.join('\n')); return '消しました: ' + del;
+        }
+        if (o.e) {
+          if (OS.htui.running && OS.htui.user && OS.apps.hcron) { OS.launch('hcron', who); return 'hCron を開きました'; }
+          throw new Error('crontab -e は GUI で hCron を開きます。CUI では crontab -a "*/5 * * * * echo hi" で追加、crontab ファイル で置き換えてください');
+        }
+        if (g.rest.length) { const p = self.abs(String(g.rest[0])); C.write(who, self.fs.read(p)); return p + ' を ' + who + ' の crontab にしました'; }
+        throw new Error('使い方: crontab -l / -a "分 時 日 月 曜日 コマンド" / -d 行番号 / -n / -e / -r / ファイル');
+      });
+      def('neofetch', 'neofetch','システム情報をそれっぽく表示', () => {
         const u = fs.usage(), art = ['  <  / >  ', ' <  /  > ', '<  /   >', ' <  /  > ', '  <  / >  ', '          '];
         const who = self.user + '@' + OS.hostname(), de = OS.htui.running && OS.htui.sessionId ? (OS.sessions[OS.htui.sessionId].full || OS.sessions[OS.htui.sessionId].name) : 'なし（CUI）';
         const info = [who, '-'.repeat(who.length), 'OS: ' + OS.name + ' (' + OS.version + ')' + (OS.live ? ' (Live)' : ''), 'Shell: jsh', 'UI: ' + OS.htui.sdk.full, 'DE: ' + de, 'Disk: ' + fmtSize(u.used) + (u.disk && !u.total ? '' : ' / ' + fmtSize(u.total)) + ' (' + (OS.store.ram ? 'RAM' : OS.storeLabel()) + ')'];
@@ -1266,24 +1301,54 @@
       });
 
       // ======== ドライブ（HDD1 = File System Access API で選んだ PC のフォルダ）
-      def('mount', 'mount [hdd1] [-p]', 'ドライブの一覧。mount hdd1 で PC のフォルダを /mnt/hdd1 に接続（-p でフォルダを選び直す）', async (...a) => {
+      def('mount', 'mount [hdd1|hdd3] [-p]', 'ドライブの一覧。mount hdd1 / mount hdd3 で PC のフォルダを /mnt/hdd1・/mnt/hdd3 に接続（-p でフォルダを選び直す）', async (...a) => {
         const g = getopts(a), dev = g.rest[0];
+        const line = (id, d) => id + '   ' + d.at.padEnd(12) + (d.mounted ? 'PC のフォルダ「' + d.name + '」' : d.supported ? '未接続' + (d.waiting ? '（「' + d.waiting + '」の許可待ち）' : '') + ' — mount ' + id + ' で接続' : 'このブラウザでは使えません');
         if (!dev) {
           const rows = [OS.hdd.root ? 'hdd1   /           PC のフォルダ「' + OS.hdd.name + '」（ここから起動）' : (OS.store.idb ? 'hdd2' : 'hdd0') + '   /           ' + OS.storeLabel()];
-          if (!OS.hdd.root) rows.push('hdd1   ' + OS.hdd.at.padEnd(12) + (OS.hdd.mounted ? 'PC のフォルダ「' + OS.hdd.name + '」' : OS.hdd.supported ? '未接続' + (OS.hdd.waiting ? '（「' + OS.hdd.waiting + '」の許可待ち）' : '') + ' — mount hdd1 で接続' : 'このブラウザでは使えません'));
+          if (!OS.hdd.root) rows.push(line('hdd1', OS.hdd));
+          if (OS.hdd3 && (OS.hdd3.mounted || OS.hdd3.waiting || (OS.storage && OS.storage.hdd3Use() === 'data'))) rows.push(line('hdd3', OS.hdd3));
+          if (OS.raid) { const st = OS.raid.status(); if (st) rows.push('md0    ' + OS.raid.at.padEnd(12) + st.level.toUpperCase() + '（' + st.members.map(m => m.label).join('・') + '）' + OS.raid.stateName(st.state)); }
           return rows.join('\n');
         }
-        if (dev !== 'hdd1') throw new Error(dev + ': そのようなドライブはありません（使えるのは hdd1 です）');
-        if (g.o.p && OS.hdd.mounted) await OS.hdd.unmount();
-        tty.println('HDD1 を読み込んでいます…', 'dim');
-        const r = await OS.hdd.mount(!!g.o.p);
-        return 'HDD1（PC のフォルダ「' + r.name + '」）を ' + OS.hdd.at + ' に接続しました（' + r.items + ' 項目' + (r.skipped.length ? '。32MB を超える ' + r.skipped.length + ' 個のファイルは読み込んでいません' : '') + '）';
+        const d = dev === 'hdd1' ? OS.hdd : dev === 'hdd3' ? OS.hdd3 : null;
+        if (!d) throw new Error(dev + ': そのようなドライブはありません（使えるのは hdd1・hdd3 です。RAID は raid assemble）');
+        if (dev === 'hdd3' && OS.storage && OS.storage.hdd3Use() === 'raid') throw new Error('HDD3 は RAID 用に設定されています（設定 → ストレージ で「データ置き場」にできます）');
+        if (g.o.p && d.mounted) await d.unmount();
+        tty.println(d.label + ' を読み込んでいます…', 'dim');
+        const r = await d.mount(!!g.o.p);
+        return d.label + '（PC のフォルダ「' + r.name + '」）を ' + d.at + ' に接続しました（' + r.items + ' 項目' + (r.skipped.length ? '。32MB を超える ' + r.skipped.length + ' 個のファイルは読み込んでいません' : '') + '）';
       });
-      def('umount', 'umount hdd1', 'HDD1 を切り離す（PC のフォルダの中身はそのまま）', async dev => {
-        if (dev != null && dev !== 'hdd1' && dev !== OS.hdd.at) throw new Error(dev + ': そのようなドライブはありません');
-        await OS.hdd.unmount();
-        if (self.cwd === OS.hdd.at || self.cwd.startsWith(OS.hdd.at + '/')) self.cwd = self.home;
-        return 'HDD1 を切り離しました';
+      def('umount', 'umount hdd1|hdd3', 'HDD1・HDD3 を切り離す（PC のフォルダの中身はそのまま）', async dev => {
+        const d = dev === 'hdd3' || dev === (OS.hdd3 && OS.hdd3.at) ? OS.hdd3 : (dev == null || dev === 'hdd1' || dev === OS.hdd.at) ? OS.hdd : null;
+        if (!d) throw new Error(dev + ': そのようなドライブはありません');
+        await d.unmount();
+        if (self.cwd === d.at || self.cwd.startsWith(d.at + '/')) self.cwd = self.home;
+        return d.label + ' を切り離しました';
+      });
+      // raid（7.0）: mdadm にあたる。RAID0 / 1 / 5（RAID5 は HDD3 が必要）
+      def('raid', 'raid [status] | create 0|1|5 ドライブ... | assemble | rebuild | stop | destroy', 'RAID（md0）の状態と操作。ドライブは hdd1・hdd2・hdd3', async (...a) => {
+        const R = OS.raid; if (!R) throw new Error('raid: RAID がありません');
+        const sub = a[0] || 'status';
+        if (sub === 'status') {
+          const st = R.status();
+          if (!st) return 'RAID はありません。作り方: raid create 1 hdd1 hdd2（RAID5 は raid create 5 hdd1 hdd2 hdd3。HDD3 を先にセットアップ）';
+          return ['md0 : ' + R.levels[st.level].name + '  ' + R.stateName(st.state) + (st.reason ? '（' + st.reason + '）' : ''),
+            '  ドライブ: ' + st.members.map(m => m.label + (m.name ? '（' + m.name + '）' : '') + (m.ok ? ' [U]' : ' [_]')).join('  '),
+            '  場所: ' + st.at + (st.files != null ? '   項目: ' + st.files + '   使用: ' + fmtSize(st.used) + '   世代: ' + st.gen : ''),
+            '  容量: ' + R.capacityNote(st.level, st.members.length)].join('\n');
+        }
+        if (sub !== 'status') needAdmin();
+        if (sub === 'create') { const st = await R.create(a[1], a.slice(2)); return R.levels[st.level].name + ' を作り、' + st.at + ' に接続しました'; }
+        if (sub === 'assemble') { const st = await R.assemble({ ask: true }); return 'md0 を組み立てました（' + R.stateName(st.state) + '）'; }
+        if (sub === 'rebuild') { await R.rebuild({ ask: true }); return '再構築が終わりました'; }
+        if (sub === 'stop') return (await R.stop()) ? 'md0 を止めました' : 'md0 は動いていません';
+        if (sub === 'destroy') {
+          const yes = await tty.read('RAID（md0）のデータをすべてのドライブから消します。元に戻せません。続けるには yes と入力: ');
+          if (yes !== 'yes') return 'やめました';
+          await R.destroy(); return 'md0 を削除しました';
+        }
+        throw new Error('raid status | create 0|1|5 ドライブ... | assemble | rebuild | stop | destroy');
       });
 
       // ======== システム情報・シェル
