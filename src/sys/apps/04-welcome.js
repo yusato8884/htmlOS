@@ -46,8 +46,11 @@
             tile('install', 'download', 'インストール', 'このブラウザに htmlOS を入れる', () => OS.launch('installer')),
             tile('update', 'reload', 'アップデート', has ? (same ? '最新です（' + meta.version + '）。もう一度書き直すこともできます' : meta.version + (meta.build ? '（ビルド ' + meta.build + '）' : '') + ' → ' + BOOT.version) : 'インストール済みの htmlOS がありません', update, !has),
             tile('recover', 'gear', 'htmlOS を回復', '修復・パスワード・バックアップ・アンインストール', recover)),
+          BOOT.lsHasOS && BOOT.lsHasOS() ? h('div', { class: 'wl-mig', id: 'wl-mig' }, OS.icon('drive', 22),
+            h('div', null, h('b', null, 'HDD0（LocalStorage）に htmlOS が残っています'), h('small', null, '6.1.0 から HDD0 は使えません。ユーザー・ファイル・設定ごと HDD2（IndexedDB）に移行してください。')),
+            h('button', { class: 'btn primary', type: 'button', id: 'wl-mig-btn', onclick: offerMigrate }, 'HDD2 に移行…')) : null,
           h('p', { class: 'wl-foot' }, 'インストール先（' + (BOOT.realLabel ? BOOT.realLabel() : 'LocalStorage') + '）: ', has ? 'htmlOS ' + meta.version + (meta.build ? '（ビルド ' + meta.build + '）' : '') + ' が見つかりました' : 'htmlOS は見つかりませんでした',
-            BOOT.realIsRam() ? '（このブラウザは LocalStorage が使えないため、インストールしても再読み込みで消えます）' : ''));
+            BOOT.realIsRam() ? '（このブラウザは IndexedDB が使えないため、HDD2 にはインストールできません。HDD1（PC のフォルダ）を使ってください）' : ''));
         if (!OS.imode) body.querySelector('#wl-try').disabled = true;
       }
 
@@ -125,7 +128,7 @@
               } catch (e) { ui().alert(e.message); }
             }, { disabled: !has }),
             row('restore', 'upload', 'バックアップから復元', 'バックアップのファイルを読み込み、インストール先をその内容に置き換えます' + (has ? '。管理者のサインインが必要です' : ''), '復元…', restore),
-            row('quota', 'drive', 'ディスクの上限', BOOT.realIsHdd && BOOT.realIsHdd() ? 'HDD1（PC のフォルダ）に htmlOS が使ってよい容量を GB で決めます。管理者のサインインが必要です' : 'HDD1 にインストールした htmlOS が使ってよい容量を GB で決めます（HDD0 の LocalStorage は約 5MB で固定です）', '設定…', setQuota, { disabled: !(BOOT.hdd && BOOT.hdd.supported) }),
+            row('quota', 'drive', 'ディスクの上限', BOOT.realIsHdd && BOOT.realIsHdd() ? 'HDD1（PC のフォルダ）に htmlOS が使ってよい容量を GB で決めます。管理者のサインインが必要です' : 'HDD1 にインストールした htmlOS が使ってよい容量を GB で決めます（HDD2 の IndexedDB は最大 10GB で固定です）', '設定…', setQuota, { disabled: !(BOOT.hdd && BOOT.hdd.supported) }),
             row('uninstall', 'trash', 'htmlOS をアンインストール', '管理者としてサインインし、このブラウザから htmlOS のユーザー・ファイル・設定をすべて消去します（BIOS の設定は残ります）', 'アンインストール…', uninstall, { danger: true, disabled: !has })));
       }
       async function resetPassword() {
@@ -224,6 +227,41 @@
         setTimeout(() => OS.reboot(), 600);
       }
 
+      // HDD0（LocalStorage）の htmlOS を HDD2（IndexedDB）に移す
+      async function offerMigrate() {
+        BOOT.offerMigrate = false;
+        if (busy || !BOOT.lsHasOS()) return;
+        const info = BOOT.hdd0Info(), m = info.meta || {}, has2 = BOOT.hdd2HasOS(), m2 = has2 ? BOOT.hdd2Meta() || {} : null, fmt = BOOT.hdd.fmt;
+        const erase = h('input', { type: 'checkbox', id: 'wl-mig-erase', checked: true });
+        const ok2 = BOOT.hdd2Ok();
+        const r = await ui().modal({ title: 'HDD2 へ移行', body: h('div', { class: 'modal-msg', id: 'wl-mig-msg' },
+            h('p', { style: 'margin:0 0 6px;font-size:17px;font-weight:600' }, 'HDD0 に htmlOS が見つかりました'),
+            h('p', { style: 'margin:0 0 8px' }, 'HDD0（LocalStorage）: ' + BOOT.osName(m.version, m.codename) + '（' + m.version + '）・ユーザー ' + (info.users.join('、') || '-') + '・' + fmt(info.bytes)),
+            h('p', { style: 'margin:0 0 8px' }, 'htmlOS 6.1.0 から HDD0 は使えなくなりました。ユーザー・ファイル・設定をそのまま HDD2（このブラウザの IndexedDB。最大 10GB）に移し、HDD2 から起動するようにしますか？'),
+            has2 ? h('p', { class: 'gi-errtext', style: 'margin:0 0 8px' }, 'HDD2 にはすでに htmlOS ' + m2.version + ' が入っています。移行すると、HDD2 の htmlOS は HDD0 の内容で置き換わります。') : null,
+            ok2 ? null : h('p', { class: 'gi-errtext', style: 'margin:0 0 8px' }, 'このブラウザでは IndexedDB が使えないため、移行できません。'),
+            h('label', { class: 'gi-check' }, erase, '移行したあと、HDD0 の htmlOS を消す（LocalStorage が空きます）')),
+          buttons: [{ label: 'あとで', cancel: true, value: false }, { label: '移行する', primary: true, value: true }] });
+        if (r && ok2) { migrate(erase.checked); return; }
+        if (r && !ok2) return;
+        if (has2) { ui().toast('HDD2 の htmlOS を起動します（次に開いたときにもう一度聞きます）'); setTimeout(() => OS.reboot(), 600); }
+      }
+      async function migrate(eraseAfter) {
+        if (busy) return; busy = true;
+        const pg = progress('HDD2 に移行しています');
+        pg.stat.textContent = 'HDD0（LocalStorage）から HDD2（IndexedDB）にコピーしています…';
+        try {
+          const n = await BOOT.migrateHdd0({ erase: eraseAfter }, (s, p) => pg.say(s, p));
+          pg.say('完了しました', 100);
+          pg.stat.textContent = n + ' 個の項目を HDD2 に移しました。再起動すると、HDD2 から htmlOS が起動します。';
+          busy = false;
+          pg.stat.after(h('div', { class: 'wl-row' }, h('button', { class: 'btn primary', type: 'button', id: 'wl-reboot', onclick: () => OS.reboot() }, '再起動'), h('button', { class: 'btn', type: 'button', onclick: home }, '最初の画面に戻る')));
+        } catch (e) {
+          busy = false; pg.say('失敗: ' + e.message); pg.stat.textContent = '移行できませんでした: ' + e.message; pg.stat.classList.add('gi-errtext');
+          pg.stat.after(h('button', { class: 'btn', type: 'button', onclick: home }, '最初の画面に戻る'));
+        }
+      }
+
       async function uninstall() {
         const user = await signIn('htmlOS をアンインストール', 'アンインストールするには、インストール先の htmlOS の管理者としてサインインしてください。');
         if (!user) return;
@@ -234,7 +272,8 @@
       }
 
       home();
-      if (BOOT.offerUpdate && BOOT.realHasOS()) setTimeout(offerUpdate, 400);
+      if (BOOT.offerMigrate) setTimeout(offerMigrate, 400);
+      else if (BOOT.offerUpdate && BOOT.realHasOS()) setTimeout(offerUpdate, 400);
       return win;
     }
   });

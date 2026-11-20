@@ -20,7 +20,7 @@
   try { OS.codename = (JSON.parse(base.get('meta')) || {}).codename || (OS.version === BOOT.version ? BOOT.codename : '') || ''; } catch (e) { OS.codename = ''; }
   OS.name = BOOT.osName ? BOOT.osName(OS.version, OS.codename) : 'htmlOS ' + OS.version;
   // システムのドライブの名前（df や設定に出す）
-  OS.storeLabel = () => base.disk ? 'HDD1（' + base.name + '）' : base.ram ? 'RAMディスク' : 'LocalStorage';
+  OS.storeLabel = () => base.disk ? 'HDD1（' + base.name + '）' : base.idb ? 'HDD2（IndexedDB）' : base.ram ? 'RAMディスク' : 'LocalStorage';
 
   // ---------- DOM ヘルパー
   function h(tag, attrs, ...kids) {
@@ -161,7 +161,7 @@
   }
   function put(p, node) {
     try { store.set(K(p), JSON.stringify(node)); }
-    catch (e) { if (mountOf(K(p)) || base.disk) throw e; throw new Error('ストレージの空き容量が足りません（LocalStorageの上限は約5MBです）'); }
+    catch (e) { if (mountOf(K(p)) || base.disk || base.idb) throw e; throw new Error('ストレージの空き容量が足りません（' + OS.storeLabel() + '）'); }
     changed(p);
   }
   const fs = OS.fs = {
@@ -281,11 +281,13 @@
       if (!fs.isDir(path.dir(d))) throw new Error(path.dir(d) + ': ディレクトリがありません');
       fs._cp(src, d); fs.rm(src, { recursive: true }); return d;
     },
-    // システムのドライブの使用量。HDD1（PC のフォルダ）から起動しているときは disk が true、total は設定した上限（なければ 0）
+    // システムのドライブの使用量。HDD1（PC のフォルダ）・HDD2（IndexedDB）では disk が true、total は上限（HDD1 で上限なしなら 0）。
+    // HDD2 は idb も true（上限は最大 10GB。ブラウザの割り当てが少なければその量）
     usage() {
+      if (base.disk || base.idb) return { used: base.used(), total: base.quota(), disk: true, idb: !!base.idb, drive: base.idb ? 'HDD2' : 'HDD1' };
       let used = 0;
       for (const k of base.keys()) used += k.length + 7 + (base.get(k) || '').length;
-      return base.disk ? { used: base.used ? base.used() : used, total: base.quota ? base.quota() : 0, disk: true } : { used: used, total: 5 * 1024 * 1024 };
+      return { used: used, total: 5 * 1024 * 1024 };
     },
     kind(p) { const e = path.ext(p); for (const k in KINDS) if (KINDS[k].includes(e)) return k; return 'other'; },
     mime(p) { return MIME[path.ext(p)] || 'text/plain'; },
@@ -727,8 +729,8 @@
       w('Documents/readme.txt', [
         OS.name + '（' + OS.version + '）へようこそ',
         '',
-        'このOSはブラウザのLocalStorageにインストールされています。',
-        '容量は全体で約5MBです（画像や音声はすぐ一杯になります）。',
+        'このOSは ' + OS.storeLabel() + ' にインストールされています。',
+        base.idb ? '容量は最大 10GB です（ブラウザが割り当てた量がそれより少なければ、その量まで）。' : base.disk ? '容量は PC のフォルダの空きと、設定した上限しだいです。' : '容量は全体で約5MBです（画像や音声はすぐ一杯になります）。',
         '',
         '■ jsh（CUI）',
         '  シェル風:  ls -l /sys     cd Documents     cat readme.txt',
@@ -1400,7 +1402,7 @@
     if (OS.init) { try { stopped = await OS.init.shutdown(); } catch (e) { /* 止められなくても電源は切る */ } }
     // PC のフォルダ（HDD1）への書き出しが残っていれば、終わるまで待つ
     try { await Promise.all([hdd.flush(), BOOT.flushAll ? BOOT.flushAll() : null]); } catch (e) { /* 書けなかった分は通知済み */ }
-    const steps = (gui ? ['HTUi を停止しました'] : []).concat(stopped.map(d => d + 'を停止しました')).concat(['アプリを終了しました', 'ユーザーセッションを閉じました', (base.disk ? 'HDD1' : 'LocalStorage') + ' ファイルシステムを同期しました'].concat(hdd.mounted ? ['HDD1 を切り離しました'] : []), [reboot ? '再起動します' : '電源を切ります']);
+    const steps = (gui ? ['HTUi を停止しました'] : []).concat(stopped.map(d => d + 'を停止しました')).concat(['アプリを終了しました', 'ユーザーセッションを閉じました', (base.disk ? 'HDD1' : base.idb ? 'HDD2' : 'LocalStorage') + ' ファイルシステムを同期しました'].concat(hdd.mounted ? ['HDD1 を切り離しました'] : []), [reboot ? '再起動します' : '電源を切ります']);
     for (let i = 0; i < steps.length; i++) {
       tty.print('['); tty.print('  OK  ', 'ok'); tty.println('] ' + steps[i]);
       msg.textContent = steps[i]; bar.style.width = (100 - (i + 1) / steps.length * 100) + '%';
@@ -1545,7 +1547,8 @@
     };
     tty.println((OS.imode ? 'htmlOS i ' + OS.version : OS.name + ' (' + OS.version + ')') + (OS.safe ? '（セーフモード）' : '') + ' を起動しています…');
     await sleep(120);
-    await step(base.disk ? 'HDD1（PC のフォルダ「' + base.name + '」）をルートとしてマウントしました' : 'LocalStorage ファイルシステムをマウントしました' + (store.ram ? '（RAMディスク: 再読み込みで消えます）' : ''));
+    if (base.idb) base.onerror = (what, e) => { if (OS.notify && OS.htui && OS.htui.user) OS.notify({ app: 'HDD2', icon: 'archive', title: 'HDD2 に書き込めませんでした', body: what + ': ' + ((e && e.message) || e) }); else console.warn('[hdd2]', what, e); };
+    await step(base.disk ? 'HDD1（PC のフォルダ「' + base.name + '」）をルートとしてマウントしました' : base.idb ? 'HDD2（IndexedDB）をルートとしてマウントしました' : 'LocalStorage ファイルシステムをマウントしました' + (store.ram ? '（RAMディスク: 再読み込みで消えます）' : ''));
     for (const f of core) { OS.loadFile(f); await step(f + ' を読み込みました'); }
     for (const n of apps) {
       try { OS.loadFile('/sys/apps/' + n); await step('アプリ ' + n); }

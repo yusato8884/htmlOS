@@ -1,5 +1,5 @@
 /* htmlOS インストーラー（GUI）。htmlOS i（とそこから始めた Live 環境）で使う。htmlOSセットアップの「インストール」から開く。
-   ユーザー → 設定 → 確認 → インストール の順に進み、本物の LocalStorage に htmlOS を入れる。
+   ユーザー → 設定 → 確認 → インストール の順に進み、HDD2（IndexedDB）か HDD1（PC のフォルダ）に htmlOS を入れる。
    書き込みはブートローダの BOOT.installReal が行う（Live の OS 自体はメモリ上のストレージで動いている）。 */
 (function () {
   const OS = window.OS, h = OS.h, BOOT = window.BOOT;
@@ -13,11 +13,17 @@
       const ex = OS.htui.wins.find(w => w.app === 'installer');
       if (ex) { ex.focus(); return ex; }
       const win = OS.htui.open({ title: 'htmlOS をインストール', icon: 'download', w: 760, h: 540, app: 'installer' });
-      const st = { step: 0, user: '', pw1: '', pw2: '', rpw: '', host: 'htmlos', mode: 'gui', session: OS.hdm.defaultSession(), keep: true, busy: false, done: false, target: 'hdd0', hdd: null, hddHasOS: false, quotaGb: '' };
+      const st = { step: 0, user: '', pw1: '', pw2: '', rpw: '', host: 'htmlos', mode: 'gui', session: OS.hdm.defaultSession(), keep: true, busy: false, done: false, target: BOOT.hdd2Ok && !BOOT.hdd2Ok() && BOOT.hdd && BOOT.hdd.supported ? 'hdd1' : 'hdd2', hdd: null, hddHasOS: false, quotaGb: '' };
       const quotaBytes = () => st.target === 'hdd1' && st.quotaGb.trim() ? Math.round(Number(st.quotaGb) * 1073741824) : 0;
       // インストール先にもう htmlOS が入っているか（入っていれば上書きになる）
-      const willOverwrite = () => st.target === 'hdd1' ? !!st.hddHasOS : BOOT.lsHasOS();
-      const targetName = () => st.target === 'hdd1' ? 'HDD1: PC のフォルダ「' + (st.hdd ? st.hdd.name : '?') + '」' : 'HDD0: このブラウザの LocalStorage（htmlos:）';
+      const willOverwrite = () => st.target === 'hdd1' ? !!st.hddHasOS : BOOT.hdd2HasOS();
+      const targetName = () => st.target === 'hdd1' ? 'HDD1: PC のフォルダ「' + (st.hdd ? st.hdd.name : '?') + '」' : 'HDD2: このブラウザの IndexedDB（htmlos-hdd2）';
+      // HDD2 の説明（容量は最大 10GB。ブラウザの割り当てがそれより少なければその量）
+      const hdd2Desc = () => {
+        if (!BOOT.hdd2Ok()) return 'このブラウザでは IndexedDB が使えません';
+        const u = BOOT.hdd2Usage(), f = BOOT.hdd2.fmt;
+        return 'IndexedDB に入れる。容量は最大 10GB' + (u.quota && u.quota < 10 * 1073741824 ? '（このブラウザの割り当て: ' + f(u.quota) + '）' : '') + '。すぐに起動できる';
+      };
       // HDD1 にするフォルダを選ぶ。空のフォルダか、htmlOS が入っているフォルダだけ使える（ほかのファイルを消してしまわないように）
       async function pickHdd() {
         try {
@@ -92,11 +98,13 @@
             h('input', { type: 'radio', name: 'gi-' + name + '-' + win.pid, id: 'gi-' + name + '-' + val, checked: st[name] === val, onchange: () => { st[name] = val; render(); } }),
             h('span', null, h('b', null, label), desc ? h('small', null, desc) : null));
           const n = countFiles();
+          const hdd2Radio = radio('target', 'hdd2', 'HDD2（このブラウザ）', hdd2Desc());
+          if (!BOOT.hdd2Ok()) { hdd2Radio.classList.add('off'); hdd2Radio.querySelector('input').disabled = true; }
           const hddRadio = radio('target', 'hdd1', 'HDD1（PC のフォルダ）', BOOT.hdd && BOOT.hdd.supported ? 'File System Access API で選んだフォルダに、ふつうのファイルとして書き込む。容量の上限なし。起動するたびにフォルダを使う許可が必要' : 'このブラウザでは使えません（パソコンの Chrome・Edge などで使えます）');
           if (!(BOOT.hdd && BOOT.hdd.supported)) { hddRadio.classList.add('off'); hddRadio.querySelector('input').disabled = true; }
           page.append(h('h2', null, '設定'),
             h('h3', null, 'インストール先'),
-            h('div', { class: 'gi-opts' }, radio('target', 'hdd0', 'HDD0（このブラウザ）', 'LocalStorage に入れる。約 5MB まで。すぐに起動できる'), hddRadio),
+            h('div', { class: 'gi-opts' }, hdd2Radio, hddRadio),
             st.target === 'hdd1' ? h('div', { class: 'gi-hdd' },
               st.hdd ? h('span', null, 'フォルダ: ', h('b', null, st.hdd.name)) : h('span', null, 'まだフォルダを選んでいません'),
               h('button', { class: 'btn', type: 'button', id: 'gi-hdd-pick', onclick: pickHdd }, OS.icon('folder', 16), st.hdd ? '選び直す…' : 'フォルダを選ぶ…'),
@@ -161,7 +169,7 @@
           OS.notify({ app: 'htmlOS', icon: 'download', title: 'インストールが完了しました', body: '再起動すると、インストールした htmlOS が起動します' });
           render();
           st.ui.bar.style.width = '100%'; st.ui.log.textContent = log.textContent;
-          st.ui.stat.textContent = '再起動すると、インストールした htmlOS が起動します。' + (st.target === 'hdd1' ? '起動するときに、フォルダ「' + st.hdd.name + '」を使う許可を求められます（BIOS の SETUP の Boot Device で HDD0 に戻せます）。' : '') + 'このまま Live を続けることもできます（ここでの変更はインストール先には反映されません）。';
+          st.ui.stat.textContent = '再起動すると、インストールした htmlOS が起動します。' + (st.target === 'hdd1' ? '起動するときに、フォルダ「' + st.hdd.name + '」を使う許可を求められます（BIOS の SETUP の Boot Device で HDD2 に戻せます）。' : '') + 'このまま Live を続けることもできます（ここでの変更はインストール先には反映されません）。';
         } catch (e) {
           st.busy = false; st.failed = true;
           say('失敗: ' + e.message);

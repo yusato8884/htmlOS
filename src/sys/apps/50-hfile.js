@@ -121,7 +121,7 @@
         if (inTrash && sel) { const f = trash.from(path.base(sel)); if (f) stSel.textContent += ' ・ 元の場所 ' + f; }
         const u = fsx.usage();
         const onHdd = dir === OS.hdd.at || dir.startsWith(OS.hdd.at + '/');
-        stUse.textContent = onHdd ? 'HDD1: PC のフォルダ「' + OS.hdd.name + '」' : u.disk ? fmtSize(u.used) + (u.total ? ' / ' + fmtSize(u.total) + '（HDD1）' : '（HDD1・上限なし）') : fmtSize(u.used) + ' / 5 MB';
+        stUse.textContent = onHdd ? 'HDD1: PC のフォルダ「' + OS.hdd.name + '」' : u.disk ? fmtSize(u.used) + (u.total ? ' / ' + fmtSize(u.total) + '（' + (u.drive || 'HDD1') + '）' : '（HDD1・上限なし）') : fmtSize(u.used) + ' / 5 MB';
         meter.parentNode.hidden = onHdd || (!!u.disk && !u.total);
         meter.style.width = (u.total ? Math.min(100, u.used / u.total * 100) : 0) + '%';
       }

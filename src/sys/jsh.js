@@ -736,7 +736,7 @@
       def('read', 'read [プロンプト]', '1行入力を受け取る（await read("? ")）', p => tty.read(p == null ? '' : String(p)));
       def('history', 'history', '入力履歴', () => self.hist.map((l, i) => String(i + 1).padStart(4) + '  ' + l).join('\n'));
       def('date', 'date', '現在の日時', () => new Date().toLocaleString('ja-JP'));
-      def('uname', 'uname', 'システム情報', () => OS.name + ' ' + OS.version + ' [' + OS.htui.sdk.full + '] (' + (OS.store.ram ? 'ramdisk' : OS.store.disk ? 'hdd1' : 'localstorage') + ') ' + navigator.userAgent);
+      def('uname', 'uname', 'システム情報', () => OS.name + ' ' + OS.version + ' [' + OS.htui.sdk.full + '] (' + (OS.store.ram ? 'ramdisk' : OS.store.disk ? 'hdd1' : OS.store.idb ? 'hdd2' : 'localstorage') + ') ' + navigator.userAgent);
       def('neofetch', 'neofetch', 'システム情報をそれっぽく表示', () => {
         const u = fs.usage(), art = ['  <  / >  ', ' <  /  > ', '<  /   >', ' <  /  > ', '  <  / >  ', '          '];
         const who = self.user + '@' + OS.hostname(), de = OS.htui.running && OS.htui.sessionId ? (OS.sessions[OS.htui.sessionId].full || OS.sessions[OS.htui.sessionId].name) : 'なし（CUI）';
@@ -1249,7 +1249,7 @@
       def('mount', 'mount [hdd1] [-p]', 'ドライブの一覧。mount hdd1 で PC のフォルダを /mnt/hdd1 に接続（-p でフォルダを選び直す）', async (...a) => {
         const g = getopts(a), dev = g.rest[0];
         if (!dev) {
-          const rows = [OS.hdd.root ? 'hdd1   /           PC のフォルダ「' + OS.hdd.name + '」（ここから起動）' : 'hdd0   /           ' + OS.storeLabel()];
+          const rows = [OS.hdd.root ? 'hdd1   /           PC のフォルダ「' + OS.hdd.name + '」（ここから起動）' : (OS.store.idb ? 'hdd2' : 'hdd0') + '   /           ' + OS.storeLabel()];
           if (!OS.hdd.root) rows.push('hdd1   ' + OS.hdd.at.padEnd(12) + (OS.hdd.mounted ? 'PC のフォルダ「' + OS.hdd.name + '」' : OS.hdd.supported ? '未接続' + (OS.hdd.waiting ? '（「' + OS.hdd.waiting + '」の許可待ち）' : '') + ' — mount hdd1 で接続' : 'このブラウザでは使えません'));
           return rows.join('\n');
         }
@@ -1270,7 +1270,7 @@
       def('free', 'free', 'メモリとストレージの使用量', () => {
         const pm = performance.memory, u = fs.usage(), rows = [['', '合計', '使用', '空き']];
         if (pm) rows.push(['JS ヒープ', fmtSize(pm.jsHeapSizeLimit), fmtSize(pm.usedJSHeapSize), fmtSize(pm.jsHeapSizeLimit - pm.usedJSHeapSize)]);
-        rows.push(u.disk ? ['HDD1', u.total ? fmtSize(u.total) : '-', fmtSize(u.used), u.total ? fmtSize(Math.max(0, u.total - u.used)) : '-'] : [OS.store.ram ? 'RAM ディスク' : 'LocalStorage', fmtSize(u.total), fmtSize(u.used), fmtSize(Math.max(0, u.total - u.used))]);
+        rows.push(u.disk ? [u.drive || 'HDD1', u.total ? fmtSize(u.total) : '-', fmtSize(u.used), u.total ? fmtSize(Math.max(0, u.total - u.used)) : '-'] : [OS.store.ram ? 'RAM ディスク' : 'LocalStorage', fmtSize(u.total), fmtSize(u.used), fmtSize(Math.max(0, u.total - u.used))]);
         const lines2 = rows.map(r => r[0].padEnd(14) + r.slice(1).map(x => x.padStart(11)).join(''));
         if (navigator.deviceMemory) lines2.push('端末のメモリ: 約 ' + navigator.deviceMemory + ' GB（ブラウザが教える目安）');
         if (!pm) lines2.push('（このブラウザは JS ヒープの使用量を教えてくれません）');

@@ -67,7 +67,7 @@
         pane.textContent = '';
         const full = JSON.stringify(collect('full')).length, mine = JSON.stringify(collect('home')).length;
         pane.append(
-          h('p', null, 'htmlOS の中身はブラウザの LocalStorage にあるので、ブラウザのデータを消すと一緒に消えます。大事なものは PC にバックアップしておくと安心です。別のPCやブラウザへの引っ越しにも使えます。'),
+          h('p', null, 'htmlOS の中身はブラウザのストレージ（IndexedDB）にあるので、ブラウザのデータを消すと一緒に消えます。大事なものは PC にバックアップしておくと安心です。別のPCやブラウザへの引っ越しにも使えます。'),
           h('h3', null, 'バックアップ（PCに書き出す）'),
           h('div', { class: 'st-card' }, h('div', { class: 'who' }, h('b', null, '自分のホーム'), h('small', null, home + ' 以下 ・ 約 ' + fmtSize(mine))),
             h('button', { class: 'btn primary', type: 'button', onclick: () => exportIt('home') }, OS.icon('download', 16), '書き出す')),

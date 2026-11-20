@@ -1480,6 +1480,10 @@
 .wl-ico{width:58px;height:58px;border-radius:16px;display:flex;align-items:center;justify-content:center;color:#fff;background:var(--accent)}
 .wl-try .wl-ico{background:#2ec27e}.wl-install .wl-ico{background:#1c71d8}.wl-update .wl-ico{background:#e66100}.wl-recover .wl-ico{background:#5e5c64}
 .wl-foot{margin:4px 0 0;color:var(--ink-2);font-size:12.5px;text-align:center}
+.wl-mig{display:flex;align-items:center;gap:12px;margin:12px 0 0;padding:12px 14px;border:1.5px solid var(--accent);border-radius:14px;background:var(--surface)}
+.wl-mig>div{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.wl-mig small{color:var(--ink-2)}
+@media (max-width:560px){.wl-mig{flex-wrap:wrap}.wl-mig .btn{width:100%}}
 .wl-prog{width:min(520px,100%);display:flex;flex-direction:column;align-items:center;gap:10px;margin:auto 0}
 .wl-prog .gi-bar,.wl-prog .wl-log{width:100%}
 .wl-row{display:flex;gap:8px;justify-content:center}
