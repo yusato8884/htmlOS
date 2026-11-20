@@ -14,3 +14,4 @@ Before each release, run SCANOSS (pip install scanoss==1.54.3; `scanoss-py scan 
 Split helper: scratchpad split.py (index_NN.html → repo src/ + build.py VERSION/BUILD/CODENAME). Fixes after a release bump the patch version and build (4.0.1 = build 26, index_17 overwritten).
 
 Memory mirror: user asked (2026-11-19) for memory files in the repo at memory/ (commit 5dc61d4). When memory files change, copy them to /home/user/htmlos/memory/ and push with the next commit.
+SCANOSS writes bad_request-*.txt dumps into the repo root on failed requests; they are gitignored since 6.2.0 — never commit them.
