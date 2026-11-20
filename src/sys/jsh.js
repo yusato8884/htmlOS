@@ -736,7 +736,47 @@
       def('read', 'read [プロンプト]', '1行入力を受け取る（await read("? ")）', p => tty.read(p == null ? '' : String(p)));
       def('history', 'history', '入力履歴', () => self.hist.map((l, i) => String(i + 1).padStart(4) + '  ' + l).join('\n'));
       def('date', 'date', '現在の日時', () => new Date().toLocaleString('ja-JP'));
-      def('uname', 'uname', 'システム情報', () => OS.name + ' ' + OS.version + ' [' + OS.htui.sdk.full + '] (' + (OS.store.ram ? 'ramdisk' : OS.store.disk ? 'hdd1' : OS.store.idb ? 'hdd2' : 'localstorage') + ') ' + navigator.userAgent);
+      const unameStr = () => OS.name + ' ' + OS.version + ' [' + OS.htui.sdk.full + '] (' + (OS.store.ram ? 'ramdisk' : OS.store.disk ? 'hdd1' : OS.store.idb ? 'hdd2' : 'localstorage') + ') ' + navigator.userAgent;
+      def('uname', 'uname', 'システム情報', unameStr);
+      // htosver（6.2.0）: htmlOS のバージョン情報。GUI（デスクトップ）ではダイアログ、CUI ではアスキーアートのロゴと文字で出す。-t で GUI でも文字で
+      const HTOS_LOGO = [["     __      __  __     ", "  _     _             _  ___  ____  "], ["    / /     / /  \\ \\    ", " | |__ | |_ _ __ ___ | |/ _ \\/ ___| "], ["   / /     / /    \\ \\   ", " | '_ \\| __| '_ ` _ \\| | | | \\___ \\ "], ["   \\ \\    / /     / /   ", " | | | | |_| | | | | | | |_| |___) |"], ["    \\_\\  /_/     /_/    ", " |_| |_|\\__|_| |_| |_|_|\\___/|____/ "]];
+      const HTOS_CREDITS = ["監督: Yu Sato", "制作: Claude", "ロゴ: Claude", "壁紙: Claude", "テーマソング:", "    歌詞: Claude", "    制作: Suno", "(c) 2026 Yu Sato", "このシステムはMITライセンスで公開されています。", "Repo: Github yusato8884/htmlOS"];
+      const htosInfo = gui => {
+        let build = ''; try { build = (JSON.parse(OS.store.get('meta')) || {}).build || ''; } catch (e) { /* なし */ }
+        const sdk = OS.htui.sdk, ses = OS.htui.running && OS.htui.sessionId ? OS.sessions[OS.htui.sessionId] : null;
+        const de = ses ? String(ses.name || ses.id).replace(/（[^）]*）/g, '').trim() + (ses.codename && String(ses.name || '').indexOf(ses.codename) < 0 ? ' ' + ses.codename : '') + ' (' + sdk.name + ' ' + String(sdk.version).split('.').slice(0, 2).join('.') + ' ' + sdk.codename + ')' : 'jsh';
+        const st = OS.store, disk = st.disk ? 'HDD1 PC のフォルダ「' + st.name + '」' : st.idb ? 'HDD2 IndexedDB' : st.ram ? 'RAM ディスク' : 'HDD0 LocalStorage';
+        return { title: 'htmlOS ' + OS.version + (OS.codename ? ' ' + OS.codename : ''), rows: [['ビルド番号', String(build || window.BOOT.build)], ['UI環境', gui || ses ? de : 'jsh'], ['ユーザー', self.user], ['起動ディスク', disk]] };
+      };
+      def('htosver', 'htosver [-t]', 'htmlOS のバージョン情報（GUI ではダイアログ。-t で文字だけ）', async (...a) => {
+        const g = getopts(a).o, gui = OS.htui.running && OS.htui.user && OS.ui && OS.ui.modal && !g.t && !g.text;
+        const info = htosInfo(gui);
+        if (!gui) {
+          HTOS_LOGO.forEach(l => { tty.print(l[0], 'accent'); tty.println(l[1]); });
+          tty.println('');
+          tty.println(info.title, 'accent');
+          info.rows.forEach(r => tty.println(r[0] + (r[0] === 'ビルド番号' ? ':' : ': ') + r[1]));
+          tty.println('===uname===', 'dim'); tty.println(unameStr());
+          tty.println('===クレジット===', 'dim'); HTOS_CREDITS.forEach(l => tty.println(l));
+          return;
+        }
+        const h = OS.h, ui = OS.ui;
+        const un = h('pre', { class: 'hv-uname', id: 'hv-uname', hidden: true }, unameStr());
+        const showBtn = h('button', { class: 'btn', type: 'button', id: 'hv-uname-btn', onclick: () => { un.hidden = !un.hidden; showBtn.textContent = un.hidden ? '表示' : '隠す'; } }, '表示');
+        const body = h('div', { class: 'hv', id: 'hv-about' },
+          h('div', { class: 'hv-logo' }, OS.mark(72)),
+          h('div', { class: 'hv-title' }, info.title),
+          h('dl', { class: 'hv-rows' }, info.rows.map(r => [h('dt', null, r[0]), h('dd', null, r[1])]).flat(), h('dt', null, 'uname'), h('dd', null, showBtn)),
+          un);
+        const credits = () => {
+          ui.modal({ title: 'クレジット', width: 340, body: h('div', { class: 'hv hv-credits', id: 'hv-credits' }, h('div', { class: 'hv-logo' }, OS.mark(48)), h('div', { class: 'hv-title' }, info.title),
+            h('pre', null, HTOS_CREDITS.join('\n'))),
+            buttons: [{ label: 'OK', primary: true, cancel: true, value: true }] });
+          return ui.KEEP;
+        };
+        await ui.modal({ title: 'htmlOS について', width: 400, body: body,
+          buttons: [{ label: 'クレジット...', value: credits }, { label: 'OK', primary: true, cancel: true, value: true }] });
+      });
       def('neofetch', 'neofetch', 'システム情報をそれっぽく表示', () => {
         const u = fs.usage(), art = ['  <  / >  ', ' <  /  > ', '<  /   >', ' <  /  > ', '  <  / >  ', '          '];
         const who = self.user + '@' + OS.hostname(), de = OS.htui.running && OS.htui.sessionId ? (OS.sessions[OS.htui.sessionId].full || OS.sessions[OS.htui.sessionId].name) : 'なし（CUI）';

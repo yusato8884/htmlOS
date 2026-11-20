@@ -1480,6 +1480,15 @@
 .wl-ico{width:58px;height:58px;border-radius:16px;display:flex;align-items:center;justify-content:center;color:#fff;background:var(--accent)}
 .wl-try .wl-ico{background:#2ec27e}.wl-install .wl-ico{background:#1c71d8}.wl-update .wl-ico{background:#e66100}.wl-recover .wl-ico{background:#5e5c64}
 .wl-foot{margin:4px 0 0;color:var(--ink-2);font-size:12.5px;text-align:center}
+.hv{display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center}
+.hv-logo .mark,.hv-logo svg{display:block}
+.hv-title{font-size:18px;font-weight:700}
+.hv-rows{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:4px 0 0;text-align:left;align-items:center;width:100%}
+.hv-rows dt{color:var(--ink-2);text-align:right}
+.hv-rows dd{margin:0;overflow-wrap:anywhere}
+.hv-rows .btn{padding:2px 12px}
+.hv-uname{width:100%;box-sizing:border-box;margin:0;padding:8px;border-radius:8px;background:var(--surface-2,rgba(127,127,127,.12));font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;text-align:left;user-select:text}
+.hv-credits pre{margin:0;font:inherit;line-height:1.7;text-align:left;white-space:pre-wrap}
 .wl-mig{display:flex;align-items:center;gap:12px;margin:12px 0 0;padding:12px 14px;border:1.5px solid var(--accent);border-radius:14px;background:var(--surface)}
 .wl-mig>div{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 .wl-mig small{color:var(--ink-2)}

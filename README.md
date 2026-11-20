@@ -4,6 +4,12 @@
 
 **▶ 使ってみる: GitHub Pages で公開中**（このリポジトリの Pages の URL を開くと htmlOS i が起動し、「htmlOSを試す」か「インストール」を選べます）
 
+## htmlOS 6.2.0: htosver
+
+- Terminal（jsh）に **`htosver`** コマンドを追加しました。htmlOS のバージョン情報を出します
+  - デスクトップ（GUI）では「htmlOS について」ダイアログ: ロゴ・バージョン・ビルド番号・UI 環境（例: HTUi 3 Ragdoll (HTUi SDK 3.0 Venus)、hAqua (HTUi SDK 3.0 Venus)）・ユーザー・起動ディスク、uname の［表示］、［クレジット...］［OK］
+  - CUI（jsh）では、アスキーアートのロゴと同じ情報、uname、クレジットを文字で出します。GUI でも `htosver -t` で文字だけにできます
+
 ## htmlOS 6.1.0: HDD2（IndexedDB）
 
 - **HDD2** を追加しました。このブラウザの **IndexedDB** を使うドライブで、容量は**最大 10GB**です（ブラウザが割り当てた量がそれより少なければ、その量まで。割り当ては `navigator.storage.estimate()` で調べます）
@@ -301,4 +307,4 @@ python3 build.py
 
 [MIT License](LICENSE)
 
-6.1.0 の公開時に [SCANOSS](https://www.scanoss.com/)（scanoss-py 1.54.3、`--all-extensions`）で全ファイル（43 個）をスキャンし、既存のオープンソースコードとの一致がないことを確認しています。
+6.2.0 の公開時に [SCANOSS](https://www.scanoss.com/)（scanoss-py 1.54.3、`--all-extensions`）で全ファイル（42 個）をスキャンし、既存のオープンソースコードとの一致がないことを確認しています。
