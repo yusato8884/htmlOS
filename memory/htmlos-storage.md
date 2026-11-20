@@ -17,3 +17,5 @@ htmlOS 6.1.0 (build 57, index_48, commit 3c0724a, 2026-11-20). The user asked fo
 - **Test:** scratchpad `test48.js` (fresh HDD2 install, quota error, migration from index_47).
 
 Related: [[htmlos-structure]], [[htmlos-history-5x]], [[htmlos-release]]
+
+7.0.0 (b0d7e95, build 62): HDD3 = 2nd PC folder (`OS.hdd3 = folderDrive('hdd3',...)` in kernel; boot.html `HDD.saved/pick(name)`), use in /etc/storage.json `{hdd3:'data'|'raid'}`; data → /mnt/hdd3. RAID in /sys/raid.js (`OS.storage`, `OS.raid`, config /etc/raid.json, mount /mnt/raid): members = folder `.htmlos-raid/<uuid>/` or IDB `htmlos-raid`; index on every member with gen counter; RAID5 needs hdd3 + exactly 3 devs. Empty/stale member is auto-rebuilt at assemble. Test: scratchpad test53c.js (OPFS stub for showDirectoryPicker).
