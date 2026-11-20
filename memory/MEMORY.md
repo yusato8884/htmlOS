@@ -1,5 +1,5 @@
 # htmlOS
-- Project name: htmlOS. Single-file browser OS (index_NN.html in /mnt/project-files).
+- Project name: htmlOS. Single-file browser OS (index_NN.html in /mnt/project-files). Latest: 6.1.0 build 57 (index_48). Storage since 6.1: HDD2 IndexedDB (10GB cap), HDD0 LocalStorage retired → [[htmlos-storage]].
 - Repo: github.com/yusato8884/htmlOS (GitHub Pages: yusato8884.github.io/htmlOS). User wants every release pushed there. Repo layout: src/ files merged by build.py into index.html served by Pages.
 - Release method (user chose, 4.0): push directly to main and add a vX.Y.Z tag. GitHub Release pages can't be created from here; user can create from the tag.
 - User writes in Japanese; reply politely in Japanese (no casual speech).
