@@ -177,6 +177,12 @@
   //   設定はこのフォルダを見て、フォルダ（追加したバージョン）ごとに並べる。SVG か、画像の data: URL を書いたファイルを置けば壁紙が増える
   const WALLDIR = '/usr/share/backgrounds';
   WALLPAPERS.forEach(w => { w.path = WALLDIR + '/' + w.dir + '/' + w.file + '.svg'; });
+  // そのバージョンの星座の壁紙（6.x ならデネブ＝はくちょう座）の CSS。htosver のロゴの背景に使う
+  function starWallpaper(codename) {
+    const c = String(codename || OS.codename || '');
+    const w = c && WALLPAPERS.find(x => x.file === c.toLowerCase() && x.dir.endsWith('-' + c));
+    return w ? (wallFileCss(w.path) || w.css) : null;
+  }
   // OS のバージョンが変わったときだけ書き出す（消したファイルを毎回戻さない）
   function installWallpapers() {
     const stamp = WALLDIR + '/.version', want = (OS.version || '') + '/' + WALLPAPERS.length;
@@ -264,7 +270,7 @@
   const wallPath = p => typeof p.wallpaper === 'string' ? p.wallpaper : (WALLPAPERS[p.wallpaper | 0] || WALLPAPERS[0]).path;
   const ACCENTS = ['#3584e4', '#2190a4', '#3a944a', '#c88800', '#ed5b00', '#e62d42', '#d56199', '#9141ac'];
 
-  const htui = OS.htui = { running: false, user: null, fs: null, wins: [], z: 10, pid: 100, wallpapers: WALLPAPERS, wallCss: wallCss, wallDir: WALLDIR, wallList: wallList, wallPath: wallPath, installWallpapers: installWallpapers, accents: ACCENTS, el: null, prefs: {}, shell: null, sessionId: null };
+  const htui = OS.htui = { running: false, user: null, fs: null, wins: [], z: 10, pid: 100, wallpapers: WALLPAPERS, wallCss: wallCss, wallDir: WALLDIR, wallList: wallList, wallPath: wallPath, starWallpaper: starWallpaper, installWallpapers: installWallpapers, accents: ACCENTS, el: null, prefs: {}, shell: null, sessionId: null };
   let clockTimer = null, ticks = [];
   // 時計などの表示を新しくする（clock.service が 1 秒ごとに呼ぶ）
   htui.tick = () => { const d = new Date(); ticks.forEach(f => { try { f(d); } catch (e) { /* 無視 */ } }); };

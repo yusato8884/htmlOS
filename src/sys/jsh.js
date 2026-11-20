@@ -744,7 +744,9 @@
       const htosInfo = gui => {
         let build = ''; try { build = (JSON.parse(OS.store.get('meta')) || {}).build || ''; } catch (e) { /* なし */ }
         const sdk = OS.htui.sdk, ses = OS.htui.running && OS.htui.sessionId ? OS.sessions[OS.htui.sessionId] : null;
-        const de = ses ? String(ses.name || ses.id).replace(/（[^）]*）/g, '').trim() + (ses.codename && String(ses.name || '').indexOf(ses.codename) < 0 ? ' ' + ses.codename : '') + ' (' + sdk.name + ' ' + String(sdk.version).split('.').slice(0, 2).join('.') + ' ' + sdk.codename + ')' : 'jsh';
+        // 版は x.y で出す（HTUi 3 → HTUi 3.0）
+        const sesName = ses ? String(ses.name || ses.id).replace(/（[^）]*）/g, '').trim().replace(/\s+\d+(\.\d+)*$/, m => ' ' + (/\./.test(ses.version || m) ? String(ses.version || m).trim() : String(ses.version || m).trim() + '.0')) : '';
+        const de = ses ? sesName + (ses.codename && String(ses.name || '').indexOf(ses.codename) < 0 ? ' ' + ses.codename : '') + ' (' + sdk.name + ' ' + String(sdk.version).split('.').slice(0, 2).join('.') + ' ' + sdk.codename + ')' : 'jsh';
         const st = OS.store, disk = st.disk ? 'HDD1 PC のフォルダ「' + st.name + '」' : st.idb ? 'HDD2 IndexedDB' : st.ram ? 'RAM ディスク' : 'HDD0 LocalStorage';
         return { title: 'htmlOS ' + OS.version + (OS.codename ? ' ' + OS.codename : ''), rows: [['ビルド番号', String(build || window.BOOT.build)], ['UI環境', gui || ses ? de : 'jsh'], ['ユーザー', self.user], ['起動ディスク', disk]] };
       };
@@ -760,16 +762,16 @@
           tty.println('===クレジット===', 'dim'); HTOS_CREDITS.forEach(l => tty.println(l));
           return;
         }
-        const h = OS.h, ui = OS.ui;
+        const h = OS.h, ui = OS.ui, star = OS.htui.starWallpaper ? OS.htui.starWallpaper() : null;
         const un = h('pre', { class: 'hv-uname', id: 'hv-uname', hidden: true }, unameStr());
         const showBtn = h('button', { class: 'btn', type: 'button', id: 'hv-uname-btn', onclick: () => { un.hidden = !un.hidden; showBtn.textContent = un.hidden ? '表示' : '隠す'; } }, '表示');
         const body = h('div', { class: 'hv', id: 'hv-about' },
-          h('div', { class: 'hv-logo' }, OS.mark(72)),
+          h('div', { class: 'hv-logo' + (star ? ' star' : ''), style: star ? 'background:' + star : null }, OS.mark(72)),
           h('div', { class: 'hv-title' }, info.title),
           h('dl', { class: 'hv-rows' }, info.rows.map(r => [h('dt', null, r[0]), h('dd', null, r[1])]).flat(), h('dt', null, 'uname'), h('dd', null, showBtn)),
           un);
         const credits = () => {
-          ui.modal({ title: 'クレジット', width: 340, body: h('div', { class: 'hv hv-credits', id: 'hv-credits' }, h('div', { class: 'hv-logo' }, OS.mark(48)), h('div', { class: 'hv-title' }, info.title),
+          ui.modal({ title: 'クレジット', width: 340, body: h('div', { class: 'hv hv-credits', id: 'hv-credits' }, h('div', { class: 'hv-logo' + (star ? ' star' : ''), style: star ? 'background:' + star : null }, OS.mark(48)), h('div', { class: 'hv-title' }, info.title),
             h('pre', null, HTOS_CREDITS.join('\n'))),
             buttons: [{ label: 'OK', primary: true, cancel: true, value: true }] });
           return ui.KEEP;

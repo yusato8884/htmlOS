@@ -1482,6 +1482,9 @@
 .wl-foot{margin:4px 0 0;color:var(--ink-2);font-size:12.5px;text-align:center}
 .hv{display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center}
 .hv-logo .mark,.hv-logo svg{display:block}
+.hv-logo.star{align-self:stretch;display:flex;align-items:center;justify-content:center;min-height:120px;border-radius:12px;color:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.12)}
+.hv-logo.star svg{filter:drop-shadow(0 2px 6px rgba(0,0,0,.6))}
+.hv-credits .hv-logo.star{min-height:84px}
 .hv-title{font-size:18px;font-weight:700}
 .hv-rows{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:4px 0 0;text-align:left;align-items:center;width:100%}
 .hv-rows dt{color:var(--ink-2);text-align:right}
