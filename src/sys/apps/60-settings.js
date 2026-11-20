@@ -233,14 +233,26 @@
         system: ['システム', 'gear', () => {
           const admin = !!me().admin, u = OS.fs.usage(), meta = window.BOOT.getMeta() || {};
           const d = ms => ms ? new Date(ms).toLocaleString('ja-JP') : '-';
+          // 6.2.3: バージョン情報（htosver）をここにまとめた。ロゴの背景はそのバージョンの星座の壁紙
+          const ab = OS.about, inf = ab ? ab.info(OS.htui.user) : { title: OS.name + '（' + OS.version + '）', build: OS.build || '-', user: OS.htui.user, env: '-' };
+          const un = h('pre', { class: 'hv-uname', id: 'hv-uname', hidden: true }, ab ? ab.uname() : '');
+          const unBtn = h('button', { class: 'btn', type: 'button', id: 'hv-uname-btn', onclick: () => { un.hidden = !un.hidden; unBtn.textContent = un.hidden ? '表示' : '隠す'; } }, '表示');
           page.append(h('h2', null, 'システム'),
-            h('dl', { class: 'st-kv' },
-              h('dt', null, 'インストール済み'), h('dd', null, OS.name + '（' + OS.version + '）'),
-              h('dt', null, '描画エンジン'), h('dd', null, OS.htui.sdk ? OS.htui.sdk.full : 'HTUi'),
-              h('dt', null, 'メディア（このHTML）'), h('dd', null, 'htmlOS ' + window.BOOT.version),
-              h('dt', null, 'インストール日時'), h('dd', null, d(meta.installedAt)),
-              h('dt', null, 'システム更新日時'), h('dd', null, d(meta.updatedAt)),
-              h('dt', null, 'ストレージ'), h('dd', null, OS.store.ram ? 'RAMディスク（再読み込みで消えます）' : OS.storeLabel())),
+            h('div', { class: 'hv st-about', id: 'hv-about' },
+              ab ? ab.logoEl(72) : OS.mark(72),
+              h('div', { class: 'hv-title' }, inf.title),
+              h('dl', { class: 'st-kv hv-rows' },
+                h('dt', null, 'ビルド番号'), h('dd', null, inf.build),
+                h('dt', null, 'ユーザー'), h('dd', null, inf.user),
+                h('dt', null, '環境'), h('dd', null, inf.env),
+                h('dt', null, '描画エンジン'), h('dd', null, OS.htui.sdk ? OS.htui.sdk.full : 'HTUi'),
+                h('dt', null, 'メディア（このHTML）'), h('dd', null, 'htmlOS ' + window.BOOT.version),
+                h('dt', null, 'インストール日時'), h('dd', null, d(meta.installedAt)),
+                h('dt', null, 'システム更新日時'), h('dd', null, d(meta.updatedAt)),
+                h('dt', null, 'ストレージ'), h('dd', null, OS.store.ram ? 'RAMディスク（再読み込みで消えます）' : OS.storeLabel()),
+                h('dt', null, 'uname'), h('dd', null, unBtn)),
+              un,
+              ab ? h('div', { class: 'hv-foot' }, h('button', { class: 'btn', type: 'button', id: 'hv-credits-btn', onclick: () => ab.showCredits(win) }, 'クレジット...')) : null),
             h('h3', null, '使用量'),
             h('div', { class: 'st-meter' }, h('i', { style: 'width:' + (u.total ? Math.min(100, u.used / u.total * 100) : 0) + '%' })),
             h('p', null, u.idb ? fmtSize(u.used) + ' / ' + fmtSize(u.total) + '（HDD2 の上限。最大 10GB で、ブラウザが割り当てた量がそれより少なければその量）' : u.disk ? fmtSize(u.used) + (u.total ? ' / ' + fmtSize(u.total) + '（HDD1 の上限。htmlOS i の「htmlOS を回復」で変えられます）' : '（上限なし。htmlOS i の「htmlOS を回復」で設定できます）') : fmtSize(u.used) + ' / 約 5 MB（ブラウザによって上限は多少違います）'),
@@ -262,6 +274,7 @@
         win.setTitle(pages[k][0] + ' — Settings');
         pages[k][2]();
       }
+      win.showPage = k => { if (pages[k]) show(k); }; // htosver から「システム」を開く
       show(typeof arg === 'string' && pages[arg] ? arg : 'users');
       return win;
     }

@@ -546,8 +546,9 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 })();
 </script>
 <script type="text/x-htmlos" data-path="/sys/apps/06-about.js">
-/* バージョン情報（id: about）— htmlOS のバージョン・ビルド番号・UI 環境・ユーザー・起動ディスク・uname・クレジットを出す。
-   アプリの一覧には出さない（hidden）。Terminal の htosver から開く（CUI では htosver が同じ情報を文字で出す。OS.about を使う） */
+/* バージョン情報（OS.about）— htmlOS のバージョン・ビルド番号・UI 環境・ユーザー・起動ディスク・uname・クレジット。
+   設定の「システム」（GUI）と、Terminal の htosver（CUI では文字で出す）が使う。
+   6.2.2 では独立したアプリ「バージョン情報」だったが、6.2.3 で設定の「システム」にまとめた */
 (function () {
   const OS = window.OS, h = OS.h;
   const LOGO = [["     __      __  __     ", "  _     _             _  ___  ____  "], ["    / /     / /  \\ \\    ", " | |__ | |_ _ __ ___ | |/ _ \\/ ___| "], ["   / /     / /    \\ \\   ", " | '_ \\| __| '_ ` _ \\| | | | \\___ \\ "], ["   \\ \\    / /     / /   ", " | | | | |_| | | | | | | |_| |___) |"], ["    \\_\\  /_/     /_/    ", " |_| |_|\\__|_| |_| |_|_|\\___/|____/ "]];
@@ -562,35 +563,16 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     const name = ses ? String(ses.name || ses.id).replace(/（[^）]*）/g, '').trim().replace(/\s+(\d+(\.\d+)*)$/, (m, v) => ' ' + ver(ses.version || v)) : '';
     const de = ses ? name + (ses.codename && String(ses.name || '').indexOf(ses.codename) < 0 ? ' ' + ses.codename : '') + ' (' + sdk.name + ' ' + String(sdk.version).split('.').slice(0, 2).join('.') + ' ' + sdk.codename + ')' : 'jsh';
     const st = OS.store, disk = st.disk ? 'HDD1 PC のフォルダ「' + st.name + '」' : st.idb ? 'HDD2 IndexedDB' : st.ram ? 'RAM ディスク' : 'HDD0 LocalStorage';
-    return { title: 'htmlOS ' + OS.version + (OS.codename ? ' ' + OS.codename : ''),
+    return { title: 'htmlOS ' + OS.version + (OS.codename ? ' ' + OS.codename : ''), build: String(build || window.BOOT.build), user: user || OS.htui.user || '-', disk: disk,
+      env: ses ? name + (ses.codename && String(ses.name || '').indexOf(ses.codename) < 0 ? ' ' + ses.codename : '') : 'jsh',
       rows: [['ビルド番号', String(build || window.BOOT.build)], ['UI環境', de], ['ユーザー', user || OS.htui.user || '-'], ['起動ディスク', disk]] };
   }
   // ロゴ（そのバージョンの星座の壁紙を背景に）
   const logo = size => { const star = OS.htui.starWallpaper ? OS.htui.starWallpaper() : null; return h('div', { class: 'hv-logo' + (star ? ' star' : ''), style: star ? 'background:' + star : null }, OS.mark(size)); };
-  OS.about = { logo: LOGO, credits: CREDITS, uname: uname, info: info };
-
-  OS.registerApp({
-    id: 'about', name: 'バージョン情報', icon: 'star', color: '#1c71d8', hidden: true, desc: 'htmlOS のバージョン情報',
-    launch() {
-      const ex = OS.htui.wins.find(w => w.app === 'about');
-      if (ex) { ex.focus(); return ex; }
-      const win = OS.htui.open({ title: 'バージョン情報', icon: 'star', w: 420, h: 'auto', dialog: true, app: 'about' });
-      const inf = info(OS.htui.user);
-      const un = h('pre', { class: 'hv-uname', id: 'hv-uname', hidden: true }, uname());
-      const showBtn = h('button', { class: 'btn', type: 'button', id: 'hv-uname-btn', onclick: () => { un.hidden = !un.hidden; showBtn.textContent = un.hidden ? '表示' : '隠す'; } }, '表示');
-      const credits = () => OS.ui.modal({ parent: win, title: 'クレジット', width: 340, body: h('div', { class: 'hv hv-credits', id: 'hv-credits' }, logo(48), h('div', { class: 'hv-title' }, inf.title), h('pre', null, CREDITS.join('\n'))),
-        buttons: [{ label: 'OK', primary: true, cancel: true, value: true }] });
-      const ok = h('button', { class: 'btn primary', type: 'button', id: 'hv-ok', onclick: () => win.close() }, 'OK');
-      win.body.append(h('div', { class: 'hv hv-app', id: 'hv-about' },
-        logo(72),
-        h('div', { class: 'hv-title' }, inf.title),
-        h('dl', { class: 'hv-rows' }, inf.rows.map(r => [h('dt', null, r[0]), h('dd', null, r[1])]).flat(), h('dt', null, 'uname'), h('dd', null, showBtn)),
-        un,
-        h('div', { class: 'hv-foot' }, h('button', { class: 'btn', type: 'button', id: 'hv-credits-btn', onclick: credits }, 'クレジット...'), ok)));
-      setTimeout(() => ok.focus(), 0);
-      return win;
-    }
-  });
+  // クレジットのダイアログ（parent: 持ち主のウインドウ）
+  const showCredits = parent => OS.ui.modal({ parent: parent, title: 'クレジット', width: 340, body: h('div', { class: 'hv hv-credits', id: 'hv-credits' }, logo(48), h('div', { class: 'hv-title' }, info().title), h('pre', null, CREDITS.join('\n'))),
+    buttons: [{ label: 'OK', primary: true, cancel: true, value: true }] });
+  OS.about = { logo: LOGO, credits: CREDITS, uname: uname, info: info, logoEl: logo, showCredits: showCredits };
 })();
 </script>
 <script type="text/x-htmlos" data-path="/sys/apps/10-terminal.js">
@@ -2266,14 +2248,26 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         system: ['システム', 'gear', () => {
           const admin = !!me().admin, u = OS.fs.usage(), meta = window.BOOT.getMeta() || {};
           const d = ms => ms ? new Date(ms).toLocaleString('ja-JP') : '-';
+          // 6.2.3: バージョン情報（htosver）をここにまとめた。ロゴの背景はそのバージョンの星座の壁紙
+          const ab = OS.about, inf = ab ? ab.info(OS.htui.user) : { title: OS.name + '（' + OS.version + '）', build: OS.build || '-', user: OS.htui.user, env: '-' };
+          const un = h('pre', { class: 'hv-uname', id: 'hv-uname', hidden: true }, ab ? ab.uname() : '');
+          const unBtn = h('button', { class: 'btn', type: 'button', id: 'hv-uname-btn', onclick: () => { un.hidden = !un.hidden; unBtn.textContent = un.hidden ? '表示' : '隠す'; } }, '表示');
           page.append(h('h2', null, 'システム'),
-            h('dl', { class: 'st-kv' },
-              h('dt', null, 'インストール済み'), h('dd', null, OS.name + '（' + OS.version + '）'),
-              h('dt', null, '描画エンジン'), h('dd', null, OS.htui.sdk ? OS.htui.sdk.full : 'HTUi'),
-              h('dt', null, 'メディア（このHTML）'), h('dd', null, 'htmlOS ' + window.BOOT.version),
-              h('dt', null, 'インストール日時'), h('dd', null, d(meta.installedAt)),
-              h('dt', null, 'システム更新日時'), h('dd', null, d(meta.updatedAt)),
-              h('dt', null, 'ストレージ'), h('dd', null, OS.store.ram ? 'RAMディスク（再読み込みで消えます）' : OS.storeLabel())),
+            h('div', { class: 'hv st-about', id: 'hv-about' },
+              ab ? ab.logoEl(72) : OS.mark(72),
+              h('div', { class: 'hv-title' }, inf.title),
+              h('dl', { class: 'st-kv hv-rows' },
+                h('dt', null, 'ビルド番号'), h('dd', null, inf.build),
+                h('dt', null, 'ユーザー'), h('dd', null, inf.user),
+                h('dt', null, '環境'), h('dd', null, inf.env),
+                h('dt', null, '描画エンジン'), h('dd', null, OS.htui.sdk ? OS.htui.sdk.full : 'HTUi'),
+                h('dt', null, 'メディア（このHTML）'), h('dd', null, 'htmlOS ' + window.BOOT.version),
+                h('dt', null, 'インストール日時'), h('dd', null, d(meta.installedAt)),
+                h('dt', null, 'システム更新日時'), h('dd', null, d(meta.updatedAt)),
+                h('dt', null, 'ストレージ'), h('dd', null, OS.store.ram ? 'RAMディスク（再読み込みで消えます）' : OS.storeLabel()),
+                h('dt', null, 'uname'), h('dd', null, unBtn)),
+              un,
+              ab ? h('div', { class: 'hv-foot' }, h('button', { class: 'btn', type: 'button', id: 'hv-credits-btn', onclick: () => ab.showCredits(win) }, 'クレジット...')) : null),
             h('h3', null, '使用量'),
             h('div', { class: 'st-meter' }, h('i', { style: 'width:' + (u.total ? Math.min(100, u.used / u.total * 100) : 0) + '%' })),
             h('p', null, u.idb ? fmtSize(u.used) + ' / ' + fmtSize(u.total) + '（HDD2 の上限。最大 10GB で、ブラウザが割り当てた量がそれより少なければその量）' : u.disk ? fmtSize(u.used) + (u.total ? ' / ' + fmtSize(u.total) + '（HDD1 の上限。htmlOS i の「htmlOS を回復」で変えられます）' : '（上限なし。htmlOS i の「htmlOS を回復」で設定できます）') : fmtSize(u.used) + ' / 約 5 MB（ブラウザによって上限は多少違います）'),
@@ -2295,6 +2289,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         win.setTitle(pages[k][0] + ' — Settings');
         pages[k][2]();
       }
+      win.showPage = k => { if (pages[k]) show(k); }; // htosver から「システム」を開く
       show(typeof arg === 'string' && pages[arg] ? arg : 'users');
       return win;
     }
@@ -7703,12 +7698,16 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       def('date', 'date', '現在の日時', () => new Date().toLocaleString('ja-JP'));
       const unameStr = () => OS.name + ' ' + OS.version + ' [' + OS.htui.sdk.full + '] (' + (OS.store.ram ? 'ramdisk' : OS.store.disk ? 'hdd1' : OS.store.idb ? 'hdd2' : 'localstorage') + ') ' + navigator.userAgent;
       def('uname', 'uname', 'システム情報', unameStr);
-      // htosver（6.2.0）: htmlOS のバージョン情報。GUI（デスクトップ）ではアプリ「バージョン情報」（about。アプリの一覧には出ない）を開き、
+      // htosver（6.2.0）: htmlOS のバージョン情報。GUI（デスクトップ）では設定の「システム」を開き（6.2.3）、
       // CUI ではアスキーアートのロゴと文字で出す。-t で GUI でも文字で。中身は OS.about（/sys/apps/06-about.js）
-      def('htosver', 'htosver [-t]', 'htmlOS のバージョン情報（GUI ではアプリ「バージョン情報」。-t で文字だけ）', (...a) => {
+      def('htosver', 'htosver [-t]', 'htmlOS のバージョン情報（GUI では設定の「システム」を開く。-t で文字だけ）', (...a) => {
         const g = getopts(a).o, ab = OS.about;
         if (!ab) throw new Error('htosver: バージョン情報（/sys/apps/06-about.js）が読み込まれていません');
-        if (OS.htui.running && OS.htui.user && OS.apps.about && !g.t) { OS.launch('about'); return; }
+        if (OS.htui.running && OS.htui.user && OS.apps.settings && !g.t) {
+          const w = OS.htui.wins.find(x => x.app === 'settings' && !x.closed && x.showPage);
+          if (w) { w.showPage('system'); w.focus(); } else OS.launch('settings', 'system');
+          return;
+        }
         const info = ab.info(self.user);
         if (!(OS.htui.running && OS.htui.sessionId)) info.rows[1][1] = 'jsh';
         ab.logo.forEach(l => { tty.print(l[0], 'accent'); tty.println(l[1]); });
@@ -12992,7 +12991,10 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 .hv-rows dd{margin:0;overflow-wrap:anywhere}
 .hv-rows .btn{padding:2px 12px}
 .hv-uname{width:100%;box-sizing:border-box;margin:0;padding:8px;border-radius:8px;background:var(--surface-2,rgba(127,127,127,.12));font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;text-align:left;user-select:text}
-.hv-app{padding:16px 18px}
+.st-about{max-width:480px;margin:0 auto 6px;align-items:stretch}
+.st-about .hv-title{text-align:center}
+.st-about .hv-rows{grid-template-columns:minmax(0,1fr) minmax(0,1.3fr)}
+.st-about .hv-foot{justify-content:center}
 .hv-foot{display:flex;justify-content:flex-end;gap:8px;align-self:stretch;margin-top:8px}
 .hv-credits pre{margin:0;font:inherit;line-height:1.7;text-align:left;white-space:pre-wrap}
 .wl-mig{display:flex;align-items:center;gap:12px;margin:12px 0 0;padding:12px 14px;border:1.5px solid var(--accent);border-radius:14px;background:var(--surface)}
@@ -13287,7 +13289,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 (function () {
   'use strict';
   // コードネーム: htmlOS は恒星の名前（3.2 = Sirius、4.0 = Vega）、描画エンジン HTUi SDK は惑星の名前（2 = Jupiter、3.0 = Venus）
-  var MEDIA_VERSION = '6.2.2', MEDIA_BUILD = '60', MEDIA_CODENAME = 'Deneb';
+  var MEDIA_VERSION = '6.2.3', MEDIA_BUILD = '61', MEDIA_CODENAME = 'Deneb';
   var BOOT = window.BOOT = {};
   var P = 'htmlos:';
 

@@ -7,7 +7,7 @@
 ## htmlOS 6.2.0: htosver
 
 - Terminal（jsh）に **`htosver`** コマンドを追加しました。htmlOS のバージョン情報を出します
-  - デスクトップ（GUI）では、アプリの一覧には出ないアプリ「バージョン情報」を開きます（6.2.2）: ロゴ・バージョン・ビルド番号・UI 環境（例: HTUi 3 Ragdoll (HTUi SDK 3.0 Venus)、hAqua (HTUi SDK 3.0 Venus)）・ユーザー・起動ディスク、uname の［表示］、［クレジット...］［OK］
+  - デスクトップ（GUI）では、設定の「システム」を開きます（6.2.3。6.2.2 の「バージョン情報」アプリはここにまとめました）。星座の壁紙を背景にしたロゴ・バージョン・ビルド番号・ユーザー・環境・描画エンジン・メディア・インストール日時・システム更新日時・ストレージ、uname の［表示］、［クレジット...］。以前の説明: ロゴ・バージョン・ビルド番号・UI 環境（例: HTUi 3 Ragdoll (HTUi SDK 3.0 Venus)、hAqua (HTUi SDK 3.0 Venus)）・ユーザー・起動ディスク、uname の［表示］、［クレジット...］［OK］
   - ロゴの背景には、そのバージョンの星座の壁紙（6.x はデネブ／はくちょう座）を敷きます（6.2.1）。UI 環境の版は「HTUi 3.0 Ragdoll」のように x.y で出します
   - CUI（jsh）では、アスキーアートのロゴと同じ情報、uname、クレジットを文字で出します。GUI でも `htosver -t` で文字だけにできます
 
@@ -308,4 +308,4 @@ python3 build.py
 
 [MIT License](LICENSE)
 
-6.2.2 の公開時に [SCANOSS](https://www.scanoss.com/)（scanoss-py 1.54.3、`--all-extensions`）で全ファイル（43 個）をスキャンし、既存のオープンソースコードとの一致がないことを確認しています。
+6.2.3 の公開時に [SCANOSS](https://www.scanoss.com/)（scanoss-py 1.54.3、`--all-extensions`）で全ファイル（43 個）をスキャンし、既存のオープンソースコードとの一致がないことを確認しています。

@@ -1491,7 +1491,10 @@
 .hv-rows dd{margin:0;overflow-wrap:anywhere}
 .hv-rows .btn{padding:2px 12px}
 .hv-uname{width:100%;box-sizing:border-box;margin:0;padding:8px;border-radius:8px;background:var(--surface-2,rgba(127,127,127,.12));font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;text-align:left;user-select:text}
-.hv-app{padding:16px 18px}
+.st-about{max-width:480px;margin:0 auto 6px;align-items:stretch}
+.st-about .hv-title{text-align:center}
+.st-about .hv-rows{grid-template-columns:minmax(0,1fr) minmax(0,1.3fr)}
+.st-about .hv-foot{justify-content:center}
 .hv-foot{display:flex;justify-content:flex-end;gap:8px;align-self:stretch;margin-top:8px}
 .hv-credits pre{margin:0;font:inherit;line-height:1.7;text-align:left;white-space:pre-wrap}
 .wl-mig{display:flex;align-items:center;gap:12px;margin:12px 0 0;padding:12px 14px;border:1.5px solid var(--accent);border-radius:14px;background:var(--surface)}

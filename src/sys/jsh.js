@@ -738,12 +738,16 @@
       def('date', 'date', '現在の日時', () => new Date().toLocaleString('ja-JP'));
       const unameStr = () => OS.name + ' ' + OS.version + ' [' + OS.htui.sdk.full + '] (' + (OS.store.ram ? 'ramdisk' : OS.store.disk ? 'hdd1' : OS.store.idb ? 'hdd2' : 'localstorage') + ') ' + navigator.userAgent;
       def('uname', 'uname', 'システム情報', unameStr);
-      // htosver（6.2.0）: htmlOS のバージョン情報。GUI（デスクトップ）ではアプリ「バージョン情報」（about。アプリの一覧には出ない）を開き、
+      // htosver（6.2.0）: htmlOS のバージョン情報。GUI（デスクトップ）では設定の「システム」を開き（6.2.3）、
       // CUI ではアスキーアートのロゴと文字で出す。-t で GUI でも文字で。中身は OS.about（/sys/apps/06-about.js）
-      def('htosver', 'htosver [-t]', 'htmlOS のバージョン情報（GUI ではアプリ「バージョン情報」。-t で文字だけ）', (...a) => {
+      def('htosver', 'htosver [-t]', 'htmlOS のバージョン情報（GUI では設定の「システム」を開く。-t で文字だけ）', (...a) => {
         const g = getopts(a).o, ab = OS.about;
         if (!ab) throw new Error('htosver: バージョン情報（/sys/apps/06-about.js）が読み込まれていません');
-        if (OS.htui.running && OS.htui.user && OS.apps.about && !g.t) { OS.launch('about'); return; }
+        if (OS.htui.running && OS.htui.user && OS.apps.settings && !g.t) {
+          const w = OS.htui.wins.find(x => x.app === 'settings' && !x.closed && x.showPage);
+          if (w) { w.showPage('system'); w.focus(); } else OS.launch('settings', 'system');
+          return;
+        }
         const info = ab.info(self.user);
         if (!(OS.htui.running && OS.htui.sessionId)) info.rows[1][1] = 'jsh';
         ab.logo.forEach(l => { tty.print(l[0], 'accent'); tty.println(l[1]); });
