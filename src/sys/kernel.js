@@ -1495,7 +1495,7 @@
 
   // ---------- 起動（起動画面は最低でも約1.2秒表示する。GUIはスプラッシュ、CUIは起動ログ）
   const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const I_APPS = ['04-welcome.js', '05-installer.js', '10-terminal.js', '20-hedit.js', '50-hfile.js'];
+  const I_APPS = ['04-welcome.js', '05-installer.js', '06-about.js', '10-terminal.js', '20-hedit.js', '50-hfile.js'];
   // htmlOS i の「htmlOS を試す」: まだ読み込んでいないアプリを読み込む（each(名前) を 1 つごとに呼ぶ）
   OS.loadMoreApps = async function (each) {
     const all = fs.list('/sys/apps').filter(n => n.endsWith('.js') && !I_APPS.includes(n)), done = [];

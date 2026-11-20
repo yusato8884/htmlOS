@@ -684,7 +684,7 @@
     const apps = OS.touch && o.appsOnTouch;
     box.classList.toggle('apps', apps); box.classList.toggle('files', !apps);
     if (apps) {
-      Object.values(OS.apps).forEach(a => box.append(h('button', { class: 'desk-icon', type: 'button', title: a.desc || a.name, 'data-app': a.id, onclick: () => run(a.id) },
+      Object.values(OS.apps).filter(a => !a.hidden).forEach(a => box.append(h('button', { class: 'desk-icon', type: 'button', title: a.desc || a.name, 'data-app': a.id, onclick: () => run(a.id) },
         kit.appIcon(a, 26), h('span', { class: 'desk-label' }, a.name))));
       return;
     }
@@ -961,7 +961,7 @@
   // ---------- デスクトップ環境を作るための部品（shells.js から使う）
   const kit = htui.kit = {
     h: h, icon: OS.icon, avatar: avatar, run: run, menu: menu, menuAt: htui.menuAt,
-    apps: () => Object.values(OS.apps),
+    apps: () => Object.values(OS.apps).filter(a => !a.hidden), // hidden のアプリ（バージョン情報など）は一覧に出さない
     appIcon(a, size) { return h('span', { class: 'app-ico', style: 'background:' + (a.color || '#5e5c64') }, OS.icon(a.icon, size || 26)); },
     // 時計。fmt(Date) の結果を el に入れ続ける
     clock(el, fmt) { const f = d => { el.textContent = fmt(d); }; ticks.push(f); f(new Date()); return el; },

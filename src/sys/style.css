@@ -1491,6 +1491,8 @@
 .hv-rows dd{margin:0;overflow-wrap:anywhere}
 .hv-rows .btn{padding:2px 12px}
 .hv-uname{width:100%;box-sizing:border-box;margin:0;padding:8px;border-radius:8px;background:var(--surface-2,rgba(127,127,127,.12));font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;text-align:left;user-select:text}
+.hv-app{padding:16px 18px}
+.hv-foot{display:flex;justify-content:flex-end;gap:8px;align-self:stretch;margin-top:8px}
 .hv-credits pre{margin:0;font:inherit;line-height:1.7;text-align:left;white-space:pre-wrap}
 .wl-mig{display:flex;align-items:center;gap:12px;margin:12px 0 0;padding:12px 14px;border:1.5px solid var(--accent);border-radius:14px;background:var(--surface)}
 .wl-mig>div{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}

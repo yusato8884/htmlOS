@@ -66,7 +66,7 @@
       async function tryLive() {
         if (busy) return; busy = true;
         const pg = progress('アプリを追加しています');
-        const total = OS.fs.list('/sys/apps').filter(n => n.endsWith('.js')).length - 5; let n = 0;
+        const total = OS.fs.list('/sys/apps').filter(n => n.endsWith('.js')).length - 6; let n = 0;
         pg.stat.textContent = 'Live 環境に必要なアプリを追加しています…';
         await OS.loadMoreApps(async name => { n++; pg.say('追加: ' + name, Math.min(95, n / Math.max(1, total) * 95)); await sleep(70); });
         try { if (!OS.users.get('live')) await OS.users.add('live', '', true); } catch (e) { pg.say('live ユーザーを作れませんでした: ' + e.message); }
