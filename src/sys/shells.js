@@ -93,7 +93,7 @@
     return close;
   }
 
-  // ======================================================== HTUi 4（Bengal。標準。htmlOS 7.1 から）
+  // ======================================================== HTUi 4（RussianBlue。標準。htmlOS 7.1 から）
   //   上に薄いパネル: 左にメニュー（htmlOS のロゴ）と使っているアプリ、真ん中に日時（押すと右から通知センター）、
   //   右に検索（Alt+Space）・仮想デスク・コントロールセンター・ユーザー。
   //   画面の下の真ん中に浮かぶ Dock（htui.prefs.dockHide: smart＝ウィンドウと重なったら隠す（既定）/ always＝いつも隠す / off＝隠さない）。
@@ -119,7 +119,7 @@
     return g;
   }
   OS.registerSession({
-    id: 'htui', name: 'HTUi 4', version: '4', codename: 'Bengal', full: 'HTUi 4 (Bengal)', touchNav: true,
+    id: 'htui', name: 'HTUi 4', version: '4', codename: 'RussianBlue', full: 'HTUi 4 (RussianBlue)', touchNav: true,
     pins: ['hfile', 'terminal', 'hbrowser', 'hedit', 'settings'], pinWhere: 'Dock',
     desc: '上に薄いパネル、画面の下の真ん中に浮かぶ Dock がある標準のデスクトップです。コントロールセンター、右から出る通知センター、デスクトップのウィジェット（時計・カレンダー・システム情報・付箋）、Alt+Space の検索が使えます。',
     get ht3() { return OS.sessions.htui3; }, // すべてのアプリ（Launchpad 風）・アプリのメニュー・ユーザーの切り替えは HTUi 3 と同じものを使う
