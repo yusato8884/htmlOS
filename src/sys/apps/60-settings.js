@@ -138,7 +138,11 @@
             OS.hdm.sessionFor(OS.htui.user) !== OS.htui.sessionId
               ? h('div', { class: 'st-row' }, h('button', { class: 'btn primary', type: 'button', onclick: () => OS.htui.switchSession(OS.hdm.sessionFor(OS.htui.user)) }, '今すぐ切り替える'), '開いているアプリは閉じます（未保存の確認は出ます）。')
               : h('p', null, '次回ログイン時も、ここで選んだ環境で起動します。ログイン画面（hdm）でも選べます。'),
-            OS.htui.sessionId === 'htui' ? [h('h3', null, 'Dock の位置（HTUi 3）'),
+            OS.htui.sessionId === 'htui' ? [h('h3', null, 'Dock を自動で隠す（HTUi 4）'),
+              h('div', { class: 'st-row' }, ['smart', 'always', 'off'].map(d => h('label', null, h('input', { type: 'radio', name: 'st-dhide-' + win.pid, id: 'st-dhide-' + d, checked: (p.dockHide || 'smart') === d, onchange: () => OS.htui.setPrefs({ dockHide: d }) }), ' ' + { smart: 'ウィンドウと重なったら隠す（既定）', always: 'いつも隠す', off: '隠さない' }[d]))),
+              h('p', null, '隠れているときは、画面のいちばん下にマウスを持っていくと出てきます。デスクトップを右クリックすると、ウィジェット（時計・カレンダー・システム情報・付箋）を追加できます。'),
+              h('div', { class: 'st-row' }, h('button', { class: 'btn small', type: 'button', onclick: () => { OS.htui.setPrefs({ widgets: undefined }); if (OS.htui.shell && OS.htui.shell.drawWidgets) OS.htui.shell.drawWidgets(); } }, 'ウィジェットを最初の並びに戻す'))] : null,
+            OS.htui.sessionId === 'htui3' ? [h('h3', null, 'Dock の位置（HTUi 3）'),
               h('div', { class: 'st-row' }, ['left', 'bottom', 'right'].map(d => h('label', null, h('input', { type: 'radio', name: 'st-dock-' + win.pid, id: 'st-dock-' + d, checked: (p.dock || 'left') === d, onchange: () => OS.htui.setPrefs({ dock: d }) }), ' ' + { left: '左（既定）', bottom: '下', right: '右' }[d]))),
               h('p', null, 'Dock のアイコンを右クリックすると、固定/解除・並び替え・Dock の位置を変えられます。')] : null,
             h('h3', null, '画面モード'),
@@ -148,8 +152,12 @@
             h('h3', null, 'アニメーション'),
             h('div', { class: 'st-row' }, h('label', null, h('input', { type: 'checkbox', id: 'st-anim', checked: p.anim !== false, onchange: e => OS.htui.setPrefs({ anim: e.target.checked }) }), 'ウィンドウやメニューのアニメーションを使う')),
             h('p', null, 'パソコン側で「アニメーションを減らす」設定にしていても、htmlOS の中ではこのスイッチだけで決まります。'),
+            h('h3', null, '透明効果'),
+            h('div', { class: 'st-row' }, h('label', null, h('input', { type: 'checkbox', id: 'st-glass', checked: p.glass !== false, onchange: e => OS.htui.setPrefs({ glass: e.target.checked }) }), 'ウィンドウとメニューをすりガラスのように透かす')),
+            h('p', null, '省電力モードのあいだは、自動でオフになります（ぼかしは描くのに力を使うため）。'),
             h('h3', null, 'ウィンドウ操作'),
-            h('p', null, 'タイトルバーを画面の左右の端までドラッグすると半分に、四隅の近くで4分の1に、上端で最大化にスナップします。最大化ボタンの右クリックや Ctrl+Alt+矢印キーでも配置できます。ウィンドウの辺と角をドラッグするとサイズを変えられます。'));
+            h('div', { class: 'st-row' }, h('label', null, h('input', { type: 'checkbox', id: 'st-assist', checked: p.snapAssist !== false, onchange: e => OS.htui.setPrefs({ snapAssist: e.target.checked }) }), 'スナップアシスト（並べたあと、空いた場所に入れるウィンドウを選ぶ）')),
+            h('p', null, '最大化ボタンにマウスを乗せると、スナップレイアウト（半分・3 分割・4 分割などの配置図）が出ます。タイトルバーを画面の左右の端までドラッグすると半分に、四隅の近くで4分の1に、上端で最大化にスナップします。最大化ボタンの右クリックや Ctrl+Alt+矢印キーでも配置できます。Alt+Space で、アプリ・ファイル・設定・コマンドをまとめて検索できます。ウィンドウの辺と角をドラッグするとサイズを変えられます。'));
         }],
         sound: ['サウンド', 'audio', () => {
           const admin = !!me().admin, S = OS.sound, mine = OS.htui.prefs.sound || {}, p = S.prefs();

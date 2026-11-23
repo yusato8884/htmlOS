@@ -1338,7 +1338,8 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   const REF = '<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>HTUi SDK 3.0 リファレンス</title><style>' +
     'body{font:14px/1.6 system-ui,"Noto Sans JP",sans-serif;margin:0;padding:14px 16px;color:#24262b}h1{font-size:18px;margin:0 0 4px}h2{font-size:15px;margin:18px 0 4px;padding-top:8px;border-top:1px solid #ddd}' +
     'code,pre{font:12.5px/1.5 ui-monospace,Menlo,Consolas,monospace}pre{background:#f3f3f6;border-radius:7px;padding:8px 10px;overflow:auto;margin:6px 0}p{margin:4px 0;color:#4b4f58}small{color:#888}a{color:#1c71d8}</style></head><body>' +
-    '<h1>HTUi SDK 3.0 (Venus)</h1><p><small>htmlOS 4.0 Vega ・ HTUi Studio ' + S.version + '</small></p>' +
+    '<h1>HTUi SDK 4 (Mars)</h1><p><small>htmlOS 7.1 Polaris ・ HTUi Studio ' + S.version + '</small></p>' +
+    '<h2 id="mars">SDK 4（Mars）で増えたもの</h2><pre>htui.search(\'文字\')            検索（Alt+Space）を開く\nhtui.searchProviders.push({ id, name, find(q) { return [{ title, sub, icon, run() {} }] } })\nwin.snap(\'l3\' | \'c3\' | \'r3\' | \'l23\' | \'r23\')   3 分割・3 分の 2 に並べる\nhtui.snapAssist([\'right\'], [win])  空いた場所に入れるウィンドウを選ばせる\nconst s = tty.screen(); s.fixed(true); s.size()  → { cols, rows }\n  key() に alt・F1〜F12・click（row, col）・resize・改行入りの貼り付けが届く</pre>' +
     '<p>目次: <a href="#app">アプリ</a> ・ <a href="#win">ウインドウ</a> ・ <a href="#cap">キャプションボタン</a> ・ <a href="#wv">WebView</a> ・ <a href="#ui">ダイアログ</a> ・ <a href="#venus">部品</a> ・ <a href="#cmd">コマンド</a> ・ <a href="#de">デスクトップ環境</a></p>' +
     '<h2 id="app">アプリ</h2><pre>OS.registerApp({ id, name, icon, color, desc, launch(arg) { … return win; } })</pre><p>icon は htmlOS のアイコン名（grid, terminal, edit, globe, star, code …）。</p>' +
     '<h2 id="win">ウインドウ</h2><pre>const win = OS.htui.open({ title, icon, w, h, app, parent, dialog, buttons })\nwin.body.append(…)   win.setTitle(t)   win.close()   win.focus()\nwin.onClose = async () =&gt; true / false   win.onDispose = () =&gt; …</pre><p>parent を渡すと子ウインドウ（親の操作をふさぐ）。dialog: true で最小化・最大化なし。</p>' +
@@ -2157,7 +2158,11 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
             OS.hdm.sessionFor(OS.htui.user) !== OS.htui.sessionId
               ? h('div', { class: 'st-row' }, h('button', { class: 'btn primary', type: 'button', onclick: () => OS.htui.switchSession(OS.hdm.sessionFor(OS.htui.user)) }, '今すぐ切り替える'), '開いているアプリは閉じます（未保存の確認は出ます）。')
               : h('p', null, '次回ログイン時も、ここで選んだ環境で起動します。ログイン画面（hdm）でも選べます。'),
-            OS.htui.sessionId === 'htui' ? [h('h3', null, 'Dock の位置（HTUi 3）'),
+            OS.htui.sessionId === 'htui' ? [h('h3', null, 'Dock を自動で隠す（HTUi 4）'),
+              h('div', { class: 'st-row' }, ['smart', 'always', 'off'].map(d => h('label', null, h('input', { type: 'radio', name: 'st-dhide-' + win.pid, id: 'st-dhide-' + d, checked: (p.dockHide || 'smart') === d, onchange: () => OS.htui.setPrefs({ dockHide: d }) }), ' ' + { smart: 'ウィンドウと重なったら隠す（既定）', always: 'いつも隠す', off: '隠さない' }[d]))),
+              h('p', null, '隠れているときは、画面のいちばん下にマウスを持っていくと出てきます。デスクトップを右クリックすると、ウィジェット（時計・カレンダー・システム情報・付箋）を追加できます。'),
+              h('div', { class: 'st-row' }, h('button', { class: 'btn small', type: 'button', onclick: () => { OS.htui.setPrefs({ widgets: undefined }); if (OS.htui.shell && OS.htui.shell.drawWidgets) OS.htui.shell.drawWidgets(); } }, 'ウィジェットを最初の並びに戻す'))] : null,
+            OS.htui.sessionId === 'htui3' ? [h('h3', null, 'Dock の位置（HTUi 3）'),
               h('div', { class: 'st-row' }, ['left', 'bottom', 'right'].map(d => h('label', null, h('input', { type: 'radio', name: 'st-dock-' + win.pid, id: 'st-dock-' + d, checked: (p.dock || 'left') === d, onchange: () => OS.htui.setPrefs({ dock: d }) }), ' ' + { left: '左（既定）', bottom: '下', right: '右' }[d]))),
               h('p', null, 'Dock のアイコンを右クリックすると、固定/解除・並び替え・Dock の位置を変えられます。')] : null,
             h('h3', null, '画面モード'),
@@ -2167,8 +2172,12 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
             h('h3', null, 'アニメーション'),
             h('div', { class: 'st-row' }, h('label', null, h('input', { type: 'checkbox', id: 'st-anim', checked: p.anim !== false, onchange: e => OS.htui.setPrefs({ anim: e.target.checked }) }), 'ウィンドウやメニューのアニメーションを使う')),
             h('p', null, 'パソコン側で「アニメーションを減らす」設定にしていても、htmlOS の中ではこのスイッチだけで決まります。'),
+            h('h3', null, '透明効果'),
+            h('div', { class: 'st-row' }, h('label', null, h('input', { type: 'checkbox', id: 'st-glass', checked: p.glass !== false, onchange: e => OS.htui.setPrefs({ glass: e.target.checked }) }), 'ウィンドウとメニューをすりガラスのように透かす')),
+            h('p', null, '省電力モードのあいだは、自動でオフになります（ぼかしは描くのに力を使うため）。'),
             h('h3', null, 'ウィンドウ操作'),
-            h('p', null, 'タイトルバーを画面の左右の端までドラッグすると半分に、四隅の近くで4分の1に、上端で最大化にスナップします。最大化ボタンの右クリックや Ctrl+Alt+矢印キーでも配置できます。ウィンドウの辺と角をドラッグするとサイズを変えられます。'));
+            h('div', { class: 'st-row' }, h('label', null, h('input', { type: 'checkbox', id: 'st-assist', checked: p.snapAssist !== false, onchange: e => OS.htui.setPrefs({ snapAssist: e.target.checked }) }), 'スナップアシスト（並べたあと、空いた場所に入れるウィンドウを選ぶ）')),
+            h('p', null, '最大化ボタンにマウスを乗せると、スナップレイアウト（半分・3 分割・4 分割などの配置図）が出ます。タイトルバーを画面の左右の端までドラッグすると半分に、四隅の近くで4分の1に、上端で最大化にスナップします。最大化ボタンの右クリックや Ctrl+Alt+矢印キーでも配置できます。Alt+Space で、アプリ・ファイル・設定・コマンドをまとめて検索できます。ウィンドウの辺と角をドラッグするとサイズを変えられます。'));
         }],
         sound: ['サウンド', 'audio', () => {
           const admin = !!me().admin, S = OS.sound, mine = OS.htui.prefs.sound || {}, p = S.prefs();
@@ -4130,10 +4139,12 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 })();
 </script>
 <script type="text/x-htmlos" data-path="/sys/htui.js">
-/* HTUi SDK 3.0（コードネーム Venus）— htmlOS の描画エンジン。ウィンドウマネージャ・ダイアログと、デスクトップ環境（セッション）の土台。
+/* HTUi SDK 4（コードネーム Mars）— htmlOS の描画エンジン。ウィンドウマネージャ・ダイアログと、デスクトップ環境（セッション）の土台。
    2（Jupiter）で子ウインドウ（htui.open の parent）に対応し、確認などのダイアログは開いたウインドウの子ウインドウとして出る。
    3.0（Venus）で、ボタン・入力欄・チェックボックス・スライダー・スクロールバーなどを独自のデザインにし、
    WebView（htui.WebView）と、タイトルバーにアプリ独自のボタンを置くキャプションボタン（htui.open の buttons / win.addButton）を追加した。
+   4（Mars）で、スナップレイアウト（最大化ボタンにマウスを乗せる）とスナップアシスト、3 分割の配置、透明効果（すりガラス）、
+   どこからでも使える検索（Alt+Space。htui.search / htui.searchProviders）を追加し、端末の TUI（tty.screen）に Alt・F キー・クリックなどが届くようにした。
    コードネームは惑星の名前から選ぶ。
    ログイン画面は hdm（/sys/hdm.js）、各デスクトップ環境は /sys/shells.js にあります。
    jsh から  htui start [セッション] / htui stop  で起動・終了できます。 */
@@ -4633,6 +4644,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     htui.el.style.background = wallCss(htui.prefs, htui.user);
     htui.el.style.setProperty('--accent', htui.prefs.accent || ACCENTS[0]);
     htui.el.classList.toggle('no-anim', htui.prefs.anim === false);
+    htui.el.classList.toggle('glass', htui.prefs.glass !== false); // SDK 4: 透明効果（すりガラス）。省電力モードでは CSS で止まる
     OS.setMode(htui.prefs.mode || 'auto');
   }
   // 画像を壁紙にする。大きい画像は長い辺 1920px に縮めて JPEG にし、~/.config/wallpaper に data: URL で保存する
@@ -5023,6 +5035,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       { label: mac ? 'しまう' : '最小化', icon: 'min', act: () => w.minimize() },
       { label: w.zone === 'max' ? '元のサイズに戻す' : mac ? '拡大' : '最大化', icon: 'max', act: () => (w.zone === 'max' ? w.unsnap() : w.snap('max')) },
       { label: '左半分に配置', act: () => w.snap('left') }, { label: '右半分に配置', act: () => w.snap('right') },
+      { label: '左 3 分の 1 に配置', act: () => w.snap('l3') }, { label: '真ん中 3 分の 1 に配置', act: () => w.snap('c3') }, { label: '右 3 分の 1 に配置', act: () => w.snap('r3') },
       { label: '左上に配置', act: () => w.snap('tl') }, { label: '右上に配置', act: () => w.snap('tr') },
       { label: '左下に配置', act: () => w.snap('bl') }, { label: '右下に配置', act: () => w.snap('br') },
       { sep: true }].concat(htui.wsMoveItems(rootOf(w)), [{ sep: true }, { label: '閉じる', icon: 'x', act: () => w.close() }]);
@@ -5050,6 +5063,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       { label: '新しいデスクトップ', icon: 'plus', disabled: htui.ws.count >= htui.ws.max, act: () => htui.wsAdd(true) });
     const vis = htui.wins.filter(w => !w.el.classList.contains('hidden'));
     if (htui.wins.length) items.push({ sep: true }, vis.length ? { label: 'すべてのウィンドウを最小化', icon: 'min', act: () => vis.forEach(w => w.minimize()) } : { label: 'すべてのウィンドウを戻す', icon: 'max', act: () => htui.wins.forEach(w => w.focus()) });
+    if (sh.deskItems) { const more = sh.deskItems(); if (more && more.length) items.push({ sep: true }, ...more); } // SDK 4: 環境が足す項目（HTUi 4 のウィジェットなど）
     items.push({ sep: true }, { label: '設定…', icon: 'gear', act: () => run('settings') });
     return items;
   }
@@ -5266,7 +5280,10 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   }
 
   // ---------- ウィンドウマネージャ（移動・8方向リサイズ・スナップ・アニメーション）
-  const ZONES = { max: [0, 0, 100, 100], left: [0, 0, 50, 100], right: [50, 0, 50, 100], tl: [0, 0, 50, 50], tr: [50, 0, 50, 50], bl: [0, 50, 50, 50], br: [50, 50, 50, 50] };
+  // SDK 4（Mars）で 3 分割（l3 c3 r3）と 3 分の 2（l23 r23）を足した
+  const T = 100 / 3;
+  const ZONES = { max: [0, 0, 100, 100], left: [0, 0, 50, 100], right: [50, 0, 50, 100], tl: [0, 0, 50, 50], tr: [50, 0, 50, 50], bl: [0, 50, 50, 50], br: [50, 50, 50, 50],
+    l3: [0, 0, T, 100], c3: [T, 0, T, 100], r3: [2 * T, 0, T, 100], l23: [0, 0, 2 * T, 100], r23: [T, 0, 2 * T, 100] };
   const MINW = 260, MINH = 150;
   const px = v => Math.round(v) + 'px', clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   htui.animOff = () => htui.prefs.anim === false || !!(OS.power && OS.power.saving);
@@ -5312,7 +5329,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   // 子ウインドウ（ダイアログなど）がアクティブなときは、その親（いちばん上の親）を返す
   const hasActive = w => w.el.classList.contains('active') || w.children.some(hasActive);
   // 描画エンジンの名前と版
-  htui.sdk = { name: 'HTUi SDK', version: '3.0.1', codename: 'Venus', full: 'HTUi SDK 3.0.1 (Venus)' };
+  htui.sdk = { name: 'HTUi SDK', version: '4.0.0', codename: 'Mars', full: 'HTUi SDK 4.0.0 (Mars)' };
   // Venus のスライダー: 値までを色で塗るために --v-p を入れる
   const rangeFill = r => { const mn = +r.min || 0, mx = r.max === '' ? 100 : +r.max, v = +r.value; r.style.setProperty('--v-p', (mx > mn ? (v - mn) / (mx - mn) * 100 : 0) + '%'); };
   htui.syncRanges = root => (root || document).querySelectorAll('input[type=range]').forEach(rangeFill);
@@ -5840,7 +5857,170 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     return wv;
   };
 
-  // ---------- HTUi SDK 2（Jupiter）〜 3.0（Venus）: ウインドウ
+  // ---------- HTUi SDK 4（Mars）: スナップレイアウトとスナップアシスト
+  //   最大化ボタンにマウスを乗せると配置の図（レイアウト）が出る。図の区画を押すと、その場所に並べる。
+  //   並べたあと、残りの区画に入れるウィンドウを選べる（スナップアシスト。htui.prefs.snapAssist === false で出さない）
+  const LAYOUTS = [['left', 'right'], ['l23', 'r3'], ['l3', 'r23'], ['l3', 'c3', 'r3'], ['left', 'tr', 'br'], ['tl', 'tr', 'bl', 'br']];
+  htui.layouts = LAYOUTS;
+  let layoutPop = null, layoutTimer = 0;
+  function closeLayouts() { clearTimeout(layoutTimer); if (layoutPop) { const p = layoutPop; layoutPop = null; p.remove(); } }
+  htui.closeLayouts = closeLayouts;
+  htui.snapLayouts = function (win, anchor) {
+    closeLayouts();
+    if (OS.touch || win.closed || win.dialog) return;
+    const pop = layoutPop = h('div', { class: 'snap-layouts', role: 'menu', 'aria-label': 'スナップレイアウト' });
+    LAYOUTS.forEach(L => {
+      const box = h('div', { class: 'sl-box' });
+      L.forEach((z, i) => {
+        const g = ZONES[z];
+        box.append(h('button', { class: 'sl-cell', type: 'button', role: 'menuitem', title: ZONE_NAMES[z] || z, 'aria-label': ZONE_NAMES[z] || z,
+          style: 'left:' + g[0] + '%;top:' + g[1] + '%;width:' + g[2] + '%;height:' + g[3] + '%',
+          onclick: e => { e.stopPropagation(); closeLayouts(); win.snap(z); win.focus(); htui.snapAssist(L.filter(x => x !== z), [win]); } }));
+      });
+      pop.append(box);
+    });
+    pop.addEventListener('pointerleave', () => { layoutTimer = setTimeout(closeLayouts, 350); });
+    pop.addEventListener('pointerenter', () => clearTimeout(layoutTimer));
+    htui.el.append(pop);
+    const a = anchor.getBoundingClientRect(), r = htui.el.getBoundingClientRect(), pw = pop.offsetWidth;
+    pop.style.left = Math.round(Math.max(4, Math.min(r.width - pw - 4, a.left - r.left + a.width / 2 - pw / 2))) + 'px';
+    pop.style.top = Math.round(a.bottom - r.top + 6) + 'px';
+  };
+  const ZONE_NAMES = { max: '最大化', left: '左半分', right: '右半分', tl: '左上', tr: '右上', bl: '左下', br: '右下', l3: '左 3 分の 1', c3: '真ん中 3 分の 1', r3: '右 3 分の 1', l23: '左 3 分の 2', r23: '右 3 分の 2' };
+  htui.zoneNames = ZONE_NAMES;
+  // 残りの区画（zones）に、ほかのウィンドウを 1 つずつ選んで入れる。used は並べ終わったウィンドウ
+  htui.snapAssist = function (zones, used) {
+    const old = htui.desk && htui.desk.querySelector('.snap-assist'); if (old) old._close();
+    if (!zones.length || htui.prefs.snapAssist === false || OS.touch || !htui.desk) return;
+    const cands = htui.wins.filter(w => !w.closed && !used.includes(w) && htui.wsOf(w) === htui.ws.cur && !w.el.classList.contains('closing'));
+    if (!cands.length) return;
+    const z = zones[0], g = ZONES[z];
+    const ov = h('div', { class: 'snap-assist', role: 'dialog', 'aria-label': 'スナップアシスト' });
+    const area = h('div', { class: 'sa-area', style: 'left:' + g[0] + '%;top:' + g[1] + '%;width:' + g[2] + '%;height:' + g[3] + '%' },
+      h('div', { class: 'sa-head' }, ZONE_NAMES[z] + 'に並べるウィンドウを選んでください'));
+    const list = h('div', { class: 'sa-list' });
+    cands.forEach(w => {
+      const a = OS.apps[w.app] || { name: w.title, icon: 'file' };
+      list.append(h('button', { class: 'sa-card', type: 'button', title: w.title, onclick: e => { e.stopPropagation(); close(); w.focus(); w.snap(z); htui.snapAssist(zones.slice(1), used.concat(w)); } },
+        kit.appIcon(a, 26), h('b', null, a.name), a.name !== w.title ? h('small', null, w.title) : null));
+    });
+    area.append(list);
+    ov.append(area);
+    const esc = e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); } };
+    function close() { document.removeEventListener('keydown', esc, true); ov.remove(); }
+    ov._close = close;
+    ov.addEventListener('click', e => { if (!e.target.closest('.sa-card')) close(); });
+    document.addEventListener('keydown', esc, true);
+    ov.style.zIndex = htui.z + 5;
+    htui.desk.append(ov);
+  };
+
+  // ---------- HTUi SDK 4（Mars）: どこからでも使える検索（Alt+Space）
+  //   アプリ・設定・ファイル（ホームの中）・jsh のコマンド・計算をまとめて探す。htui.searchProviders に足すと、検索の対象を増やせる
+  //   プロバイダー: { id, name, find(q) → [{ title, sub, icon, run() }] }
+  htui.searchProviders = [];
+  const SETTING_PAGES = [['look', '外観', '壁紙 アクセント 色 アニメーション 透明 画面モード デスクトップ環境 dock スナップ'], ['users', 'ユーザー', 'アカウント パスワード アバター'], ['sound', 'サウンド', '音 音量 効果音 bgm'],
+    ['power', '電源管理', '省電力 スリープ バッテリー'], ['net', 'ネットワーク', 'プロキシ 接続'], ['storage', 'ストレージ', 'ディスク hdd raid 容量'], ['boot', '起動', 'ブート cui gui'], ['system', 'システム', 'バージョン 情報 htmlos について']];
+  function homeFiles(limit) {
+    const out = [], hf = htui.fs || fs, base = users.home(htui.user);
+    const walk = (d, depth) => {
+      if (out.length >= limit || depth > 5) return;
+      let l; try { l = hf.list(d); } catch (e) { return; }
+      for (const n of l) {
+        if (n[0] === '.') continue;
+        const p = d + '/' + n; out.push(p); if (out.length >= limit) return;
+        try { if (hf.isDir(p) && !hf.isLink(p)) walk(p, depth + 1); } catch (e) { /* 読めない */ }
+      }
+    };
+    walk(base, 0);
+    return out;
+  }
+  function calc(q) {
+    if (!/^[\d\s+\-*/().%^,]+$/.test(q) || !/\d/.test(q) || !/[+\-*/%^]/.test(q)) return null;
+    try { const v = Function('"use strict";return (' + q.replace(/\^/g, '**').replace(/,/g, '') + ')')(); return typeof v === 'number' && isFinite(v) ? v : null; } catch (e) { return null; }
+  }
+  function searchAll(q) {
+    const t = q.trim().toLowerCase(), groups = [];
+    if (!t) {
+      groups.push({ name: 'アプリ', items: kit.apps().slice(0, 8).map(a => ({ title: a.name, sub: a.desc, app: a, run: () => run(a.id) })) });
+      return groups;
+    }
+    const v = calc(t);
+    if (v != null) groups.push({ name: '計算', items: [{ title: '= ' + (Math.round(v * 1e10) / 1e10).toLocaleString('ja-JP', { maximumFractionDigits: 10 }), sub: q.trim() + '（Enter でコピー）', icon: 'calc', run: () => { try { navigator.clipboard.writeText(String(v)); ui.toast('コピーしました: ' + v); } catch (e) { /* 無視 */ } } }] });
+    const apps = kit.apps().filter(a => (a.name + ' ' + (a.desc || '') + ' ' + a.id).toLowerCase().includes(t)).sort((a, b) => (a.name.toLowerCase().startsWith(t) ? 0 : 1) - (b.name.toLowerCase().startsWith(t) ? 0 : 1));
+    if (apps.length) groups.push({ name: 'アプリ', items: apps.slice(0, 6).map(a => ({ title: a.name, sub: a.desc, app: a, run: () => run(a.id) })) });
+    if (OS.apps.settings) {
+      const st = SETTING_PAGES.filter(s => (s[1] + ' ' + s[2] + ' ' + s[0] + ' 設定').toLowerCase().includes(t));
+      if (st.length) groups.push({ name: '設定', items: st.map(s => ({ title: '設定 ▸ ' + s[1], sub: s[2], icon: 'gear', run: () => run('settings', s[0]) })) });
+    }
+    if (htui.user) {
+      const files = homeFiles(1500).filter(p => path.base(p).toLowerCase().includes(t)).slice(0, 8);
+      if (files.length) groups.push({ name: 'ファイル', items: files.map(p => ({ title: path.base(p), sub: p, icon: fileIcon(p), run: () => openPath(p) })) });
+    }
+    if (OS.apps.terminal) {
+      const word = t.split(/\s+/)[0], known = Object.keys(OS.commands || {}).concat(['ls', 'cat', 'nano', 'top', 'ps', 'neofetch', 'htosver', 'systemctl', 'df', 'free', 'uname', 'help', 'man', 'crontab', 'screenshot']);
+      const hits = [...new Set(known)].filter(c => c.startsWith(word)).slice(0, 3);
+      const items = hits.map(c => ({ title: c === word ? q.trim() : c, sub: 'Terminal で実行する（jsh）', icon: 'terminal', run: () => run('terminal', { cmd: c === word ? q.trim() : c }) }));
+      if (!hits.includes(word)) items.push({ title: '> ' + q.trim(), sub: 'Terminal で実行する（jsh）', icon: 'terminal', run: () => run('terminal', { cmd: q.trim() }) });
+      groups.push({ name: 'コマンド', items: items });
+    }
+    htui.searchProviders.forEach(p => { try { const l = p.find(q) || []; if (l.length) groups.push({ name: p.name, items: l.slice(0, 6) }); } catch (e) { /* 無視 */ } });
+    return groups;
+  }
+  function openPath(p) {
+    const hf = htui.fs || fs;
+    try {
+      if (hf.isDir(p)) { run('hfile', p); return; }
+      const k = fs.kind(p);
+      const app = k === 'image' ? 'hpaint' : k === 'audio' || k === 'video' ? 'hplayer' : k === 'markdown' && OS.apps.hmd ? 'hmd' : k === 'html' ? 'hbrowser' : 'hedit';
+      run(OS.apps[app] ? app : 'hedit', p);
+    } catch (e) { ui.alert(e.message); }
+  }
+  htui.search = function (initial) {
+    const old = htui.el && htui.el.querySelector('.hs-ov:not(.leaving)'); if (old) { old._close(); return; }
+    if (!htui.user) return;
+    closeMenus();
+    const q = h('input', { class: 'hs-q', id: 'hs-q', placeholder: 'アプリ・ファイル・設定・コマンドを検索', 'aria-label': '検索', autocomplete: 'off', spellcheck: 'false' });
+    const res = h('div', { class: 'hs-res', role: 'listbox' });
+    let flat = [], sel = 0;
+    const paint = () => flat.forEach((x, i) => x.el.classList.toggle('on', i === sel));
+    const fill = () => {
+      res.textContent = ''; flat = []; sel = 0;
+      const gs = searchAll(q.value);
+      gs.forEach(g => {
+        res.append(h('div', { class: 'hs-group' }, g.name));
+        g.items.forEach(it => {
+          const b = h('button', { class: 'hs-item', type: 'button', role: 'option', onclick: () => go(it) },
+            it.app ? kit.appIcon(it.app, 18) : h('span', { class: 'hs-ico' }, OS.icon(it.icon || 'file', 17)),
+            h('span', { class: 'hs-t' }, h('b', null, it.title), it.sub ? h('small', null, it.sub) : null));
+          b.addEventListener('pointermove', () => { sel = flat.findIndex(x => x.el === b); paint(); });
+          flat.push({ el: b, it: it }); res.append(b);
+        });
+      });
+      if (!flat.length) res.append(h('p', { class: 'hs-empty' }, '見つかりませんでした'));
+      paint();
+    };
+    const box = h('div', { class: 'hs-box' }, h('label', { class: 'hs-bar' }, OS.icon('search', 18), q, h('kbd', null, 'Esc')), res);
+    const ov = h('div', { class: 'hs-ov', role: 'dialog', 'aria-label': '検索' }, box);
+    function go(it) { close(); try { it.run(); } catch (e) { ui.alert(e.message); } }
+    function close() { document.removeEventListener('keydown', esc, true); leave(ov); }
+    const esc = e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); if (q.value) { q.value = ''; fill(); } else close(); } };
+    ov._close = close;
+    ov.addEventListener('pointerdown', e => { if (e.target === ov) close(); });
+    q.addEventListener('input', fill);
+    q.addEventListener('keydown', e => {
+      if (e.isComposing) return;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); if (flat.length) { sel = (sel + (e.key === 'ArrowDown' ? 1 : -1) + flat.length) % flat.length; paint(); flat[sel].el.scrollIntoView({ block: 'nearest' }); } }
+      else if (e.key === 'Enter') { e.preventDefault(); if (flat[sel]) go(flat[sel].it); }
+    });
+    document.addEventListener('keydown', esc, true);
+    htui.el.append(ov);
+    if (initial) q.value = initial;
+    fill();
+    setTimeout(() => q.focus(), 20);
+  };
+
+  // ---------- HTUi SDK 2（Jupiter）〜 4（Mars）: ウインドウ
   //   o.parent を渡すと、そのウインドウの子ウインドウになる。子ウインドウは
   //   ・タスクバーなどには出ず、親の真ん中に開く（htui.wins には入らず、親の children に入る）
   //   ・開いているあいだ、親は操作できない（親を押すと子が前に出て点滅する）
@@ -5979,10 +6159,14 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 
     bX.addEventListener('click', () => win.close());
     bMin.addEventListener('click', () => win.minimize());
-    bMax.addEventListener('click', toggleMax);
+    bMax.addEventListener('click', () => { closeLayouts(); toggleMax(); });
+    // SDK 4: マウスを乗せて少し待つとスナップレイアウト
+    bMax.addEventListener('pointerenter', e => { if (e.pointerType !== 'mouse' || OS.touch || parent) return; clearTimeout(layoutTimer); layoutTimer = setTimeout(() => htui.snapLayouts(win, bMax), 450); });
+    bMax.addEventListener('pointerleave', () => { clearTimeout(layoutTimer); if (layoutPop) layoutTimer = setTimeout(closeLayouts, 350); });
     bMax.addEventListener('contextmenu', e => {
       e.preventDefault();
-      menu(bMax, [['左半分', 'left'], ['右半分', 'right'], ['左上', 'tl'], ['右上', 'tr'], ['左下', 'bl'], ['右下', 'br'], ['最大化', 'max']]
+      closeLayouts();
+      menu(bMax, [['左半分', 'left'], ['右半分', 'right'], ['左 3 分の 1', 'l3'], ['真ん中 3 分の 1', 'c3'], ['右 3 分の 1', 'r3'], ['左上', 'tl'], ['右上', 'tr'], ['左下', 'bl'], ['右下', 'br'], ['最大化', 'max']]
         .map(x => ({ label: x[0], act: () => win.snap(x[1]) })).concat([{ label: '元のサイズに戻す', act: () => win.unsnap() }]), true);
     });
     head.addEventListener('dblclick', e => { if (!e.target.closest('.win-btn,.win-cbtn') && (!OS.touch || win.free) && !o.dialog) toggleMax(); });
@@ -6014,7 +6198,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       const up = () => {
         head.removeEventListener('pointermove', mv); head.removeEventListener('pointerup', up); head.removeEventListener('pointercancel', up);
         htui.el.classList.remove('dragging'); preview(null);
-        if (moved && zone) { win.snap(zone); win.rect = startRect; }
+        if (moved && zone) { win.snap(zone); win.rect = startRect; if (zone === 'left' || zone === 'right') htui.snapAssist([zone === 'left' ? 'right' : 'left'], [win]); }
       };
       head.addEventListener('pointermove', mv); head.addEventListener('pointerup', up); head.addEventListener('pointercancel', up);
     });
@@ -6196,6 +6380,8 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     if (htui.user && e.altKey && !e.ctrlKey && !e.metaKey && (e.key === 'Tab' || e.code === 'Backquote') && !htui.el.querySelector('.modal-ov')) {
       e.preventDefault(); e.stopPropagation(); altTab(e.shiftKey); return;
     }
+    // SDK 4: 検索（Alt+Space）
+    if (htui.user && e.altKey && !e.ctrlKey && !e.metaKey && e.code === 'Space') { e.preventDefault(); e.stopPropagation(); if (!e.repeat) htui.search(); return; }
     if (htui.user && htui.shell && htui.shell.onKey && htui.shell.onKey(e) === true) { e.preventDefault(); return; }
     if (!e.ctrlKey || !e.altKey || !htui.user) return;
     const w = htui.active(); if (!w) return;
@@ -10075,6 +10261,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     // ---- 全画面の TUI（4.0）。const s = tty.screen(); s.render(行); const k = await s.key(); s.close()
     //   行は文字列か、[文字, 色]（色: accent dim ok err sel head prompt）の配列。
     //   key() は { key: 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight' | 'Enter' | 'Escape' | 'Tab' | 'Backspace' | 'Home' | 'End' | 'PageUp' | 'PageDown' | 'text', text, ctrl, shift }
+    //   SDK 4（Mars）から: alt（Alt+文字）、'F1'〜'F12'、'click'（row, col）、'resize'、貼り付けは改行入りの text（paste: true）。size() / fixed(on)
     //   日本語入力（IME）で確定した文字も key: 'text' で届く
     screen() {
       if (this._screen) return this._screen;
@@ -10083,11 +10270,18 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       const inp = h('input', { class: 'tty-tui-key', 'aria-label': 'キー入力（矢印キー・Enter・Esc）', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' });
       const push = ev => { const w = waiters.shift(); if (w) w(ev); else q.push(ev); };
       const NAV = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'Escape', 'Tab', 'Backspace', 'Delete', 'Home', 'End', 'PageUp', 'PageDown'];
+      // SDK 4（Mars）: Alt+文字・F1〜F12・Ctrl+記号・Ctrl+矢印も届ける（nano などのエディタ用）。Alt の文字はキーの位置（e.code）から決める
+      const codeKey = c => { const m = /^(?:Key|Digit)(\w)$/.exec(c || ''); if (m) return m[1].toLowerCase(); return { Backslash: '\\', Slash: '/', Comma: ',', Period: '.', Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']', Semicolon: ';', Quote: "'", Backquote: '`', Space: ' ' }[c] || null; };
       inp.addEventListener('keydown', e => {
         if (e.isComposing || e.keyCode === 229) return;
-        if (e.ctrlKey && /^[a-z]$/i.test(e.key)) { e.preventDefault(); push({ key: e.key.toLowerCase(), ctrl: true }); return; }
-        if (NAV.includes(e.key)) { e.preventDefault(); e.stopPropagation(); push({ key: e.key, shift: e.shiftKey }); }
+        if (e.ctrlKey && !e.altKey && /^[a-z]$/i.test(e.key)) { e.preventDefault(); push({ key: e.key.toLowerCase(), ctrl: true, shift: e.shiftKey }); return; }
+        if (NAV.includes(e.key)) { e.preventDefault(); e.stopPropagation(); push({ key: e.key, shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, alt: e.altKey }); return; }
+        if (/^F([1-9]|1[0-2])$/.test(e.key)) { e.preventDefault(); e.stopPropagation(); push({ key: e.key, shift: e.shiftKey }); return; }
+        if (e.altKey && !e.ctrlKey) { const k = codeKey(e.code); if (k) { e.preventDefault(); e.stopPropagation(); push({ key: k, alt: true, shift: e.shiftKey }); } return; }
+        if (e.ctrlKey && !e.altKey) { const k = codeKey(e.code); if (k && !/^[0-9]$/.test(k)) { e.preventDefault(); push({ key: e.shiftKey && k === '-' ? '_' : k, ctrl: true, shift: e.shiftKey }); } }
       });
+      // 貼り付けは改行を残したまま 1 つの text として届ける
+      inp.addEventListener('paste', e => { const t = e.clipboardData && e.clipboardData.getData('text/plain'); if (t) { e.preventDefault(); push({ key: 'text', text: t.replace(/\r\n?/g, '\n'), paste: true }); } });
       const flush = () => { if (inp.value) { push({ key: 'text', text: inp.value }); inp.value = ''; } };
       inp.addEventListener('input', e => { if (!e.isComposing) flush(); });
       inp.addEventListener('compositionend', () => setTimeout(flush, 0));
@@ -10096,6 +10290,13 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       const keys = h('div', { class: 'tty-keys tty-tuikeys' }, tk('↑', 'ArrowUp'), tk('↓', 'ArrowDown'), tk('←', 'ArrowLeft'), tk('→', 'ArrowRight'), tk('Enter', 'Enter'), tk('Esc', 'Escape'), tk('⌫', 'Backspace'));
       const box = h('div', { class: 'tty-tuibox' }, view, inp);
       box.addEventListener('click', () => inp.focus());
+      // 文字 1 つの幅と行の高さ（ch 単位で測る）
+      const cell = () => { const m = h('span', { style: 'position:absolute;visibility:hidden;white-space:pre' }, '0000000000'); view.append(m); const r = m.getBoundingClientRect(); m.remove(); return { w: r.width / 10 || 8, h: r.height || 19 }; };
+      // 文字の位置でのクリック（SDK 4）: { key: 'click', row, col }
+      view.addEventListener('mousedown', e => { if (e.button) return; const c = cell(), r = view.getBoundingClientRect(); push({ key: 'click', row: Math.floor((e.clientY - r.top) / c.h), col: Math.floor((e.clientX - r.left) / c.w) }); });
+      // 大きさが変わったら { key: 'resize' } を届ける
+      let ro = null, lastSize = '';
+      if (window.ResizeObserver) { ro = new ResizeObserver(() => { const z = box.clientWidth + 'x' + box.clientHeight; if (z !== lastSize) { const first = !lastSize; lastSize = z; if (!first) push({ key: 'resize' }); } }); ro.observe(box); }
       this.scr.style.display = 'none'; this.keys.style.display = 'none';
       this.el.insertBefore(box, this.keys); this.el.insertBefore(keys, this.keys);
       const seg = s => Array.isArray(s) ? h('span', { class: 't-' + s[1] }, s[0]) : document.createTextNode(String(s));
@@ -10107,7 +10308,10 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         },
         key() { return q.length ? Promise.resolve(q.shift()) : new Promise(r => waiters.push(r)); },
         focus() { inp.focus(); },
-        close() { box.remove(); keys.remove(); self.scr.style.display = ''; self.keys.style.display = ''; self._screen = null; while (waiters.length) waiters.shift()({ key: 'Escape' }); if (self.wantsFocus()) self.input.focus(); }
+        // SDK 4: 画面に入る文字数と行数。fixed(true) で折り返さずにぴったり並べる表示にする（エディタ用）
+        size() { const c = cell(), cs = getComputedStyle(box), pw = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight), ph = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom); return { cols: Math.max(20, Math.floor((box.clientWidth - pw) / c.w)), rows: Math.max(6, Math.floor((box.clientHeight - ph) / c.h)) }; },
+        fixed(on) { box.classList.toggle('tty-fixed', !!on); },
+        close() { if (ro) ro.disconnect(); box.remove(); keys.remove(); self.scr.style.display = ''; self.keys.style.display = ''; self._screen = null; while (waiters.length) waiters.shift()({ key: 'Escape' }); if (self.wantsFocus()) self.input.focus(); }
       };
       if (this.wantsFocus()) inp.focus();
       return sc;
@@ -10508,7 +10712,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     if (OS.imode) apps = apps.filter(n => I_APPS.includes(n));
     const pkgs = OS.safe || OS.imode ? [] : OS.pkg.list();
     try { OS.build = (JSON.parse(store.get('meta')) || {}).build || BOOT.build || '?'; } catch (e) { OS.build = BOOT.build || '?'; }
-    const core = ['/sys/init.js', '/sys/ipc.js', '/sys/raid.js', '/sys/cursor.js', '/sys/jsh.js', '/sys/htui.js', '/sys/hdm.js', '/sys/shells.js'];
+    const core = ['/sys/init.js', '/sys/ipc.js', '/sys/raid.js', '/sys/cursor.js', '/sys/jsh.js', '/sys/nano.js', '/sys/htui.js', '/sys/hdm.js', '/sys/shells.js'];
     const total = 2 + core.length + apps.length + pkgs.length; let done = 0;
     const step = async (s, failed) => {
       if (OS.klog) OS.klog(s, failed ? 3 : 6); else (OS._klog = OS._klog || []).push({ t: Date.now(), msg: s, prio: failed ? 3 : 6 });
@@ -10562,6 +10766,583 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       setTimeout(() => splash.remove(), 450);
     }
   };
+})();
+</script>
+<script type="text/x-htmlos" data-path="/sys/nano.js">
+/* nano — 端末の中で使うテキストエディタ（htmlOS 7.1 から）。GNU nano のキー操作をまねている。
+   nano [-l] [-v] [-i] [-E] [-T 幅] [+行[,列]] [ファイル]
+   画面は tty.screen()（HTUi SDK 4 Mars で Alt・F キー・クリック・大きさの変化・改行入りの貼り付けが届くようになった）に描く。
+   ファイルの読み書きはシェルのユーザーの権限（sh.fs）で行う。 */
+(function () {
+  const OS = window.OS, path = OS.path;
+  const VERSION = '1.0';
+
+  // 文字の幅（全角・絵文字は 2）
+  function wide(c) {
+    return (c >= 0x1100 && c <= 0x115f) || (c >= 0x2e80 && c <= 0x303e) || (c >= 0x3041 && c <= 0x33ff) || (c >= 0x3400 && c <= 0x4dbf) || (c >= 0x4e00 && c <= 0x9fff) ||
+      (c >= 0xa000 && c <= 0xa4cf) || (c >= 0xac00 && c <= 0xd7a3) || (c >= 0xf900 && c <= 0xfaff) || (c >= 0xfe30 && c <= 0xfe4f) || (c >= 0xff00 && c <= 0xff60) ||
+      (c >= 0xffe0 && c <= 0xffe6) || (c >= 0x1f300 && c <= 0x1f64f) || (c >= 0x1f900 && c <= 0x1f9ff) || (c >= 0x20000 && c <= 0x3fffd);
+  }
+  const cw = ch => { const c = ch.codePointAt(0); return c < 32 ? 2 : wide(c) ? 2 : 1; }; // 制御文字は ^X のように 2 マス
+
+  // ---- ヘルプ（^G）
+  const HELP = [
+    'htmlOS nano ' + VERSION + ' のヘルプ',
+    '',
+    'GNU nano と同じキー操作のテキストエディタです。^ は Ctrl、M- は Alt（または Esc を押してから）です。',
+    'ブラウザが先に使ってしまう Ctrl+W・Ctrl+N・Ctrl+T の代わりに、^F（検索）・↓・F キーを使ってください。',
+    '',
+    '── ファイル ──',
+    '^O / F3        書き込む（ファイル名を確かめてから保存）',
+    '^S             すぐに保存する',
+    '^X / F2        終わる（変更があれば保存するか聞きます）',
+    '^R / F5        ほかのファイルを読み込んで、カーソルの位置に挿入',
+    '^T / F12       jsh のコマンドを実行して、出力を挿入',
+    '',
+    '── 移動 ──',
+    '矢印キー       1 文字・1 行ずつ        ^A / Home  行の先頭    ^E / End  行の末尾',
+    '^P / ^B        上 / 左                  ^Y / PageUp  前のページ   ^V / PageDown  次のページ',
+    'Ctrl+←/→       単語ごと                 M-\\ / Ctrl+Home  先頭    M-/ / Ctrl+End  末尾',
+    '^_ / M-G / ^/  指定した行（と列）へ     ^C  カーソルの位置を表示',
+    'クリック       その位置へ',
+    '',
+    '── 編集 ──',
+    '^K / F9        行（範囲を選んでいればその範囲）を切り取り。続けて押すとまとめて切り取ります',
+    '^U / F10       切り取ったものを貼り付け',
+    'M-6            行（または範囲）をコピー',
+    'M-A / Shift+矢印  範囲の選択を始める・やめる',
+    '^D / Delete    カーソルの文字を消す     ^H / Backspace  前の文字を消す',
+    'Tab            タブ（-E のときは空白）を入れる',
+    'M-U / ^Z       元に戻す                 M-E            やり直す',
+    '',
+    '── 検索・置換 ──',
+    '^F / F6 / ^W   検索（大文字と小文字は区別しません）',
+    'M-W            次を検索                 M-Q            前を検索',
+    '^\\ / M-R       置換（Y 置換  N 飛ばす  A すべて  ^C やめる）',
+    '',
+    '── 表示 ──',
+    'M-N / M-#      行番号の表示を切り替え   M-I  自動インデントを切り替え',
+    '^G / F1        このヘルプ',
+    '',
+    '── 起動のオプション ──',
+    'nano -l ファイル     行番号を出す',
+    'nano -v ファイル     読むだけ（書き換えない）',
+    'nano -i ファイル     自動インデント（改行したとき前の行の字下げをそろえる）',
+    'nano -E ファイル     Tab で空白を入れる',
+    'nano -T 2 ファイル   タブの幅（既定 4）',
+    'nano +10 ファイル    10 行目から開く（+10,5 で 5 列目）',
+    '',
+    '↑↓ PageUp/PageDown でスクロール、^X・Esc・q でヘルプを閉じます。'
+  ];
+
+  // 下の 2 行に出すキーの一覧
+  const KEYS_MAIN = [['^G', 'ヘルプ'], ['^O', '書き込み'], ['^F', '検索'], ['^K', '切り取り'], ['^T', '実行'], ['^C', '位置'],
+    ['^X', '終了'], ['^R', '読み込み'], ['^\\', '置換'], ['^U', '貼り付け'], ['M-U', '元に戻す'], ['^/', '行へ移動']];
+  const KEYS_VIEW = [['^G', 'ヘルプ'], ['^F', '検索'], ['M-W', '次'], ['^C', '位置'], ['^/', '行へ移動'], ['M-N', '行番号'],
+    ['^X', '終了'], ['^Y', '前頁'], ['^V', '次頁'], ['M-\\', '先頭'], ['M-/', '末尾'], ['M-Q', '前']];
+  const KEYS_PROMPT = [['^G', 'ヘルプ'], ['Enter', '決定'], ['', ''], ['', ''], ['', ''], ['', ''], ['^C', '取消'], ['↑↓', '履歴'], ['', ''], ['', ''], ['', ''], ['', '']];
+  const KEYS_YN = [['Y', 'はい'], ['N', 'いいえ'], ['', ''], ['', ''], ['', ''], ['', ''], ['^C', '取消'], ['', ''], ['', ''], ['', ''], ['', ''], ['', '']];
+  const KEYS_REPL = [['Y', '置換'], ['N', '飛ばす'], ['A', 'すべて'], ['', ''], ['', ''], ['', ''], ['^C', 'やめる'], ['', ''], ['', ''], ['', ''], ['', ''], ['', '']];
+
+  const searchHist = [], cmdHist = [];
+
+  async function nano(args, sh) {
+    const tty = sh.tty, fs = sh.fs;
+    if (!tty || typeof tty.screen !== 'function' || tty.capture) throw new Error('nano: 端末（Terminal・tty1）の中で実行してください');
+    // ---- 引数
+    const opt = { lines: false, view: false, indent: false, spaces: false, tab: 4 };
+    let file = null, startLine = 0, startCol = 0;
+    for (let i = 0; i < args.length; i++) {
+      const a = String(args[i]);
+      if (a === '-h' || a === '--help') return 'nano [-l] [-v] [-i] [-E] [-T 幅] [+行[,列]] [ファイル]\n  -l 行番号  -v 読むだけ  -i 自動インデント  -E タブを空白に  -T タブの幅\n  キーの一覧は nano の中で ^G（Ctrl+G）';
+      if (a === '-T' || a === '--tabsize') { opt.tab = Math.max(1, Math.min(16, parseInt(args[++i], 10) || 4)); continue; }
+      if (/^\+\d+(,\d+)?$/.test(a)) { const m = a.slice(1).split(','); startLine = +m[0]; startCol = +(m[1] || 0); continue; }
+      if (/^-[A-Za-z]+$/.test(a)) {
+        for (const f of a.slice(1)) {
+          if (f === 'l') opt.lines = true; else if (f === 'v') opt.view = true; else if (f === 'i') opt.indent = true; else if (f === 'E') opt.spaces = true;
+          else throw new Error('nano: -' + f + ': 知らないオプションです（nano -h）');
+        }
+        continue;
+      }
+      if (file) throw new Error('nano: ファイルは 1 つだけ指定してください');
+      file = sh.abs(a);
+    }
+
+    // ---- バッファ
+    let lines = [''], crlf = false, modified = false, msg = '', msgCls = 'msg';
+    if (file) {
+      const st = fs.exists(file) ? fs.stat(file) : null;
+      if (st && st.t === 'd') throw new Error('nano: ' + file + ': ディレクトリです');
+      if (st && st.b) throw new Error('nano: ' + file + ': バイナリファイルは開けません');
+      if (st) {
+        const text = String(fs.read(file)); // 読めなければここで例外（権限）
+        crlf = /\r\n/.test(text);
+        lines = text.replace(/\r\n?/g, '\n').split('\n');
+        const n = lines.length - (lines[lines.length - 1] === '' ? 1 : 0);
+        msg = n + ' 行を読み込みました' + (crlf ? '（DOS 形式）' : '');
+        if (!opt.view && fs.canWrite && !fs.canWrite(file)) msg += ' ・ 書き込みの権限がありません';
+      } else msg = '新しいファイル';
+    }
+    let cy = 0, cx = 0, want = 0, top = 0; // カーソル（行・文字の位置）、上下に動くときに保つ列、画面のいちばん上の行
+    if (startLine) { cy = Math.max(0, Math.min(lines.length - 1, startLine - 1)); cx = Math.max(0, Math.min(lines[cy].length, startCol ? startCol - 1 : 0)); }
+    let mark = null, autoMark = false; // 範囲選択の始まり { y, x }
+    let cut = [], lastCut = false; // 切り取ったもの（行の配列）、直前の操作も ^K だったか
+    const undo = [], redo = []; let lastEdit = '';
+    let searchStr = '', showLines = opt.lines, esc = false;
+
+    const scr = tty.screen();
+    scr.fixed(true);
+    let size = scr.size();
+
+    // ---- 位置と幅
+    const prevIdx = (s, i) => { if (i <= 0) return 0; const c = s.charCodeAt(i - 1); return i - (c >= 0xdc00 && c <= 0xdfff && i > 1 ? 2 : 1); };
+    const nextIdx = (s, i) => { if (i >= s.length) return s.length; const c = s.charCodeAt(i); return i + (c >= 0xd800 && c <= 0xdbff ? 2 : 1); };
+    function colOf(s, idx) { let col = 0; for (let i = 0; i < idx && i < s.length;) { const ch = String.fromCodePoint(s.codePointAt(i)); col += ch === '\t' ? opt.tab - col % opt.tab : cw(ch); i += ch.length; } return col; }
+    function idxAt(s, col) { let c = 0, i = 0; while (i < s.length) { const ch = String.fromCodePoint(s.codePointAt(i)), w = ch === '\t' ? opt.tab - c % opt.tab : cw(ch); if (c + w > col) break; c += w; i += ch.length; } return i; }
+    const gutter = () => showLines ? String(lines.length).length + 1 : 0;
+    const textRows = () => Math.max(1, size.rows - 4);
+    const textCols = () => Math.max(8, size.cols - gutter());
+    const clampX = () => { cx = Math.max(0, Math.min(lines[cy].length, cx)); };
+    function scrollTo() {
+      const H = textRows();
+      if (cy < top) top = cy; else if (cy >= top + H) top = cy - H + 1;
+      if (top > Math.max(0, lines.length - 1)) top = Math.max(0, lines.length - 1);
+    }
+    const ordered = () => { if (!mark) return null; const a = mark, b = { y: cy, x: cx }; return (a.y < b.y || (a.y === b.y && a.x <= b.x)) ? [a, b] : [b, a]; };
+
+    // ---- 描画
+    function lineSegs(s, y, cur) {
+      const W = textCols(), segs = [];
+      let start = 0;
+      const ccol = cur ? colOf(s, cx) : 0;
+      if (cur && ccol > W - 3) { const page = Math.max(4, W - 8); start = Math.ceil((ccol - (W - 3)) / page) * page; }
+      const sel = ordered();
+      const inSel = i => sel && (y > sel[0].y || (y === sel[0].y && i >= sel[0].x)) && (y < sel[1].y || (y === sel[1].y && i < sel[1].x));
+      let col = 0, out = 0, i = 0;
+      const push = (t, cls) => { const last = segs[segs.length - 1]; if (last && last[1] === cls && cls !== 'cur' && cls !== 'w' && !/ t-w$/.test(cls || '')) last[0] += t; else segs.push([t, cls]); };
+      if (start > 0) { push('$', 'dim'); out = 1; }
+      while (i < s.length) {
+        const ch = String.fromCodePoint(s.codePointAt(i)), w = ch === '\t' ? opt.tab - col % opt.tab : cw(ch);
+        const here = cur && i === cx, mk = inSel(i);
+        if (col + w > start) {
+          if (out + w > W || (out + w === W && nextIdx(s, i) < s.length)) { push('$', 'dim'); out = W; break; }
+          let shown = ch === '\t' ? ' '.repeat(col < start ? col + w - start : w) : ch.codePointAt(0) < 32 ? '^' + String.fromCharCode(ch.codePointAt(0) + 64) : ch;
+          if (col < start) shown = ' '.repeat(col + w - start); // 左端で途中から見える全角文字
+          const cls = here ? 'cur' : mk ? 'mark' : null;
+          if (shown.length > 1 && here) { push(shown[0], cls); push(shown.slice(1), mk ? 'mark' : null); }
+          else if (w === 2 && ch !== '\t' && ch.codePointAt(0) >= 32 && col >= start) push(shown, cls ? cls + ' t-w' : 'w');
+          else push(shown, cls);
+          out += col < start ? col + w - start : w;
+        }
+        col += w; i += ch.length;
+      }
+      if (cur && cx >= s.length && out < W) { push(' ', 'cur'); out++; }
+      return segs;
+    }
+    function bar(items) {
+      const per = Math.max(6, Math.floor(size.cols / 6)), rows = [[], []];
+      items.forEach((k, n) => {
+        const r = rows[n < 6 ? 0 : 1];
+        if (!k[0]) { r.push([' '.repeat(per), null]); return; }
+        const label = ' ' + k[1];
+        let w = 0, txt = ''; for (const ch of label) { const x = cw(ch); if (k[0].length + w + x > per - 1) break; txt += ch; w += x; }
+        r.push([k[0], 'key'], [txt + ' '.repeat(Math.max(0, per - k[0].length - w)), null]);
+      });
+      return rows;
+    }
+    function titleRow() {
+      const name = file ? path.base(file) : '新しいバッファ', left = '  nano ' + VERSION, right = (opt.view ? '読むだけ' : modified ? '変更あり' : '') + '  ';
+      const width = s => Array.from(s).reduce((a, c) => a + cw(c), 0);
+      const W = size.cols, nw = width(name), mid = Math.max(width(left) + 1, Math.floor((W - nw) / 2));
+      const gap1 = Math.max(1, mid - width(left)), gap2 = Math.max(1, W - width(left) - gap1 - nw - width(right));
+      return [[left + ' '.repeat(gap1) + name + ' '.repeat(gap2) + right, 'inv']];
+    }
+    function draw(status, keys) {
+      size = scr.size();
+      scrollTo();
+      const rows = [titleRow()], H = textRows(), g = gutter();
+      for (let r = 0; r < H; r++) {
+        const y = top + r;
+        if (y >= lines.length) { rows.push(''); continue; }
+        const row = [];
+        if (g) row.push([String(y + 1).padStart(g - 1) + ' ', 'num']);
+        lineSegs(lines[y], y, y === cy).forEach(x => row.push(x));
+        rows.push(row.length ? row : '');
+      }
+      if (status) rows.push(status);
+      else if (msg) { const t = '[ ' + msg + ' ]', w = Array.from(t).reduce((a, c) => a + cw(c), 0), pad = Math.max(0, Math.floor((size.cols - w) / 2)); rows.push([[' '.repeat(pad), null], [t, msgCls]]); }
+      else rows.push('');
+      bar(keys || (opt.view ? KEYS_VIEW : KEYS_MAIN)).forEach(r => rows.push(r));
+      scr.render(rows);
+    }
+    const say = (t, cls) => { msg = t; msgCls = cls || 'msg'; };
+
+    // ---- 1 行の入力（下から 3 行目）。決めた文字か、^C なら null
+    async function prompt(label, def, hist) {
+      let v = def || '', i = v.length, hi = hist ? hist.length : 0;
+      for (;;) {
+        const before = v.slice(0, i), after = v.slice(i);
+        draw([[label, 'inv'], [before, null], [after ? Array.from(after)[0] : ' ', 'cur'], [after ? after.slice(Array.from(after)[0].length) : '', null]], KEYS_PROMPT);
+        const k = await scr.key();
+        if (k.key === 'resize' || k.key === 'click') continue;
+        if (k.key === 'Enter') { if (hist && v && hist[hist.length - 1] !== v) hist.push(v); return v; }
+        if (k.key === 'Escape' || (k.ctrl && (k.key === 'c' || k.key === 'x'))) return null;
+        if (k.ctrl && k.key === 'g') { await help(); continue; }
+        if (k.key === 'text') { const t = k.text.replace(/\n/g, ' '); v = before + t + after; i += t.length; }
+        else if (k.key === 'Backspace' || (k.ctrl && k.key === 'h')) { const j = prevIdx(v, i); v = v.slice(0, j) + after; i = j; }
+        else if (k.key === 'Delete' || (k.ctrl && k.key === 'd')) v = before + v.slice(nextIdx(v, i));
+        else if (k.key === 'ArrowLeft' || (k.ctrl && k.key === 'b')) i = prevIdx(v, i);
+        else if (k.key === 'ArrowRight') i = nextIdx(v, i);
+        else if (k.key === 'Home' || (k.ctrl && k.key === 'a')) i = 0;
+        else if (k.key === 'End' || (k.ctrl && k.key === 'e')) i = v.length;
+        else if (k.ctrl && k.key === 'u') { v = ''; i = 0; }
+        else if (hist && (k.key === 'ArrowUp' || k.key === 'ArrowDown')) { hi = Math.max(0, Math.min(hist.length, hi + (k.key === 'ArrowUp' ? -1 : 1))); v = hist[hi] || ''; i = v.length; }
+      }
+    }
+    // はい・いいえ（ほかの答えも選べる）。答えのキー（小文字）か、^C なら null
+    async function ask(label, keys, allowed) {
+      for (;;) {
+        draw([[label, 'inv'], [' ', 'cur']], keys || KEYS_YN);
+        const k = await scr.key();
+        if (k.key === 'Escape' || (k.ctrl && k.key === 'c')) return null;
+        if (k.key === 'text') { const c = k.text.trim().slice(-1).toLowerCase(); const m = { 'は': 'y', 'い': 'n' }[c] || c; if ((allowed || 'yn').includes(m)) return m; }
+      }
+    }
+    async function help() {
+      let at = 0;
+      for (;;) {
+        size = scr.size();
+        const H = size.rows - 3;
+        const rows = [[['  nano ' + VERSION + ' のヘルプ' + ' '.repeat(Math.max(0, size.cols - 20)), 'inv']]].concat(HELP.slice(at, at + H));
+        while (rows.length < size.rows - 2) rows.push('');
+        bar([['^X', 'ヘルプを閉じる'], ['↑↓', 'スクロール'], ['', ''], ['', ''], ['', ''], ['', ''], ['^Y', '前頁'], ['^V', '次頁'], ['', ''], ['', ''], ['', ''], ['', '']]).forEach(r => rows.push(r));
+        scr.render(rows);
+        const k = await scr.key(), max = Math.max(0, HELP.length - H);
+        if (k.key === 'ArrowDown' || (k.ctrl && k.key === 'n')) at = Math.min(max, at + 1);
+        else if (k.key === 'ArrowUp' || (k.ctrl && k.key === 'p')) at = Math.max(0, at - 1);
+        else if (k.key === 'PageDown' || (k.ctrl && k.key === 'v') || (k.key === 'text' && k.text === ' ')) at = Math.min(max, at + H);
+        else if (k.key === 'PageUp' || (k.ctrl && k.key === 'y')) at = Math.max(0, at - H);
+        else if (k.key === 'Escape' || k.key === 'Enter' || (k.ctrl && (k.key === 'x' || k.key === 'g' || k.key === 'c')) || (k.key === 'text' && /q/i.test(k.text)) || k.key === 'F1' || k.key === 'F2') return;
+      }
+    }
+
+    // ---- 編集（元に戻せるように、変える前の状態を積む）
+    function snap(kind) {
+      if (kind && kind === lastEdit && undo.length) return; // 続けて打った文字は 1 回で戻す
+      undo.push({ lines: lines.slice(), cy: cy, cx: cx, modified: modified }); if (undo.length > 300) undo.shift();
+      redo.length = 0; lastEdit = kind || '';
+    }
+    function changed() { modified = true; }
+    const ro = () => { if (opt.view) { say('読むだけのモードです', 'msg'); return true; } return false; };
+    function insertText(t) {
+      if (ro()) return;
+      if (mark && !autoMark) { /* 選択中でも文字はカーソルに入れる（nano と同じ） */ }
+      const parts = t.split('\n'), s = lines[cy], before = s.slice(0, cx), after = s.slice(cx);
+      if (parts.length === 1) { lines[cy] = before + t + after; cx += t.length; }
+      else {
+        const add = parts.slice(1, -1), last = parts[parts.length - 1];
+        lines.splice(cy, 1, before + parts[0], ...add, last + after);
+        cy += parts.length - 1; cx = last.length;
+      }
+      want = colOf(lines[cy], cx); changed();
+    }
+    function newline() {
+      if (ro()) return;
+      snap('nl');
+      const ind = opt.indent ? (/^[ \t]*/.exec(lines[cy].slice(0, cx)) || [''])[0] : '';
+      insertText('\n' + ind);
+    }
+    function backspace() {
+      if (ro()) return;
+      if (mark && !autoMark) { /* 範囲はそのまま */ }
+      snap('del');
+      if (cx > 0) { const j = prevIdx(lines[cy], cx); lines[cy] = lines[cy].slice(0, j) + lines[cy].slice(cx); cx = j; }
+      else if (cy > 0) { cx = lines[cy - 1].length; lines[cy - 1] += lines[cy]; lines.splice(cy, 1); cy--; }
+      else return;
+      want = colOf(lines[cy], cx); changed();
+    }
+    function del() {
+      if (ro()) return;
+      snap('del');
+      if (cx < lines[cy].length) lines[cy] = lines[cy].slice(0, cx) + lines[cy].slice(nextIdx(lines[cy], cx));
+      else if (cy < lines.length - 1) { lines[cy] += lines[cy + 1]; lines.splice(cy + 1, 1); }
+      else return;
+      changed();
+    }
+    // 範囲を取り出す（remove なら消す）。行の配列を返す
+    function takeRegion(remove) {
+      const [a, b] = ordered();
+      let out;
+      if (a.y === b.y) out = [lines[a.y].slice(a.x, b.x)];
+      else out = [lines[a.y].slice(a.x)].concat(lines.slice(a.y + 1, b.y), [lines[b.y].slice(0, b.x)]);
+      if (remove) { lines.splice(a.y, b.y - a.y + 1, lines[a.y].slice(0, a.x) + lines[b.y].slice(b.x)); cy = a.y; cx = a.x; }
+      mark = null; autoMark = false;
+      return out;
+    }
+    function cutLine() {
+      if (ro()) return;
+      snap('cut');
+      if (mark) { cut = takeRegion(true); cut.region = true; changed(); lastCut = false; return; }
+      if (!lastCut) cut = [];
+      if (cy === lines.length - 1 && lines.length > 1 && lines[cy] === '') return;
+      cut.push(lines[cy]);
+      if (lines.length === 1) lines[0] = ''; else { lines.splice(cy, 1); if (cy >= lines.length) cy = lines.length - 1; }
+      cx = 0; changed(); lastCut = true;
+    }
+    function copyLine() {
+      if (mark) { cut = takeRegion(false); cut.region = true; say('コピーしました'); return; }
+      if (!lastCut) cut = [];
+      cut.push(lines[cy]);
+      if (cy < lines.length - 1) { cy++; cx = 0; }
+      lastCut = true; say('行をコピーしました');
+    }
+    function paste() {
+      if (ro()) return;
+      if (!cut.length) { say('貼り付けるものがありません'); return; }
+      snap('paste');
+      if (cut.region) insertText(cut.join('\n'));
+      else { lines.splice(cy, 0, ...cut); cy += cut.length; cx = 0; changed(); }
+    }
+    function doUndo(from, to, what) {
+      if (!from.length) { say(what === 'u' ? '元に戻せる操作はありません' : 'やり直せる操作はありません'); return; }
+      to.push({ lines: lines.slice(), cy: cy, cx: cx, modified: modified });
+      const s = from.pop(); lines = s.lines; cy = s.cy; cx = s.cx; modified = s.modified; mark = null; lastEdit = '';
+      say(what === 'u' ? '元に戻しました' : 'やり直しました');
+    }
+
+    // ---- 移動
+    function vmove(d) { cy = Math.max(0, Math.min(lines.length - 1, cy + d)); cx = idxAt(lines[cy], want); }
+    function hmove(d) {
+      if (d < 0) { if (cx > 0) cx = prevIdx(lines[cy], cx); else if (cy > 0) { cy--; cx = lines[cy].length; } }
+      else { if (cx < lines[cy].length) cx = nextIdx(lines[cy], cx); else if (cy < lines.length - 1) { cy++; cx = 0; } }
+      want = colOf(lines[cy], cx);
+    }
+    const isWord = c => /[\p{L}\p{N}_]/u.test(c);
+    function wordMove(d) {
+      if (d > 0) {
+        if (cx >= lines[cy].length) { hmove(1); return; }
+        const s = lines[cy]; while (cx < s.length && isWord(s[cx])) cx++; while (cx < s.length && !isWord(s[cx])) cx++;
+      } else {
+        if (cx === 0) { hmove(-1); return; }
+        const s = lines[cy]; while (cx > 0 && !isWord(s[cx - 1])) cx--; while (cx > 0 && isWord(s[cx - 1])) cx--;
+      }
+      want = colOf(lines[cy], cx);
+    }
+    function showPos() {
+      const total = lines.reduce((a, l) => a + l.length + 1, 0) - 1;
+      let at = 0; for (let y = 0; y < cy; y++) at += lines[y].length + 1; at += cx;
+      const pct = (a, b) => Math.round(a / Math.max(1, b) * 100) + '%';
+      say('行 ' + (cy + 1) + '/' + lines.length + ' (' + pct(cy + 1, lines.length) + ')、列 ' + (cx + 1) + '/' + (lines[cy].length + 1) + ' (' + pct(cx + 1, lines[cy].length + 1) + ')、文字 ' + (at + 1) + '/' + (total + 1) + ' (' + pct(at + 1, total + 1) + ')');
+    }
+    async function gotoLine() {
+      const v = await prompt('行と列を入力（例 12,3）: ', '');
+      if (v == null || !v.trim()) { say('取り消しました'); return; }
+      const m = /^\s*(-?\d+)?\s*(?:[,\s]\s*(-?\d+))?\s*$/.exec(v);
+      if (!m) { say('数字で入力してください'); return; }
+      let y = m[1] ? +m[1] : cy + 1; if (y < 0) y = lines.length + y + 1;
+      cy = Math.max(0, Math.min(lines.length - 1, y - 1));
+      cx = m[2] ? Math.max(0, Math.min(lines[cy].length, +m[2] - 1)) : 0; want = colOf(lines[cy], cx);
+      top = Math.max(0, cy - Math.floor(textRows() / 2));
+    }
+
+    // ---- 検索・置換
+    function find(str, back, fromNext) {
+      if (!str) return false;
+      const low = str.toLowerCase(), n = lines.length;
+      let y = cy, x = cx;
+      if (!back) {
+        let s = lines[y].toLowerCase().indexOf(low, x + (fromNext ? 1 : 0));
+        if (s >= 0) { cx = s; want = colOf(lines[cy], cx); return true; }
+        for (let k = 1; k <= n; k++) {
+          y = (cy + k) % n; s = lines[y].toLowerCase().indexOf(low);
+          if (s >= 0) { if (y <= cy) say('折り返しました'); cy = y; cx = s; want = colOf(lines[cy], cx); return true; }
+        }
+      } else {
+        let s = x > 0 ? lines[y].toLowerCase().lastIndexOf(low, x - 1) : -1;
+        if (s >= 0) { cx = s; want = colOf(lines[cy], cx); return true; }
+        for (let k = 1; k <= n; k++) {
+          y = (cy - k + n * 2) % n; s = lines[y].toLowerCase().lastIndexOf(low);
+          if (s >= 0) { if (y >= cy) say('折り返しました'); cy = y; cx = s; want = colOf(lines[cy], cx); return true; }
+        }
+      }
+      return false;
+    }
+    async function search(back) {
+      const v = await prompt((back ? '前を検索' : '検索') + (searchStr ? ' [' + searchStr + ']' : '') + ': ', '', searchHist);
+      if (v == null) { say('取り消しました'); return; }
+      if (v) searchStr = v;
+      if (!searchStr) { say('取り消しました'); return; }
+      say('');
+      if (!find(searchStr, back, true)) say('「' + searchStr + '」は見つかりませんでした');
+    }
+    function again(back) {
+      if (!searchStr) { say('まだ検索していません（^F）'); return; }
+      say('');
+      if (!find(searchStr, back, true)) say('「' + searchStr + '」は見つかりませんでした');
+    }
+    async function replace() {
+      if (ro()) return;
+      const a = await prompt('置換する文字' + (searchStr ? ' [' + searchStr + ']' : '') + ': ', '', searchHist);
+      if (a == null) { say('取り消しました'); return; }
+      const from = a || searchStr; if (!from) { say('取り消しました'); return; }
+      searchStr = from;
+      const to = await prompt('置き換える文字: ', '');
+      if (to == null) { say('取り消しました'); return; }
+      snap('replace');
+      const sy = cy, sx = cx, low = from.toLowerCase(); let count = 0, all = false, y = cy, x = cx;
+      while (y < lines.length) {
+        const at = lines[y].toLowerCase().indexOf(low, x);
+        if (at < 0) { y++; x = 0; continue; }
+        cy = y; cx = at; want = colOf(lines[cy], cx);
+        if (!all) {
+          mark = { y: cy, x: cx + from.length }; autoMark = true;
+          const r = await ask('置換しますか？ ', KEYS_REPL, 'yna');
+          mark = null; autoMark = false;
+          if (r == null) break;
+          if (r === 'n') { x = at + Math.max(1, from.length); continue; }
+          if (r === 'a') all = true;
+        }
+        lines[y] = lines[y].slice(0, at) + to + lines[y].slice(at + from.length);
+        x = at + to.length; count++; changed();
+      }
+      if (!count) { cy = sy; cx = sx; } else clampX();
+      say(count ? count + ' か所を置換しました' : '置換しませんでした');
+    }
+
+    // ---- ファイル
+    function save(name) {
+      const text = lines.join(crlf ? '\r\n' : '\n');
+      fs.write(name, text);
+      file = name; modified = false;
+      const n = lines.length - (lines[lines.length - 1] === '' ? 1 : 0);
+      say(n + ' 行を書き込みました');
+      return true;
+    }
+    async function writeOut(quick) {
+      if (opt.view) { say('読むだけのモードでは書き込めません'); return false; }
+      let name = file;
+      if (!quick || !name) {
+        const v = await prompt('書き込むファイル名' + (crlf ? '（DOS 形式）' : '') + ': ', file ? (file.startsWith(sh.cwd + '/') ? file.slice(sh.cwd.length + 1) : file) : '');
+        if (v == null || !v.trim()) { say('取り消しました'); return false; }
+        name = sh.abs(v.trim());
+        if (name !== file && fs.exists(name)) {
+          if (fs.isDir(name)) { say(name + ' はディレクトリです', 'err'); return false; }
+          const r = await ask('ファイルがあります。上書きしますか？ ');
+          if (r !== 'y') { say('取り消しました'); return false; }
+        }
+      }
+      try { return save(name); } catch (e) { say('書き込めません: ' + e.message, 'err'); return false; }
+    }
+    async function readFile() {
+      if (ro()) return;
+      const v = await prompt('挿入するファイル: ', '');
+      if (v == null || !v.trim()) { say('取り消しました'); return; }
+      const p = sh.abs(v.trim());
+      try {
+        const st = fs.stat(p); if (!st) throw new Error('ありません'); if (st.t === 'd') throw new Error('ディレクトリです'); if (st.b) throw new Error('バイナリファイルです');
+        const t = String(fs.read(p)).replace(/\r\n?/g, '\n');
+        snap('read'); insertText(t);
+        say(t.split('\n').length + ' 行を読み込みました');
+      } catch (e) { say(p + ': ' + e.message, 'err'); }
+    }
+    async function execCmd() {
+      if (ro()) return;
+      const v = await prompt('実行するコマンド: ', '', cmdHist);
+      if (v == null || !v.trim()) { say('取り消しました'); return; }
+      try {
+        draw([['実行しています…', 'dim']]);
+        const out = String(await sh.cmd(v)).replace(/\r\n?/g, '\n');
+        snap('exec'); insertText(out);
+        say('コマンドの出力を挿入しました');
+      } catch (e) { say(e.message || String(e), 'err'); }
+    }
+    async function quit() {
+      if (!modified || opt.view) return true;
+      const r = await ask('変更されたバッファを保存しますか？ ');
+      if (r == null) { say('取り消しました'); return false; }
+      if (r === 'n') return true;
+      return writeOut(false);
+    }
+
+    // ---- キーの処理
+    try {
+      for (;;) {
+        draw();
+        const k0 = await scr.key();
+        let k = k0;
+        if (k.key === 'Escape' && !esc) { esc = true; continue; } // Esc の次のキーは Alt つき（端末の nano と同じ）
+        if (esc) { esc = false; if (k.key === 'text' && k.text.length === 1) k = { key: k.text.toLowerCase(), alt: true }; else if (k.key !== 'Escape') k = Object.assign({}, k, { alt: true }); }
+        if (k.key !== 'resize') { msg = msg && k.key === 'click' ? msg : ''; }
+        const wasCut = lastCut; lastCut = false;
+        const K = k.key, C = !!k.ctrl && !k.alt, M = !!k.alt;
+        // Shift+矢印で範囲を選ぶ
+        const moveKey = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown'].includes(K);
+        if (moveKey && k.shift && !mark) { mark = { y: cy, x: cx }; autoMark = true; }
+        else if (moveKey && !k.shift && autoMark) { mark = null; autoMark = false; }
+        if (K !== 'text' && K !== 'Backspace' && K !== 'Delete' && !(C && (K === 'h' || K === 'd'))) lastEdit = '';
+
+        if (K === 'resize') continue;
+        if (K === 'click') {
+          const y = top + k.row - 1, g = gutter();
+          if (k.row >= 1 && k.row <= textRows() && y < lines.length) { cy = y; cx = idxAt(lines[cy], Math.max(0, k.col - g)); want = colOf(lines[cy], cx); if (autoMark) { mark = null; autoMark = false; } }
+          continue;
+        }
+        if (K === 'text') {
+          if (ro()) continue;
+          if (k.paste) snap('paste'); else snap('type');
+          insertText(k.text);
+          continue;
+        }
+        if (K === 'Enter' && !C && !M) { newline(); continue; }
+        if (K === 'Tab' && !C && !M) { if (ro()) continue; snap('type'); insertText(opt.spaces ? ' '.repeat(opt.tab - colOf(lines[cy], cx) % opt.tab) : '\t'); continue; }
+        if ((K === 'Backspace' && !M) || (C && K === 'h')) { backspace(); continue; }
+        if ((K === 'Delete' && !M) || (C && K === 'd')) { del(); continue; }
+        if (K === 'ArrowUp' || (C && K === 'p')) { if (k.alt) continue; vmove(-1); continue; }
+        if (K === 'ArrowDown' || (C && K === 'n')) { if (k.alt) continue; vmove(1); continue; }
+        if (K === 'ArrowLeft' || (C && K === 'b')) { if (K === 'ArrowLeft' && k.ctrl) wordMove(-1); else hmove(-1); continue; }
+        if (K === 'ArrowRight') { if (k.ctrl) wordMove(1); else hmove(1); continue; }
+        if (K === 'Home' || (C && K === 'a')) { if (k.ctrl && K === 'Home') cy = 0; cx = 0; want = 0; continue; }
+        if (K === 'End' || (C && K === 'e')) { if (k.ctrl && K === 'End') cy = lines.length - 1; cx = lines[cy].length; want = colOf(lines[cy], cx); continue; }
+        if (K === 'PageUp' || (C && K === 'y')) { const H = textRows(); top = Math.max(0, top - H + 2); vmove(-(H - 2)); continue; }
+        if (K === 'PageDown' || (C && K === 'v')) { const H = textRows(); top = Math.min(Math.max(0, lines.length - 1), top + H - 2); vmove(H - 2); continue; }
+        if ((M && K === '\\') || (M && K === ',')) { cy = 0; cx = 0; want = 0; continue; }
+        if ((M && K === '/') || (M && K === '.')) { cy = lines.length - 1; cx = lines[cy].length; want = colOf(lines[cy], cx); continue; }
+        if ((C && K === 'g') || K === 'F1') { await help(); continue; }
+        if ((C && K === 'x') || K === 'F2') { if (await quit()) break; continue; }
+        if ((C && K === 'o') || K === 'F3') { await writeOut(false); continue; }
+        if (C && K === 's') { await writeOut(true); continue; }
+        if ((C && K === 'r') || K === 'F5') { await readFile(); continue; }
+        if ((C && K === 't') || K === 'F12') { await execCmd(); continue; }
+        if ((C && (K === 'f' || K === 'w')) || K === 'F6') { await search(false); continue; }
+        if (M && K === 'w') { again(false); continue; }
+        if (M && K === 'q') { again(true); continue; }
+        if ((C && K === '\\') || (M && K === 'r') || K === 'F14') { await replace(); continue; }
+        if ((C && K === 'k') || K === 'F9') { lastCut = wasCut; cutLine(); continue; }
+        if ((C && K === 'u') || K === 'F10') { paste(); continue; }
+        if (M && K === '6') { lastCut = wasCut; copyLine(); continue; }
+        if ((M && K === 'a') || (C && K === ' ')) { if (mark) { mark = null; autoMark = false; say('選択をやめました'); } else { mark = { y: cy, x: cx }; autoMark = false; say('選択を始めました'); } continue; }
+        if ((M && K === 'u') || (C && K === 'z')) { doUndo(undo, redo, 'u'); continue; }
+        if (M && K === 'e') { doUndo(redo, undo, 'r'); continue; }
+        if ((C && K === 'c') || K === 'F11') { showPos(); continue; }
+        if ((C && (K === '_' || K === '/' || K === '-')) || (M && K === 'g') || K === 'F13') { await gotoLine(); continue; }
+        if (M && (K === 'n' || K === '#' || K === '3')) { showLines = !showLines; say('行番号を' + (showLines ? '表示します' : '隠しました')); continue; }
+        if (M && K === 'i') { opt.indent = !opt.indent; say('自動インデント: ' + (opt.indent ? 'オン' : 'オフ')); continue; }
+        if (C && K === 'l') { size = scr.size(); top = Math.max(0, cy - Math.floor(textRows() / 2)); continue; }
+        if (K === 'Escape') continue;
+        if (C || M) say('このキーには何も割り当てられていません（^G でヘルプ）');
+      }
+    } finally {
+      scr.close();
+    }
+    return undefined;
+  }
+
+  OS.registerCommand({
+    name: 'nano', usage: 'nano [-l] [-v] [-i] [-E] [-T 幅] [+行[,列]] [ファイル]',
+    desc: '端末の中で使うテキストエディタ（GNU nano と同じキー操作。^O 保存、^X 終了、^G ヘルプ）',
+    run: nano
+  });
+  OS.nano = { version: VERSION };
 })();
 </script>
 <script type="text/x-htmlos" data-path="/sys/raid.js">
@@ -10913,7 +11694,8 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 </script>
 <script type="text/x-htmlos" data-path="/sys/shells.js">
 /* デスクトップ環境（セッション）
-   htui  … HTUi       上にパネル、左にデスクトップアイコン（標準）。タッチでは下にナビが出る
+   htui  … HTUi 4     薄いパネルと浮かぶ Dock、コントロールセンター・通知センター・ウィジェット（標準。7.1 から）。タッチでは下にナビが出る
+   htui3 … HTUi 3     上にパネル、左に Dock（6.0〜7.0 の標準）
    win   … hWin       Windows 風。マウスではタスクバーとスタートメニュー、タッチでは Windows 8.1 風
    gnome … hShell     GNOME 風。トップバー、アクティビティ画面とドック、カレンダーと通知センター
    wm    … hwc        Labwc 風。パネルなしのウィンドウマネージャだけ。右クリックでメニュー
@@ -11006,16 +11788,343 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     return close;
   }
 
-  // ======================================================== HTUi 3（Ragdoll。標準。htmlOS 6 から）
+  // ======================================================== HTUi 4（Bengal。標準。htmlOS 7.1 から）
+  //   上に薄いパネル: 左にメニュー（htmlOS のロゴ）と使っているアプリ、真ん中に日時（押すと右から通知センター）、
+  //   右に検索（Alt+Space）・仮想デスク・コントロールセンター・ユーザー。
+  //   画面の下の真ん中に浮かぶ Dock（htui.prefs.dockHide: smart＝ウィンドウと重なったら隠す（既定）/ always＝いつも隠す / off＝隠さない）。
+  //   デスクトップにウィジェット（時計・カレンダー・システム情報・付箋。htui.prefs.widgets に位置と中身を覚える）
+  const WEEK4 = '日月火水木金土';
+  const HIDE4 = { smart: 'ウィンドウと重なったら隠す', always: 'いつも隠す', off: '隠さない' };
+  const WIDGETS = {
+    clock: { name: '時計', icon: 'clock', w: 230 },
+    calendar: { name: 'カレンダー', icon: 'clock', w: 230 },
+    sysinfo: { name: 'システム情報', icon: 'chart', w: 230 },
+    note: { name: '付箋', icon: 'edit', w: 210 }
+  };
+  const fmtSize4 = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : n < 1073741824 ? (n / 1048576).toFixed(1) + ' MB' : (n / 1073741824).toFixed(2) + ' GB';
+  function monthGrid(y, m, now) {
+    const first = new Date(y, m, 1).getDay(), days = new Date(y, m + 1, 0).getDate(), g = h('div', { class: 'ht4-days' });
+    for (let i = 0; i < 7; i++) g.append(h('span', { class: 'ht4-wd' + (i === 0 ? ' sun' : i === 6 ? ' sat' : '') }, WEEK4[i]));
+    const cells = Math.ceil((first + days) / 7) * 7;
+    for (let i = 0; i < cells; i++) {
+      const n = i - first + 1, out = n < 1 || n > days;
+      const today = !out && y === now.getFullYear() && m === now.getMonth() && n === now.getDate();
+      g.append(h('span', { class: 'ht4-day' + (out ? ' out' : '') + (today ? ' today' : '') + (i % 7 === 0 ? ' sun' : i % 7 === 6 ? ' sat' : '') }, out ? '' : String(n)));
+    }
+    return g;
+  }
+  OS.registerSession({
+    id: 'htui', name: 'HTUi 4', version: '4', codename: 'Bengal', full: 'HTUi 4 (Bengal)', touchNav: true,
+    pins: ['hfile', 'terminal', 'hbrowser', 'hedit', 'settings'], pinWhere: 'Dock',
+    desc: '上に薄いパネル、画面の下の真ん中に浮かぶ Dock がある標準のデスクトップです。コントロールセンター、右から出る通知センター、デスクトップのウィジェット（時計・カレンダー・システム情報・付箋）、Alt+Space の検索が使えます。',
+    get ht3() { return OS.sessions.htui3; }, // すべてのアプリ（Launchpad 風）・アプリのメニュー・ユーザーの切り替えは HTUi 3 と同じものを使う
+    build(k) {
+      const self = this;
+      htui.tasks = h('div', { class: 'p-tasks', hidden: '' });
+      htui.titleEl = h('span', { hidden: '' });
+      const btn = (cls, title, icon, fn) => h('button', { class: 'p-btn ' + cls, type: 'button', title: title, 'aria-label': title, onclick: fn }, icon ? OS.icon(icon, 16) : null);
+      this.logo = h('button', { class: 'p-btn ht4-logo', type: 'button', title: 'メニュー', 'aria-haspopup': 'menu', onclick: e => k.menu(e.currentTarget, self.logoItems()) }, h('span', { class: 'os-logo', 'aria-hidden': 'true' }, '<', h('b', null, '/'), '>'));
+      this.appBtn = h('button', { class: 'p-btn ht4-app', type: 'button', 'aria-haspopup': 'menu', onclick: e => { const w = htui.active(); k.menu(e.currentTarget, w && self.ht3 ? self.ht3.appItems() : self.logoItems()); } });
+      this.dot = h('span', { class: 'ht4-dot', 'aria-hidden': 'true' });
+      this.clockBtn = h('button', { class: 'p-btn ht4-clock', type: 'button', title: '通知センター', 'aria-label': '通知センター', onclick: () => self.center() },
+        k.clock(h('span'), d => (d.getMonth() + 1) + '月' + d.getDate() + '日(' + WEEK4[d.getDay()] + ')  ' + k.pad(d.getHours()) + ':' + k.pad(d.getMinutes())), this.dot);
+      this.wsBtn = btn('ht4-ws', '仮想デスク（Ctrl+Super+←/→）', null, () => htui.wsView());
+      this.ccBtn = h('button', { class: 'p-btn ht4-ccb', type: 'button', title: 'コントロールセンター', 'aria-label': 'コントロールセンター', onclick: () => self.control() }, OS.icon('music', 15), OS.icon('battery', 15));
+      const user = htui.userBtn = h('button', { class: 'p-btn ht4-user', type: 'button', title: 'ユーザー（押すと切り替え）', 'aria-haspopup': 'menu', onclick: e => k.menu(e.currentTarget, self.ht3 ? self.ht3.userItems() : k.powerItems(), true) });
+      const panel = h('div', { class: 'panel ht4-panel' },
+        h('div', { class: 'ht4-side' }, this.logo, this.appBtn),
+        this.clockBtn,
+        h('div', { class: 'ht4-side ht4-right' }, btn('ht4-search', '検索（Alt+Space）', 'search', () => htui.search()), this.wsBtn, this.ccBtn, k.modeButton('p-btn'), user));
+      this.dock = h('div', { class: 'ht4-dock', role: 'toolbar', 'aria-label': 'Dock', 'aria-orientation': 'horizontal' });
+      this.edge = h('div', { class: 'ht4-edge', 'aria-hidden': 'true' });
+      this.widgetsEl = h('div', { class: 'ht4-widgets' });
+      const desk = k.desk(true);
+      desk.append(this.widgetsEl);
+      this.main = h('div', { class: 'ht4-main' }, desk, this.edge, this.dock);
+      htui.el.append(panel, this.main);
+      // Dock を隠す・出す
+      this.peek = false;
+      this.edge.addEventListener('pointerenter', () => { this.peek = true; this.syncHide(); });
+      this.dock.addEventListener('pointerenter', () => { this.peek = true; this.syncHide(); });
+      this.dock.addEventListener('pointerleave', () => { this.peek = false; clearTimeout(this._pt); this._pt = setTimeout(() => this.syncHide(), 500); });
+      this._sig = null; this.syncApp(); this.onWs(); this.syncDot(); this.drawWidgets();
+      this._timer = setInterval(() => { this.syncHide(); this.tickWidgets(); }, 1000);
+    },
+    // ---- パネル
+    logoItems() {
+      const k = htui.kit, self = this;
+      return [{ head: OS.name + ' ' + OS.version }, { label: 'すべてのアプリ', icon: 'grid', act: () => self.launchpad() }, { label: '検索', icon: 'search', hint: 'Alt+Space', act: () => htui.search() },
+        { label: '仮想デスク', icon: 'desks', act: () => htui.wsView() }, { label: 'コントロールセンター', icon: 'music', act: () => self.control() }, { sep: true },
+        { label: '設定', icon: 'gear', act: () => k.run('settings') }, { label: 'htmlOS について', icon: 'info', act: () => k.run('settings', 'system') }, { sep: true }].concat(k.powerItems());
+    },
+    syncApp() {
+      const b = this.appBtn; if (!b) return;
+      const w = htui.active(), a = w ? (OS.apps[w.app] || { name: w.title, icon: 'file' }) : null;
+      b.textContent = '';
+      b.append(h('b', null, a ? a.name : 'デスクトップ'));
+      if (a && w.title !== a.name) b.append(h('span', { class: 'ht4-wtitle' }, w.title));
+      b.title = a ? a.name + ' のメニュー' : 'メニュー'; b.setAttribute('aria-label', b.title);
+    },
+    onWs() {
+      const b = this.wsBtn; if (!b) return;
+      const ws = htui.ws;
+      b.textContent = '';
+      b.append(h('span', { class: 'ht3-wsdots', 'aria-hidden': 'true' }, Array.from({ length: ws.count }, (_, i) => h('i', { class: i === ws.cur ? 'on' : '' }))));
+      b.setAttribute('aria-label', '仮想デスク（' + htui.wsName(ws.cur) + ' / ' + ws.count + ' 個）');
+      this._sig = null; this.onApps(); this.syncApp();
+    },
+    launchpad() { if (this.ht3) this.ht3.launchpad(); },
+    onSuper() { this.launchpad(); },
+    // ---- コントロールセンター
+    control() {
+      const old = htui.el.querySelector('.ht4-cc:not(.leaving)'); if (old) { old._close(); return; }
+      htui.closeMenus();
+      const k = htui.kit, self = this, p = () => htui.prefs;
+      const tile = (icon, label, on, act, sub) => {
+        const t = h('button', { class: 'ht4-tile' + (on() ? ' on' : ''), type: 'button', 'aria-pressed': on() ? 'true' : 'false' },
+          h('span', { class: 'ht4-tico' }, OS.icon(icon, 17)), h('span', { class: 'ht4-tl' }, h('b', null, label), h('small', null, sub ? sub() : on() ? 'オン' : 'オフ')));
+        t.addEventListener('click', () => { act(); setTimeout(() => { const v = on(); t.classList.toggle('on', v); t.setAttribute('aria-pressed', v ? 'true' : 'false'); t.querySelector('small').textContent = sub ? sub() : v ? 'オン' : 'オフ'; }, 30); });
+        return t;
+      };
+      const S = OS.sound, vol0 = S && S.prefs ? Math.round(S.prefs().vol * 100) : 70;
+      const vol = h('input', { type: 'range', min: '0', max: '100', step: '5', value: String(vol0), 'aria-label': '音量', id: 'ht4-vol' });
+      vol.addEventListener('change', () => { htui.setPrefs({ sound: Object.assign({}, p().sound || {}, { vol: Number(vol.value) / 100 }) }); if (S) S.play('confirm', true); });
+      const bright = h('input', { type: 'range', min: '40', max: '100', value: String(Math.round((p().brightness || 1) * 100)), 'aria-label': '画面の明るさ', id: 'ht4-bright' });
+      bright.addEventListener('input', () => { const v = Number(bright.value) / 100; OS.root.style.filter = v < 1 ? 'brightness(' + v + ')' : ''; });
+      bright.addEventListener('change', () => htui.setPrefs({ brightness: Number(bright.value) / 100 }));
+      const u = OS.users.get(htui.user) || { name: htui.user };
+      const pop = h('div', { class: 'ht4-cc', role: 'dialog', 'aria-label': 'コントロールセンター' },
+        h('div', { class: 'ht4-tiles' },
+          tile('bell', 'おやすみモード', () => !!p().dnd, () => htui.setPrefs({ dnd: !p().dnd })),
+          tile('battery', '省電力モード', () => !!(p().power || {}).saver, () => htui.setPrefs({ power: Object.assign({}, p().power || {}, { saver: !(p().power || {}).saver }) })),
+          tile('music', 'BGM', () => k.bgmOn(), () => k.bgmToggle(), () => k.bgmLabel()),
+          tile('layers', '透明効果', () => p().glass !== false, () => htui.setPrefs({ glass: p().glass === false })),
+          tile('play', 'アニメーション', () => p().anim !== false, () => htui.setPrefs({ anim: p().anim === false })),
+          tile('grid', 'スナップアシスト', () => p().snapAssist !== false, () => htui.setPrefs({ snapAssist: p().snapAssist === false }))),
+        h('div', { class: 'ht4-slider' }, h('span', { class: 'ht4-sl' }, OS.icon('audio', 16), '音量'), vol),
+        h('div', { class: 'ht4-slider' }, h('span', { class: 'ht4-sl' }, OS.icon('monitor', 16), '明るさ'), bright),
+        h('div', { class: 'ht4-ccfoot' }, htui.avatar(u, 28), h('b', null, htui.user),
+          h('button', { class: 'ht4-round', type: 'button', title: '設定', 'aria-label': '設定', onclick: () => { close(); k.run('settings'); } }, OS.icon('gear', 16)),
+          h('button', { class: 'ht4-round', type: 'button', title: 'ロック', 'aria-label': 'ロック', onclick: () => { close(); htui.lock(); } }, OS.icon('lock', 16)),
+          h('button', { class: 'ht4-round', type: 'button', title: '電源', 'aria-label': '電源', onclick: e => k.menu(e.currentTarget, k.powerItems(), true) }, OS.icon('power', 16))));
+      htui.syncRanges(pop);
+      const close = popup(pop, this.ccBtn);
+    },
+    // ---- 通知センター（右から出る）
+    syncDot() { if (this.dot) this.dot.classList.toggle('on', htui.notices.some(n => n.unread)); },
+    onNotify(n) {
+      const open = htui.el.querySelector('.ht4-nc:not(.leaving)');
+      if (!n.silent && !htui.prefs.dnd && !open) OS.ui.toast(n.title + (n.body ? '：' + n.body : ''));
+      this.syncDot();
+      if (open && open._fill) open._fill();
+    },
+    center() {
+      const old = htui.el.querySelector('.ht4-nc:not(.leaving)'); if (old) { old._close(); return; }
+      htui.closeMenus();
+      const self = this, pad = n => String(n).padStart(2, '0');
+      const now = new Date();
+      let month = new Date(now.getFullYear(), now.getMonth(), 1);
+      const cal = h('div', { class: 'ht4-cal' }), list = h('div', { class: 'ht4-nlist' });
+      const ago = t => { const m = Math.round((Date.now() - t) / 60000); if (m < 1) return '今'; if (m < 60) return m + '分前'; const d = new Date(t); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
+      function fillCal() {
+        cal.textContent = '';
+        const y = month.getFullYear(), m = month.getMonth();
+        cal.append(h('div', { class: 'ht4-mhead' },
+          h('b', null, y + '年' + (m + 1) + '月'),
+          h('button', { class: 'ht4-mini', type: 'button', 'aria-label': '前の月', onclick: () => { month = new Date(y, m - 1, 1); fillCal(); } }, OS.icon('back', 14)),
+          h('button', { class: 'ht4-mini', type: 'button', onclick: () => { month = new Date(now.getFullYear(), now.getMonth(), 1); fillCal(); } }, '今日'),
+          h('button', { class: 'ht4-mini', type: 'button', 'aria-label': '次の月', onclick: () => { month = new Date(y, m + 1, 1); fillCal(); } }, OS.icon('fwd', 14))), monthGrid(y, m, now));
+      }
+      // 通知はアプリごとにまとめる
+      function fill() {
+        list.textContent = '';
+        const groups = {};
+        htui.notices.forEach(n => { const a = n.app || 'htmlOS'; (groups[a] = groups[a] || []).push(n); });
+        const names = Object.keys(groups);
+        if (!names.length) list.append(h('div', { class: 'ht4-nempty' }, OS.icon('bell', 30), h('span', null, '通知はありません')));
+        names.forEach(a => {
+          const g = groups[a];
+          const box = h('div', { class: 'ht4-ngroup' }, h('div', { class: 'ht4-nghead' }, h('b', null, a), h('small', null, g.length + ' 件'),
+            h('button', { class: 'ht4-mini', type: 'button', title: a + ' の通知をすべて消す', 'aria-label': a + ' の通知をすべて消す', onclick: () => { htui.notices = htui.notices.filter(x => (x.app || 'htmlOS') !== a); fill(); self.syncDot(); } }, OS.icon('x', 12))));
+          g.forEach(n => box.append(h('div', { class: 'ht4-note' },
+            h('span', { class: 'ht4-nico' }, OS.icon(n.icon || 'bell', 15)),
+            h('span', { class: 'ht4-ntext' }, h('b', null, n.title), n.body ? h('span', null, n.body) : null, h('small', null, ago(n.time))),
+            h('button', { class: 'ht4-mini', type: 'button', title: '消す', 'aria-label': n.title + ' を消す', onclick: () => { htui.notices = htui.notices.filter(x => x !== n); fill(); self.syncDot(); } }, OS.icon('x', 12)))));
+          list.append(box);
+        });
+        htui.notices.forEach(n => { n.unread = false; }); self.syncDot();
+      }
+      const big = h('div', { class: 'ht4-big' });
+      const tickBig = () => { const d = new Date(); big.textContent = ''; big.append(h('b', null, pad(d.getHours()) + ':' + pad(d.getMinutes())), h('span', null, d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + WEEK4[d.getDay()] + '曜日')); };
+      tickBig();
+      const iv = setInterval(tickBig, 5000);
+      const pop = h('div', { class: 'ht4-nc', role: 'dialog', 'aria-label': '通知センター' },
+        big, cal,
+        h('div', { class: 'ht4-nhead' }, h('b', null, '通知'), h('button', { class: 'ht4-mini', type: 'button', onclick: () => { htui.notices = []; fill(); self.syncDot(); } }, 'すべて消す')),
+        list,
+        h('label', { class: 'ht4-dnd' }, h('input', { type: 'checkbox', class: 'switch', id: 'ht4-dnd', checked: !!htui.prefs.dnd, onchange: e => htui.setPrefs({ dnd: e.target.checked }) }), ' おやすみモード（通知を出さない）'));
+      pop._fill = fill;
+      fillCal(); fill();
+      popup(pop, this.clockBtn, () => clearInterval(iv));
+    },
+    // ---- Dock
+    onStart() { this.onApps(); },
+    onStop() { clearInterval(this._timer); clearTimeout(this._pt); this.dock = null; this.main = null; this.edge = null; this.widgetsEl = null; this._sig = null; this.appBtn = null; this.wsBtn = null; this.clockBtn = null; this.ccBtn = null; this.dot = null; this.logo = null; },
+    onActive() { this.onApps(); this.syncApp(); },
+    onFocus() { this.onApps(); this.syncApp(); },
+    onMode() { this._sig = null; this.onApps(); },
+    place() { this._sig = null; this.onApps(); this.syncHide(); },
+    onApps() {
+      if (!this.dock) return;
+      const k = htui.kit, act = htui.active(), pins = htui.pins.list();
+      const sig = [pins.join(), Object.keys(OS.apps).join(), htui.wins.filter(w => !w.parent).map(w => w.app + (w.el.classList.contains('hidden') ? '-' : '+')).join(), act ? act.app : ''].join('#');
+      if (sig !== this._sig) {
+        this._sig = sig;
+        const running = [...new Set(htui.wins.filter(w => !w.parent).map(w => w.app))].filter(id => OS.apps[id] && !pins.includes(id));
+        this.dock.textContent = '';
+        const item = id => {
+          const a = OS.apps[id], n = htui.wins.filter(w => w.app === id && !w.parent).length;
+          const b = h('button', { class: 'ht4-dk' + (n ? ' run' : '') + (act && act.app === id ? ' active' : ''), type: 'button', 'aria-label': a.name, 'data-app': id },
+            k.appIcon(a, 24), h('span', { class: 'ht4-tip', 'aria-hidden': 'true' }, a.name), n ? h('i', { class: 'ht4-run', 'aria-hidden': 'true' }) : null);
+          b.addEventListener('click', () => htui.openPinned(id, b, 'bottom'));
+          return b;
+        };
+        const all = h('button', { class: 'ht4-dk ht4-all', type: 'button', 'aria-label': 'すべてのアプリ' }, h('span', { class: 'app-ico' }, OS.icon('grid', 22)), h('span', { class: 'ht4-tip', 'aria-hidden': 'true' }, 'すべてのアプリ'));
+        all.addEventListener('click', () => this.launchpad());
+        this.dock.append(all, h('span', { class: 'ht4-sep' }));
+        pins.forEach(id => this.dock.append(item(id)));
+        if (running.length) { this.dock.append(h('span', { class: 'ht4-sep' })); running.forEach(id => this.dock.append(item(id))); }
+        const trash = h('button', { class: 'ht4-dk', type: 'button', 'aria-label': 'ゴミ箱' }, h('span', { class: 'app-ico ht4-trash' }, OS.icon('trash', 22)), h('span', { class: 'ht4-tip', 'aria-hidden': 'true' }, 'ゴミ箱'));
+        trash.addEventListener('click', () => k.run('hfile', OS.users.home(htui.user) + '/.Trash'));
+        this.dock.append(h('span', { class: 'ht4-sep' }), trash);
+      }
+      this.syncHide();
+    },
+    // 重なっているウィンドウがあれば Dock を隠す
+    syncHide() {
+      if (!this.main || !this.dock) return;
+      const mode = HIDE4[htui.prefs.dockHide] ? htui.prefs.dockHide : 'smart';
+      let hide = false;
+      if (mode === 'always') hide = true;
+      else if (mode === 'smart') {
+        const d = this.dock.getBoundingClientRect(), r = { l: d.left, r: d.right, t: d.top - (this.main.classList.contains('dock-hidden') ? 0 : 0), b: d.bottom };
+        const dh = this.main.classList.contains('dock-hidden') ? this.dock.offsetHeight + 14 : 0; // 隠れているときは、出たときの位置で比べる
+        hide = htui.wins.some(w => {
+          if (w.closed || w.el.classList.contains('hidden') || w.el.classList.contains('minimizing') || w.el.classList.contains('ws-off')) return false;
+          const e = w.el.getBoundingClientRect();
+          return e.left < r.r && e.right > r.l && e.bottom > r.t - dh && e.top < r.b - dh;
+        });
+      }
+      if (this.peek || htui.el.querySelector('.ht3-lp:not(.leaving)')) hide = false;
+      this.main.classList.toggle('dock-hidden', hide);
+    },
+    posItems() {
+      const cur = HIDE4[htui.prefs.dockHide] ? htui.prefs.dockHide : 'smart';
+      return [{ head: 'Dock を自動で隠す' }].concat(Object.keys(HIDE4).map(m => ({ label: HIDE4[m] + (m === 'smart' ? '（既定）' : ''), hint: cur === m ? '選択中' : null, act: () => htui.setPrefs({ dockHide: m }) })));
+    },
+    // ---- ウィジェット
+    widgetList() {
+      const l = htui.prefs.widgets;
+      if (Array.isArray(l)) return l;
+      return [{ id: 'w1', type: 'clock' }, { id: 'w2', type: 'calendar' }, { id: 'w3', type: 'sysinfo' }]; // はじめは右上に 3 つ
+    },
+    saveWidgets(l) { htui.setPrefs({ widgets: l }); },
+    deskItems() {
+      const self = this, l = this.widgetList();
+      return [{ head: 'ウィジェットを追加' }].concat(Object.keys(WIDGETS).map(t => ({ label: WIDGETS[t].name, icon: WIDGETS[t].icon, act: () => {
+        const at = htui._ctxAt || [200, 200], r = self.widgetsEl.getBoundingClientRect();
+        self.saveWidgets(l.concat({ id: 'w' + Date.now().toString(36), type: t, x: Math.max(0, Math.round(at[0] - r.left)), y: Math.max(0, Math.round(at[1] - r.top)) }));
+        self.drawWidgets();
+      } })), l.length ? [{ label: 'ウィジェットをすべて片付ける', icon: 'x', act: () => { self.saveWidgets([]); self.drawWidgets(); } }] : []);
+    },
+    drawWidgets() {
+      const L = this.widgetsEl; if (!L) return;
+      L.textContent = '';
+      const self = this, list = this.widgetList(), dw = (htui.desk && htui.desk.clientWidth) || 1000;
+      let ny = 14;
+      list.forEach(wd => {
+        const def = WIDGETS[wd.type]; if (!def) return;
+        const body = h('div', { class: 'bw-body' });
+        const el = h('div', { class: 'bw bw-' + wd.type, 'data-wid': wd.id, style: 'width:' + def.w + 'px' }, body);
+        let x = wd.x, y = wd.y;
+        if (x == null || y == null) { x = dw - def.w - 18; y = ny; } // 置き場所が決まっていなければ右に縦に並べる
+        el.style.left = x + 'px'; el.style.top = y + 'px';
+        el._wd = wd; el._body = body;
+        this.fillWidget(el);
+        L.append(el);
+        if (wd.x == null || wd.y == null) ny += el.offsetHeight + 12;
+        // ドラッグで動かす（付箋の文字の上は除く）
+        el.addEventListener('pointerdown', e => {
+          if (e.button > 0 || e.target.closest('textarea,button,input')) return;
+          e.preventDefault();
+          const sx = e.clientX - el.offsetLeft, sy = e.clientY - el.offsetTop;
+          el.setPointerCapture(e.pointerId); el.classList.add('drag');
+          const mv = ev => { el.style.left = Math.max(0, Math.min(L.clientWidth - 40, ev.clientX - sx)) + 'px'; el.style.top = Math.max(0, Math.min(L.clientHeight - 30, ev.clientY - sy)) + 'px'; };
+          const up = () => {
+            el.removeEventListener('pointermove', mv); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', up); el.classList.remove('drag');
+            const l = self.widgetList().map(o => o.id === wd.id ? Object.assign({}, o, { x: el.offsetLeft, y: el.offsetTop }) : o);
+            // まだ保存していない（はじめの並び）ときは、ほかのウィジェットの今の位置も一緒に覚える
+            L.querySelectorAll('.bw').forEach(b => { const o = l.find(q => q.id === b.dataset.wid); if (o && (o.x == null || o.y == null)) { o.x = b.offsetLeft; o.y = b.offsetTop; } });
+            self.saveWidgets(l);
+          };
+          el.addEventListener('pointermove', mv); el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+        });
+      });
+    },
+    fillWidget(el) {
+      const wd = el._wd, b = el._body, d = new Date(), pad = n => String(n).padStart(2, '0');
+      if (wd.type === 'clock') {
+        b.textContent = '';
+        b.append(h('div', { class: 'bw-time' }, pad(d.getHours()) + ':' + pad(d.getMinutes()), h('small', null, pad(d.getSeconds()))),
+          h('div', { class: 'bw-date' }, (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + WEEK4[d.getDay()] + '曜日'));
+      } else if (wd.type === 'calendar') {
+        const key = d.toDateString(); if (el._key === key) return; el._key = key;
+        b.textContent = '';
+        b.append(h('div', { class: 'bw-title' }, d.getFullYear() + '年' + (d.getMonth() + 1) + '月'), monthGrid(d.getFullYear(), d.getMonth(), d));
+      } else if (wd.type === 'sysinfo') {
+        if (el._t && Date.now() - el._t < 4000) return; el._t = Date.now();
+        let u = null; try { u = htui.fs ? OS.fs.usage() : null; } catch (e) { /* 無視 */ }
+        const pct = u && u.total ? Math.min(100, Math.round(u.used / u.total * 100)) : null;
+        const up = Math.floor((Date.now() - (OS.bootTime || Date.now())) / 1000);
+        const rows = [['ディスク', u ? fmtSize4(u.used) + (u.total ? ' / ' + fmtSize4(u.total) : '') : '—'], ['プロセス', OS.proc ? OS.proc.list().length + ' 個' : '—'],
+          ['ウィンドウ', htui.wins.length + ' 個'], ['起動から', (up >= 3600 ? Math.floor(up / 3600) + ' 時間 ' : '') + Math.floor(up % 3600 / 60) + ' 分']];
+        b.textContent = '';
+        b.append(h('div', { class: 'bw-title' }, OS.name + ' ' + OS.version),
+          pct != null ? h('div', { class: 'bw-meter', role: 'meter', 'aria-valuenow': String(pct), 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-label': 'ディスクの使用率' }, h('i', { style: 'width:' + pct + '%' })) : null,
+          h('dl', { class: 'bw-dl' }, rows.map(r => [h('dt', null, r[0]), h('dd', null, r[1])])));
+      } else if (wd.type === 'note') {
+        if (b.firstChild) return;
+        const ta = h('textarea', { class: 'bw-ta', placeholder: 'メモを書けます', 'aria-label': '付箋', spellcheck: 'false' });
+        ta.value = wd.text || '';
+        let t = 0;
+        ta.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => { this.saveWidgets(this.widgetList().map(o => o.id === wd.id ? Object.assign({}, o, { text: ta.value }) : o)); }, 600); });
+        b.append(ta);
+      }
+    },
+    tickWidgets() { if (this.widgetsEl) this.widgetsEl.querySelectorAll('.bw').forEach(el => this.fillWidget(el)); },
+    onContext(e) {
+      const wEl = e.target.closest('.bw[data-wid]');
+      if (wEl && !e.target.closest('textarea')) {
+        const self = this, def = WIDGETS[wEl._wd.type];
+        return [{ head: def.name }, { label: 'このウィジェットを片付ける', icon: 'x', act: () => { self.saveWidgets(self.widgetList().filter(o => o.id !== wEl.dataset.wid)); self.drawWidgets(); } }];
+      }
+      const b = e.target.closest('.ht4-dk[data-app]');
+      if (b) return appItems(b.dataset.app, id => htui.openPinned(id)).concat({ sep: true }, this.posItems());
+      if (e.target.closest('.ht4-dock')) return this.posItems();
+      return null;
+    }
+  });
+
+  // ======================================================== HTUi 3（Ragdoll。htmlOS 6 の標準。7.1 からはセッション id が htui3）
   //   上にパネル: 左に使っているアプリ（アイコンと名前。押すと最小化・最大化・閉じる・終了・アプリの情報）、
   //   右に仮想デスク・クイック設定・画面モード・日時（押すとカレンダーと通知）・ユーザー（押すと別のユーザーに切り替え）。
   //   左（既定）・下・右に Dock: 固定したアプリと起動中のアプリ、いちばん端に「すべてのアプリ」（Launchpad 風のアイコン一覧）
   const DOCK_POS = { left: '左', bottom: '下', right: '右' };
   const WEEK3 = '日月火水木金土';
   OS.registerSession({
-    id: 'htui', name: 'HTUi 3', version: '3', codename: 'Ragdoll', full: 'HTUi 3 (Ragdoll)', touchNav: true,
+    id: 'htui3', name: 'HTUi 3', version: '3', codename: 'Ragdoll', full: 'HTUi 3 (Ragdoll)', touchNav: true,
     pins: ['hfile', 'terminal', 'hbrowser', 'hedit', 'settings'], pinWhere: 'Dock',
-    desc: '上にパネル（左に使っているアプリ、右に時計やユーザー）、左（下・右にも置ける）に Dock がある標準のデスクトップです。すべてのアプリは Launchpad 風のアイコン一覧、日時を押すとカレンダーと通知、仮想デスクも使えます。',
+    desc: '上にパネル（左に使っているアプリ、右に時計やユーザー）、左（下・右にも置ける）に Dock がある、htmlOS 6〜7.0 の標準のデスクトップです。すべてのアプリは Launchpad 風のアイコン一覧、日時を押すとカレンダーと通知、仮想デスクも使えます。',
     build(k) {
       const self = this;
       htui.tasks = h('div', { class: 'p-tasks', hidden: '' }); // ウィンドウのボタンは Dock にまとめる
@@ -13053,7 +14162,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 .touch .win-head{height:46px;padding:0 6px 0 12px;font-size:15px}
 .touch .win-title{font-size:15px}
 .touch .win-btn{width:36px;height:36px}
-.touch .de-htui .win-btns,.touch .rz{display:none} /* HTUi では閉じるが下のナビにあるので、右上のボタンは出さない */
+.touch .de-htui .win-btns,.touch .de-htui3 .win-btns,.touch .rz{display:none} /* HTUi では閉じるが下のナビにあるので、右上のボタンは出さない */
 .touch .win.free .rz{display:block}
 .touch .rz-e,.touch .rz-w{width:12px}.touch .rz-n,.touch .rz-s{height:12px}.touch .rz-ne,.touch .rz-nw,.touch .rz-se,.touch .rz-sw{width:22px;height:22px}
 .touch .btn{min-height:44px;padding:9px 16px}
@@ -13105,7 +14214,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 
 /* スマートフォン: さらに1列の配置に */
 .phone .panel .p-uname,.phone .p-lbl{display:none}
-.phone .de-htui .win-head{display:none} /* HTUi ではタイトルは上のパネルに、閉じるは下のナビにあるので省く */
+.phone .de-htui .win-head,.phone .de-htui3 .win-head{display:none} /* HTUi ではタイトルは上のパネルに、閉じるは下のナビにあるので省く */
 .phone .desk-icons{padding:20px 6px;gap:16px 2px}
 .phone .desk-icon{width:84px;font-size:12.5px}
 .phone .app-ico{width:58px;height:58px;border-radius:15px}
@@ -14548,6 +15657,165 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 .ad-snap{position:absolute;inset:0;pointer-events:none;background:var(--surface)}
 .ad-snap>.win{border-radius:0;box-shadow:none}
 .ad-ph{background:#222;width:100%;height:100%}
+/* ---- 端末の TUI: 折り返さない表示（SDK 4。nano など） */
+.tty-tuibox.tty-fixed{overflow:hidden;padding:4px 6px}
+.tty-fixed .tty-tui{white-space:pre;word-break:normal;overflow:hidden}
+.t-w{display:inline-block;width:2ch;text-align:center;overflow:hidden;vertical-align:top}
+.t-inv{background:var(--tty-ink);color:var(--tty-bg)}
+.t-key{background:var(--tty-ink);color:var(--tty-bg);font-weight:700}
+.t-cur{background:var(--tty-ink);color:var(--tty-bg);animation:t-blink 1.1s steps(1) infinite}
+.t-mark{background:color-mix(in srgb,var(--accent) 55%,transparent);color:#fff}
+.t-num{color:#6b7280}
+.t-msg{background:var(--tty-ink);color:var(--tty-bg)}
+@keyframes t-blink{50%{background:transparent;color:inherit}}
+/* ---- HTUi SDK 4（Mars）: スナップレイアウト */
+.snap-layouts{position:absolute;z-index:260000;display:grid;grid-template-columns:repeat(3,auto);gap:10px;padding:12px;border-radius:12px;background:var(--surface);border:1px solid var(--line);box-shadow:0 12px 32px rgba(0,0,0,.32);animation:sl-in .14s ease-out}
+.sl-box{position:relative;width:78px;height:50px;border-radius:7px;background:var(--surface-2);border:1px solid var(--line)}
+.sl-cell{position:absolute;box-sizing:border-box;margin:0;padding:0;border:2px solid var(--surface-2);border-radius:6px;background:color-mix(in srgb,var(--ink) 16%,var(--surface));cursor:pointer;transition:background .1s}
+.sl-cell:hover,.sl-cell:focus-visible{background:var(--accent)}
+@keyframes sl-in{from{opacity:0;transform:translateY(-4px)}}
+/* スナップアシスト */
+.snap-assist{position:absolute;inset:0;background:rgba(10,12,18,.28)}
+.sa-area{position:absolute;box-sizing:border-box;padding:10px;display:flex;flex-direction:column;gap:10px;border:2px dashed color-mix(in srgb,var(--accent) 70%,#fff);border-radius:12px;background:rgba(18,20,26,.55);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);overflow:auto;animation:sl-in .16s ease-out}
+.sa-head{color:#fff;font-weight:700;font-size:13.5px;text-align:center}
+.sa-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
+.sa-card{display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 8px;border:1px solid rgba(255,255,255,.18);border-radius:10px;background:rgba(255,255,255,.1);color:#fff!important;cursor:pointer;min-width:0}
+.sa-card:hover,.sa-card:focus-visible{background:var(--accent);border-color:transparent}
+.sa-card b{font-size:13px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sa-card small{font-size:11.5px;opacity:.8;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 透明効果（すりガラス） */
+.glass .win{background:color-mix(in srgb,var(--surface) 86%,transparent);-webkit-backdrop-filter:blur(20px) saturate(1.5);backdrop-filter:blur(20px) saturate(1.5);border-color:rgba(255,255,255,.35)}
+.glass .win-head{background:color-mix(in srgb,var(--surface-2) 62%,transparent)}
+.glass .win.active{box-shadow:0 10px 34px rgba(0,0,0,.34)}
+.glass .menu,.glass .snap-layouts{background:color-mix(in srgb,var(--surface) 80%,transparent);-webkit-backdrop-filter:blur(18px) saturate(1.4);backdrop-filter:blur(18px) saturate(1.4)}
+/* 検索（Alt+Space） */
+.hs-ov{position:absolute;inset:0;z-index:270000;display:flex;justify-content:center;align-items:flex-start;padding:12vh 16px 16px;box-sizing:border-box;background:rgba(8,10,14,.32);animation:ht3-lpin .16s ease-out}
+.hs-box{width:min(640px,100%);max-height:70vh;display:flex;flex-direction:column;border-radius:14px;background:color-mix(in srgb,var(--surface) 88%,transparent);-webkit-backdrop-filter:blur(24px) saturate(1.5);backdrop-filter:blur(24px) saturate(1.5);border:1px solid rgba(255,255,255,.4);box-shadow:0 20px 50px rgba(0,0,0,.4);overflow:hidden;color:var(--ink)}
+.hs-bar{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);color:var(--ink-2)}
+.hs-q{flex:1;min-width:0;border:0!important;outline:0!important;background:none!important;box-shadow:none!important;font:18px var(--ui);color:var(--ink);padding:4px 0}
+.hs-bar kbd{font:11px var(--mono);padding:2px 6px;border:1px solid var(--line);border-radius:5px;color:var(--ink-2)}
+.hs-res{overflow:auto;padding:6px}
+.hs-group{padding:8px 10px 4px;font-size:11.5px;font-weight:700;color:var(--ink-2)}
+.hs-item{display:flex;align-items:center;gap:10px;width:100%;padding:7px 10px;border:0;border-radius:8px;background:none;text-align:left;cursor:pointer;color:var(--ink)!important}
+.hs-item.on{background:var(--accent);color:#fff!important}
+.hs-item.on small{color:rgba(255,255,255,.85)}
+.hs-ico{flex:none;width:30px;height:30px;display:grid;place-items:center;border-radius:8px;background:var(--surface-2);color:var(--ink-2)}
+.hs-item.on .hs-ico{background:rgba(255,255,255,.2);color:#fff}
+.hs-item .app-ico{width:30px;height:30px;border-radius:8px;flex:none}
+.hs-t{display:flex;flex-direction:column;min-width:0}
+.hs-t b{font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hs-t small{font-size:12px;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hs-empty{padding:18px;text-align:center;color:var(--ink-2)}
+/* ---- HTUi 4（Bengal） */
+.de-htui{display:flex;flex-direction:column}
+.ht4-panel{position:relative;height:30px;padding:0 6px;background:rgba(18,20,26,.62);-webkit-backdrop-filter:blur(18px) saturate(1.4);backdrop-filter:blur(18px) saturate(1.4);border-bottom:1px solid rgba(255,255,255,.07);display:flex;align-items:center;justify-content:space-between}
+.ht4-side{display:flex;align-items:center;gap:2px;min-width:0;flex:1}
+.ht4-right{justify-content:flex-end}
+.ht4-panel .p-btn{height:24px}
+.ht4-panel .p-btn:hover{background:rgba(255,255,255,.12)}
+.ht4-app{min-width:0;max-width:100%;gap:8px}
+.ht4-app b{font-weight:650;white-space:nowrap}
+.ht4-wtitle{opacity:.55;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ht4-clock{position:relative;font-variant-numeric:tabular-nums;font-weight:600;flex:none}
+.ht4-dot{position:absolute;top:3px;right:1px;width:6px;height:6px;border-radius:50%;background:var(--accent);display:none}
+.ht4-dot.on{display:block}
+.ht4-ccb{gap:4px}
+.ht4-user .avatar{flex:none}
+.phone .ht4-wtitle,.phone .ht4-user .p-uname,.phone .ht4-search,.phone .ht4-ws{display:none}
+.phone .ht4-clock span{font-size:12px}
+.ht4-main{position:relative;flex:1;min-height:0;display:flex}
+/* 浮かぶ Dock */
+.ht4-dock{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);z-index:120000;display:flex;align-items:flex-end;gap:6px;padding:7px 9px;max-width:calc(100% - 24px);box-sizing:border-box;border-radius:20px;background:rgba(28,30,38,.5);-webkit-backdrop-filter:blur(22px) saturate(1.5);backdrop-filter:blur(22px) saturate(1.5);border:1px solid rgba(255,255,255,.16);box-shadow:0 10px 30px rgba(0,0,0,.35);transition:transform .25s cubic-bezier(.3,.8,.4,1),opacity .2s}
+.dock-hidden .ht4-dock{transform:translate(-50%,calc(100% + 16px));opacity:0;pointer-events:none}
+.ht4-edge{position:absolute;left:0;right:0;bottom:0;height:5px;z-index:119999}
+.ht4-dk{position:relative;flex:none;display:flex;flex-direction:column;align-items:center;padding:0;border:0;background:none;cursor:pointer;color:#fff!important;transition:transform .16s cubic-bezier(.3,.8,.4,1)}
+.ht4-dk .app-ico{width:44px;height:44px;border-radius:12px}
+.ht4-dk .app-ico svg{width:24px;height:24px}
+.ht4-dk:hover{transform:translateY(-6px) scale(1.14)}
+.ht4-dk:hover+.ht4-dk{transform:translateY(-2px) scale(1.05)}
+.ht4-all .app-ico{background:rgba(255,255,255,.18)}
+.ht4-trash{background:rgba(255,255,255,.12)!important}
+.ht4-run{position:absolute;bottom:-5px;width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.8)}
+.ht4-dk.active .ht4-run{width:14px;border-radius:3px;background:var(--accent)}
+.ht4-sep{flex:none;align-self:stretch;width:1px;margin:4px 2px;background:rgba(255,255,255,.22)}
+.ht4-tip{position:absolute;bottom:calc(100% + 10px);left:50%;transform:translateX(-50%);padding:3px 9px;border-radius:7px;background:rgba(20,22,28,.9);color:#fff;font-size:12px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .12s}
+.ht4-dk:hover .ht4-tip{opacity:1}
+.touch .ht4-dock{display:none}
+/* コントロールセンター */
+.ht4-cc{position:absolute;top:36px;right:8px;z-index:150000;width:min(340px,calc(100% - 16px));display:flex;flex-direction:column;gap:12px;padding:14px;box-sizing:border-box;border-radius:18px;color:#f2f3f5;background:rgba(26,28,36,.72);-webkit-backdrop-filter:blur(26px) saturate(1.5);backdrop-filter:blur(26px) saturate(1.5);border:1px solid rgba(255,255,255,.14);box-shadow:0 16px 40px rgba(0,0,0,.4);animation:sl-in .16s ease-out}
+.ht4-tiles{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.ht4-tile{display:flex;align-items:center;gap:9px;padding:9px 10px;border:0;border-radius:14px;background:rgba(255,255,255,.1);color:#f2f3f5!important;text-align:left;cursor:pointer;min-width:0}
+.ht4-tile:hover{background:rgba(255,255,255,.16)}
+.ht4-tico{flex:none;width:32px;height:32px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.14)}
+.ht4-tile.on .ht4-tico{background:var(--accent);color:#fff}
+.ht4-tl{display:flex;flex-direction:column;min-width:0}
+.ht4-tl b{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ht4-tl small{font-size:11.5px;opacity:.7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ht4-slider{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:14px;background:rgba(255,255,255,.08)}
+.ht4-sl{display:flex;align-items:center;gap:6px;min-width:76px;font-size:13px}
+.ht4-slider input{flex:1;min-width:0}
+.ht4-ccfoot{display:flex;align-items:center;gap:8px}
+.ht4-ccfoot b{flex:1;font-weight:600}
+.ht4-round{width:32px;height:32px;border:0;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.12);color:#fff!important;cursor:pointer}
+.ht4-round:hover{background:rgba(255,255,255,.22)}
+/* 通知センター（右から） */
+.ht4-nc{position:absolute;top:36px;right:8px;bottom:8px;z-index:150000;width:min(360px,calc(100% - 16px));display:flex;flex-direction:column;gap:12px;padding:16px;box-sizing:border-box;overflow:auto;border-radius:18px;color:#f2f3f5;background:rgba(26,28,36,.72);-webkit-backdrop-filter:blur(26px) saturate(1.5);backdrop-filter:blur(26px) saturate(1.5);border:1px solid rgba(255,255,255,.14);box-shadow:0 16px 40px rgba(0,0,0,.4);animation:ht4-ncin .22s cubic-bezier(.3,.8,.4,1)}
+.ht4-nc.leaving{animation:ht4-ncout .16s ease-in forwards!important}
+@keyframes ht4-ncin{from{transform:translateX(30px);opacity:0}}
+@keyframes ht4-ncout{to{transform:translateX(30px);opacity:0}}
+.ht4-big{display:flex;flex-direction:column}
+.ht4-big b{font-size:40px;font-weight:300;line-height:1.1;font-variant-numeric:tabular-nums}
+.ht4-big span{opacity:.75}
+.ht4-cal{padding:10px;border-radius:14px;background:rgba(255,255,255,.08)}
+.ht4-mhead{display:flex;align-items:center;gap:4px;margin-bottom:4px}
+.ht4-mhead b{flex:1;font-size:14px}
+.ht4-mini{border:0;background:none;color:inherit!important;cursor:pointer;border-radius:6px;padding:3px 7px;display:inline-flex;align-items:center;font-size:12px}
+.ht4-mini:hover{background:rgba(255,255,255,.14)}
+.ht4-days{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center;font-variant-numeric:tabular-nums}
+.ht4-wd{font-size:11px;opacity:.6;padding:2px 0}
+.ht4-day{padding:4px 0;border-radius:8px;font-size:12.5px;min-height:1.3em}
+.ht4-day.sun,.ht4-wd.sun{color:#ff8a8a}
+.ht4-day.sat,.ht4-wd.sat{color:#8ab8ff}
+.ht4-day.today{background:var(--accent);color:#fff!important;font-weight:700}
+.ht4-nhead{display:flex;align-items:center;justify-content:space-between}
+.ht4-nlist{display:flex;flex-direction:column;gap:10px}
+.ht4-nempty{display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px;opacity:.55}
+.ht4-ngroup{display:flex;flex-direction:column;gap:6px;padding:8px;border-radius:14px;background:rgba(255,255,255,.08)}
+.ht4-nghead{display:flex;align-items:center;gap:8px;padding:0 4px}
+.ht4-nghead b{flex:1;font-size:12.5px}
+.ht4-nghead small{opacity:.6;font-size:11.5px}
+.ht4-note{display:flex;align-items:flex-start;gap:8px;padding:8px;border-radius:10px;background:rgba(255,255,255,.07)}
+.ht4-nico{flex:none;width:26px;height:26px;border-radius:7px;display:grid;place-items:center;background:var(--accent);color:#fff}
+.ht4-ntext{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.ht4-ntext span{opacity:.8;overflow-wrap:anywhere}
+.ht4-ntext small{opacity:.55;font-size:11px}
+.ht4-dnd{display:flex;align-items:center;gap:6px;margin-top:auto;padding-top:8px;border-top:1px solid rgba(255,255,255,.12)}
+/* ウィジェット */
+.ht4-widgets{position:absolute;inset:0;z-index:1;pointer-events:none}
+.bw{position:absolute;pointer-events:auto;box-sizing:border-box;padding:12px 14px;border-radius:18px;color:#f4f5f7;background:rgba(24,26,34,.42);-webkit-backdrop-filter:blur(20px) saturate(1.4);backdrop-filter:blur(20px) saturate(1.4);border:1px solid rgba(255,255,255,.14);box-shadow:0 8px 24px rgba(0,0,0,.22);cursor:grab;user-select:none;touch-action:none}
+.bw.drag{cursor:grabbing;box-shadow:0 16px 36px rgba(0,0,0,.35);z-index:2}
+.bw-time{font-size:44px;font-weight:250;line-height:1.05;font-variant-numeric:tabular-nums;letter-spacing:.01em}
+.bw-time small{font-size:18px;opacity:.6;margin-left:4px}
+.bw-date{opacity:.8;font-size:13px}
+.bw-title{font-weight:650;font-size:13px;margin-bottom:6px}
+.bw-meter{height:7px;border-radius:4px;background:rgba(255,255,255,.18);overflow:hidden;margin-bottom:8px}
+.bw-meter i{display:block;height:100%;border-radius:4px;background:var(--accent)}
+.bw-dl{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:0;font-size:12.5px}
+.bw-dl dt{opacity:.65}
+.bw-dl dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
+.bw-ta{display:block;width:100%;min-height:110px;box-sizing:border-box;border:0;outline:0;resize:vertical;background:none!important;box-shadow:none!important;color:#3d3416!important;font:13.5px/1.5 var(--ui);padding:0}
+.bw-ta{user-select:text;cursor:text}
+.bw-ta::placeholder{color:rgba(61,52,22,.55)}
+.bw.bw-note{background:rgba(255,226,120,.88);border-color:rgba(255,255,255,.4)}
+.phone .ht4-widgets{display:none}
+.de-htui:not(.dock-off) .toast{bottom:92px}
+.touch .de-htui .toast{bottom:22px}
+.ht4-cc{width:min(372px,calc(100% - 16px))}
+.ht4-tl b{font-size:12.5px}
+.bw-ta,.bw-ta:focus,.bw-ta:focus-visible{outline:0!important;border:0!important}
+.ht4-side{overflow:hidden}
+.ht4-app{overflow:hidden}
+.phone .ht4-app{display:none}
 </script>
 <script>
 /* ============================================================
@@ -14559,7 +15827,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 (function () {
   'use strict';
   // コードネーム: htmlOS は恒星の名前（3.2 = Sirius、4.0 = Vega）、描画エンジン HTUi SDK は惑星の名前（2 = Jupiter、3.0 = Venus）
-  var MEDIA_VERSION = '7.0.0', MEDIA_BUILD = '62', MEDIA_CODENAME = 'Polaris';
+  var MEDIA_VERSION = '7.1.0', MEDIA_BUILD = '63', MEDIA_CODENAME = 'Polaris';
   var BOOT = window.BOOT = {};
   var P = 'htmlos:';
 

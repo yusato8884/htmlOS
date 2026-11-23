@@ -1126,6 +1126,7 @@
     // ---- 全画面の TUI（4.0）。const s = tty.screen(); s.render(行); const k = await s.key(); s.close()
     //   行は文字列か、[文字, 色]（色: accent dim ok err sel head prompt）の配列。
     //   key() は { key: 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight' | 'Enter' | 'Escape' | 'Tab' | 'Backspace' | 'Home' | 'End' | 'PageUp' | 'PageDown' | 'text', text, ctrl, shift }
+    //   SDK 4（Mars）から: alt（Alt+文字）、'F1'〜'F12'、'click'（row, col）、'resize'、貼り付けは改行入りの text（paste: true）。size() / fixed(on)
     //   日本語入力（IME）で確定した文字も key: 'text' で届く
     screen() {
       if (this._screen) return this._screen;
@@ -1134,11 +1135,18 @@
       const inp = h('input', { class: 'tty-tui-key', 'aria-label': 'キー入力（矢印キー・Enter・Esc）', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false' });
       const push = ev => { const w = waiters.shift(); if (w) w(ev); else q.push(ev); };
       const NAV = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'Escape', 'Tab', 'Backspace', 'Delete', 'Home', 'End', 'PageUp', 'PageDown'];
+      // SDK 4（Mars）: Alt+文字・F1〜F12・Ctrl+記号・Ctrl+矢印も届ける（nano などのエディタ用）。Alt の文字はキーの位置（e.code）から決める
+      const codeKey = c => { const m = /^(?:Key|Digit)(\w)$/.exec(c || ''); if (m) return m[1].toLowerCase(); return { Backslash: '\\', Slash: '/', Comma: ',', Period: '.', Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']', Semicolon: ';', Quote: "'", Backquote: '`', Space: ' ' }[c] || null; };
       inp.addEventListener('keydown', e => {
         if (e.isComposing || e.keyCode === 229) return;
-        if (e.ctrlKey && /^[a-z]$/i.test(e.key)) { e.preventDefault(); push({ key: e.key.toLowerCase(), ctrl: true }); return; }
-        if (NAV.includes(e.key)) { e.preventDefault(); e.stopPropagation(); push({ key: e.key, shift: e.shiftKey }); }
+        if (e.ctrlKey && !e.altKey && /^[a-z]$/i.test(e.key)) { e.preventDefault(); push({ key: e.key.toLowerCase(), ctrl: true, shift: e.shiftKey }); return; }
+        if (NAV.includes(e.key)) { e.preventDefault(); e.stopPropagation(); push({ key: e.key, shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey, alt: e.altKey }); return; }
+        if (/^F([1-9]|1[0-2])$/.test(e.key)) { e.preventDefault(); e.stopPropagation(); push({ key: e.key, shift: e.shiftKey }); return; }
+        if (e.altKey && !e.ctrlKey) { const k = codeKey(e.code); if (k) { e.preventDefault(); e.stopPropagation(); push({ key: k, alt: true, shift: e.shiftKey }); } return; }
+        if (e.ctrlKey && !e.altKey) { const k = codeKey(e.code); if (k && !/^[0-9]$/.test(k)) { e.preventDefault(); push({ key: e.shiftKey && k === '-' ? '_' : k, ctrl: true, shift: e.shiftKey }); } }
       });
+      // 貼り付けは改行を残したまま 1 つの text として届ける
+      inp.addEventListener('paste', e => { const t = e.clipboardData && e.clipboardData.getData('text/plain'); if (t) { e.preventDefault(); push({ key: 'text', text: t.replace(/\r\n?/g, '\n'), paste: true }); } });
       const flush = () => { if (inp.value) { push({ key: 'text', text: inp.value }); inp.value = ''; } };
       inp.addEventListener('input', e => { if (!e.isComposing) flush(); });
       inp.addEventListener('compositionend', () => setTimeout(flush, 0));
@@ -1147,6 +1155,13 @@
       const keys = h('div', { class: 'tty-keys tty-tuikeys' }, tk('↑', 'ArrowUp'), tk('↓', 'ArrowDown'), tk('←', 'ArrowLeft'), tk('→', 'ArrowRight'), tk('Enter', 'Enter'), tk('Esc', 'Escape'), tk('⌫', 'Backspace'));
       const box = h('div', { class: 'tty-tuibox' }, view, inp);
       box.addEventListener('click', () => inp.focus());
+      // 文字 1 つの幅と行の高さ（ch 単位で測る）
+      const cell = () => { const m = h('span', { style: 'position:absolute;visibility:hidden;white-space:pre' }, '0000000000'); view.append(m); const r = m.getBoundingClientRect(); m.remove(); return { w: r.width / 10 || 8, h: r.height || 19 }; };
+      // 文字の位置でのクリック（SDK 4）: { key: 'click', row, col }
+      view.addEventListener('mousedown', e => { if (e.button) return; const c = cell(), r = view.getBoundingClientRect(); push({ key: 'click', row: Math.floor((e.clientY - r.top) / c.h), col: Math.floor((e.clientX - r.left) / c.w) }); });
+      // 大きさが変わったら { key: 'resize' } を届ける
+      let ro = null, lastSize = '';
+      if (window.ResizeObserver) { ro = new ResizeObserver(() => { const z = box.clientWidth + 'x' + box.clientHeight; if (z !== lastSize) { const first = !lastSize; lastSize = z; if (!first) push({ key: 'resize' }); } }); ro.observe(box); }
       this.scr.style.display = 'none'; this.keys.style.display = 'none';
       this.el.insertBefore(box, this.keys); this.el.insertBefore(keys, this.keys);
       const seg = s => Array.isArray(s) ? h('span', { class: 't-' + s[1] }, s[0]) : document.createTextNode(String(s));
@@ -1158,7 +1173,10 @@
         },
         key() { return q.length ? Promise.resolve(q.shift()) : new Promise(r => waiters.push(r)); },
         focus() { inp.focus(); },
-        close() { box.remove(); keys.remove(); self.scr.style.display = ''; self.keys.style.display = ''; self._screen = null; while (waiters.length) waiters.shift()({ key: 'Escape' }); if (self.wantsFocus()) self.input.focus(); }
+        // SDK 4: 画面に入る文字数と行数。fixed(true) で折り返さずにぴったり並べる表示にする（エディタ用）
+        size() { const c = cell(), cs = getComputedStyle(box), pw = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight), ph = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom); return { cols: Math.max(20, Math.floor((box.clientWidth - pw) / c.w)), rows: Math.max(6, Math.floor((box.clientHeight - ph) / c.h)) }; },
+        fixed(on) { box.classList.toggle('tty-fixed', !!on); },
+        close() { if (ro) ro.disconnect(); box.remove(); keys.remove(); self.scr.style.display = ''; self.keys.style.display = ''; self._screen = null; while (waiters.length) waiters.shift()({ key: 'Escape' }); if (self.wantsFocus()) self.input.focus(); }
       };
       if (this.wantsFocus()) inp.focus();
       return sc;
@@ -1559,7 +1577,7 @@
     if (OS.imode) apps = apps.filter(n => I_APPS.includes(n));
     const pkgs = OS.safe || OS.imode ? [] : OS.pkg.list();
     try { OS.build = (JSON.parse(store.get('meta')) || {}).build || BOOT.build || '?'; } catch (e) { OS.build = BOOT.build || '?'; }
-    const core = ['/sys/init.js', '/sys/ipc.js', '/sys/raid.js', '/sys/cursor.js', '/sys/jsh.js', '/sys/htui.js', '/sys/hdm.js', '/sys/shells.js'];
+    const core = ['/sys/init.js', '/sys/ipc.js', '/sys/raid.js', '/sys/cursor.js', '/sys/jsh.js', '/sys/nano.js', '/sys/htui.js', '/sys/hdm.js', '/sys/shells.js'];
     const total = 2 + core.length + apps.length + pkgs.length; let done = 0;
     const step = async (s, failed) => {
       if (OS.klog) OS.klog(s, failed ? 3 : 6); else (OS._klog = OS._klog || []).push({ t: Date.now(), msg: s, prio: failed ? 3 : 6 });

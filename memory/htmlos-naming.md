@@ -18,3 +18,4 @@ User's naming rules (2026-11-18):
 - The standard desktop environment "HTUi" (session id 'htui', not the SDK) has its own version line with cat-breed codenames: HTUi 2 = MaineCoon (htmlOS 5.2, user confirmed 2026-11-19). HTUi 2 replaces the panel taskbar with a Dock (left default / bottom / right); other DEs keep their bars.
 - htmlOS 6.0 = Deneb, HTUi 3 = Ragdoll (user chose 2026-11-19, index_38).
 - htmlOS 7.0 = Polaris (user chose 2026-11-20); 7.0 constellation wallpaper = Ursa Minor/Polaris. Android-like DE "hDroid（Android 風）" (session id droid, shells.js, released in 7.0.0).
+- HTUi 4 = Bengal, HTUi SDK 4 = Mars (user chose 2026-11-23). Plan: nano in jsh, SDK 4 snap layouts/snap assist/glass windows/Alt+Space search; HTUi 4 floating dock, control center, desktop widgets, notification center; HTUi 3 kept as separate session.

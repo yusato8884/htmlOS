@@ -415,7 +415,7 @@
 .touch .win-head{height:46px;padding:0 6px 0 12px;font-size:15px}
 .touch .win-title{font-size:15px}
 .touch .win-btn{width:36px;height:36px}
-.touch .de-htui .win-btns,.touch .rz{display:none} /* HTUi では閉じるが下のナビにあるので、右上のボタンは出さない */
+.touch .de-htui .win-btns,.touch .de-htui3 .win-btns,.touch .rz{display:none} /* HTUi では閉じるが下のナビにあるので、右上のボタンは出さない */
 .touch .win.free .rz{display:block}
 .touch .rz-e,.touch .rz-w{width:12px}.touch .rz-n,.touch .rz-s{height:12px}.touch .rz-ne,.touch .rz-nw,.touch .rz-se,.touch .rz-sw{width:22px;height:22px}
 .touch .btn{min-height:44px;padding:9px 16px}
@@ -467,7 +467,7 @@
 
 /* スマートフォン: さらに1列の配置に */
 .phone .panel .p-uname,.phone .p-lbl{display:none}
-.phone .de-htui .win-head{display:none} /* HTUi ではタイトルは上のパネルに、閉じるは下のナビにあるので省く */
+.phone .de-htui .win-head,.phone .de-htui3 .win-head{display:none} /* HTUi ではタイトルは上のパネルに、閉じるは下のナビにあるので省く */
 .phone .desk-icons{padding:20px 6px;gap:16px 2px}
 .phone .desk-icon{width:84px;font-size:12.5px}
 .phone .app-ico{width:58px;height:58px;border-radius:15px}
@@ -1910,3 +1910,162 @@
 .ad-snap{position:absolute;inset:0;pointer-events:none;background:var(--surface)}
 .ad-snap>.win{border-radius:0;box-shadow:none}
 .ad-ph{background:#222;width:100%;height:100%}
+/* ---- 端末の TUI: 折り返さない表示（SDK 4。nano など） */
+.tty-tuibox.tty-fixed{overflow:hidden;padding:4px 6px}
+.tty-fixed .tty-tui{white-space:pre;word-break:normal;overflow:hidden}
+.t-w{display:inline-block;width:2ch;text-align:center;overflow:hidden;vertical-align:top}
+.t-inv{background:var(--tty-ink);color:var(--tty-bg)}
+.t-key{background:var(--tty-ink);color:var(--tty-bg);font-weight:700}
+.t-cur{background:var(--tty-ink);color:var(--tty-bg);animation:t-blink 1.1s steps(1) infinite}
+.t-mark{background:color-mix(in srgb,var(--accent) 55%,transparent);color:#fff}
+.t-num{color:#6b7280}
+.t-msg{background:var(--tty-ink);color:var(--tty-bg)}
+@keyframes t-blink{50%{background:transparent;color:inherit}}
+/* ---- HTUi SDK 4（Mars）: スナップレイアウト */
+.snap-layouts{position:absolute;z-index:260000;display:grid;grid-template-columns:repeat(3,auto);gap:10px;padding:12px;border-radius:12px;background:var(--surface);border:1px solid var(--line);box-shadow:0 12px 32px rgba(0,0,0,.32);animation:sl-in .14s ease-out}
+.sl-box{position:relative;width:78px;height:50px;border-radius:7px;background:var(--surface-2);border:1px solid var(--line)}
+.sl-cell{position:absolute;box-sizing:border-box;margin:0;padding:0;border:2px solid var(--surface-2);border-radius:6px;background:color-mix(in srgb,var(--ink) 16%,var(--surface));cursor:pointer;transition:background .1s}
+.sl-cell:hover,.sl-cell:focus-visible{background:var(--accent)}
+@keyframes sl-in{from{opacity:0;transform:translateY(-4px)}}
+/* スナップアシスト */
+.snap-assist{position:absolute;inset:0;background:rgba(10,12,18,.28)}
+.sa-area{position:absolute;box-sizing:border-box;padding:10px;display:flex;flex-direction:column;gap:10px;border:2px dashed color-mix(in srgb,var(--accent) 70%,#fff);border-radius:12px;background:rgba(18,20,26,.55);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);overflow:auto;animation:sl-in .16s ease-out}
+.sa-head{color:#fff;font-weight:700;font-size:13.5px;text-align:center}
+.sa-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
+.sa-card{display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 8px;border:1px solid rgba(255,255,255,.18);border-radius:10px;background:rgba(255,255,255,.1);color:#fff!important;cursor:pointer;min-width:0}
+.sa-card:hover,.sa-card:focus-visible{background:var(--accent);border-color:transparent}
+.sa-card b{font-size:13px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sa-card small{font-size:11.5px;opacity:.8;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 透明効果（すりガラス） */
+.glass .win{background:color-mix(in srgb,var(--surface) 86%,transparent);-webkit-backdrop-filter:blur(20px) saturate(1.5);backdrop-filter:blur(20px) saturate(1.5);border-color:rgba(255,255,255,.35)}
+.glass .win-head{background:color-mix(in srgb,var(--surface-2) 62%,transparent)}
+.glass .win.active{box-shadow:0 10px 34px rgba(0,0,0,.34)}
+.glass .menu,.glass .snap-layouts{background:color-mix(in srgb,var(--surface) 80%,transparent);-webkit-backdrop-filter:blur(18px) saturate(1.4);backdrop-filter:blur(18px) saturate(1.4)}
+/* 検索（Alt+Space） */
+.hs-ov{position:absolute;inset:0;z-index:270000;display:flex;justify-content:center;align-items:flex-start;padding:12vh 16px 16px;box-sizing:border-box;background:rgba(8,10,14,.32);animation:ht3-lpin .16s ease-out}
+.hs-box{width:min(640px,100%);max-height:70vh;display:flex;flex-direction:column;border-radius:14px;background:color-mix(in srgb,var(--surface) 88%,transparent);-webkit-backdrop-filter:blur(24px) saturate(1.5);backdrop-filter:blur(24px) saturate(1.5);border:1px solid rgba(255,255,255,.4);box-shadow:0 20px 50px rgba(0,0,0,.4);overflow:hidden;color:var(--ink)}
+.hs-bar{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);color:var(--ink-2)}
+.hs-q{flex:1;min-width:0;border:0!important;outline:0!important;background:none!important;box-shadow:none!important;font:18px var(--ui);color:var(--ink);padding:4px 0}
+.hs-bar kbd{font:11px var(--mono);padding:2px 6px;border:1px solid var(--line);border-radius:5px;color:var(--ink-2)}
+.hs-res{overflow:auto;padding:6px}
+.hs-group{padding:8px 10px 4px;font-size:11.5px;font-weight:700;color:var(--ink-2)}
+.hs-item{display:flex;align-items:center;gap:10px;width:100%;padding:7px 10px;border:0;border-radius:8px;background:none;text-align:left;cursor:pointer;color:var(--ink)!important}
+.hs-item.on{background:var(--accent);color:#fff!important}
+.hs-item.on small{color:rgba(255,255,255,.85)}
+.hs-ico{flex:none;width:30px;height:30px;display:grid;place-items:center;border-radius:8px;background:var(--surface-2);color:var(--ink-2)}
+.hs-item.on .hs-ico{background:rgba(255,255,255,.2);color:#fff}
+.hs-item .app-ico{width:30px;height:30px;border-radius:8px;flex:none}
+.hs-t{display:flex;flex-direction:column;min-width:0}
+.hs-t b{font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hs-t small{font-size:12px;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hs-empty{padding:18px;text-align:center;color:var(--ink-2)}
+/* ---- HTUi 4（Bengal） */
+.de-htui{display:flex;flex-direction:column}
+.ht4-panel{position:relative;height:30px;padding:0 6px;background:rgba(18,20,26,.62);-webkit-backdrop-filter:blur(18px) saturate(1.4);backdrop-filter:blur(18px) saturate(1.4);border-bottom:1px solid rgba(255,255,255,.07);display:flex;align-items:center;justify-content:space-between}
+.ht4-side{display:flex;align-items:center;gap:2px;min-width:0;flex:1}
+.ht4-right{justify-content:flex-end}
+.ht4-panel .p-btn{height:24px}
+.ht4-panel .p-btn:hover{background:rgba(255,255,255,.12)}
+.ht4-app{min-width:0;max-width:100%;gap:8px}
+.ht4-app b{font-weight:650;white-space:nowrap}
+.ht4-wtitle{opacity:.55;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ht4-clock{position:relative;font-variant-numeric:tabular-nums;font-weight:600;flex:none}
+.ht4-dot{position:absolute;top:3px;right:1px;width:6px;height:6px;border-radius:50%;background:var(--accent);display:none}
+.ht4-dot.on{display:block}
+.ht4-ccb{gap:4px}
+.ht4-user .avatar{flex:none}
+.phone .ht4-wtitle,.phone .ht4-user .p-uname,.phone .ht4-search,.phone .ht4-ws{display:none}
+.phone .ht4-clock span{font-size:12px}
+.ht4-main{position:relative;flex:1;min-height:0;display:flex}
+/* 浮かぶ Dock */
+.ht4-dock{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);z-index:120000;display:flex;align-items:flex-end;gap:6px;padding:7px 9px;max-width:calc(100% - 24px);box-sizing:border-box;border-radius:20px;background:rgba(28,30,38,.5);-webkit-backdrop-filter:blur(22px) saturate(1.5);backdrop-filter:blur(22px) saturate(1.5);border:1px solid rgba(255,255,255,.16);box-shadow:0 10px 30px rgba(0,0,0,.35);transition:transform .25s cubic-bezier(.3,.8,.4,1),opacity .2s}
+.dock-hidden .ht4-dock{transform:translate(-50%,calc(100% + 16px));opacity:0;pointer-events:none}
+.ht4-edge{position:absolute;left:0;right:0;bottom:0;height:5px;z-index:119999}
+.ht4-dk{position:relative;flex:none;display:flex;flex-direction:column;align-items:center;padding:0;border:0;background:none;cursor:pointer;color:#fff!important;transition:transform .16s cubic-bezier(.3,.8,.4,1)}
+.ht4-dk .app-ico{width:44px;height:44px;border-radius:12px}
+.ht4-dk .app-ico svg{width:24px;height:24px}
+.ht4-dk:hover{transform:translateY(-6px) scale(1.14)}
+.ht4-dk:hover+.ht4-dk{transform:translateY(-2px) scale(1.05)}
+.ht4-all .app-ico{background:rgba(255,255,255,.18)}
+.ht4-trash{background:rgba(255,255,255,.12)!important}
+.ht4-run{position:absolute;bottom:-5px;width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.8)}
+.ht4-dk.active .ht4-run{width:14px;border-radius:3px;background:var(--accent)}
+.ht4-sep{flex:none;align-self:stretch;width:1px;margin:4px 2px;background:rgba(255,255,255,.22)}
+.ht4-tip{position:absolute;bottom:calc(100% + 10px);left:50%;transform:translateX(-50%);padding:3px 9px;border-radius:7px;background:rgba(20,22,28,.9);color:#fff;font-size:12px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .12s}
+.ht4-dk:hover .ht4-tip{opacity:1}
+.touch .ht4-dock{display:none}
+/* コントロールセンター */
+.ht4-cc{position:absolute;top:36px;right:8px;z-index:150000;width:min(340px,calc(100% - 16px));display:flex;flex-direction:column;gap:12px;padding:14px;box-sizing:border-box;border-radius:18px;color:#f2f3f5;background:rgba(26,28,36,.72);-webkit-backdrop-filter:blur(26px) saturate(1.5);backdrop-filter:blur(26px) saturate(1.5);border:1px solid rgba(255,255,255,.14);box-shadow:0 16px 40px rgba(0,0,0,.4);animation:sl-in .16s ease-out}
+.ht4-tiles{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.ht4-tile{display:flex;align-items:center;gap:9px;padding:9px 10px;border:0;border-radius:14px;background:rgba(255,255,255,.1);color:#f2f3f5!important;text-align:left;cursor:pointer;min-width:0}
+.ht4-tile:hover{background:rgba(255,255,255,.16)}
+.ht4-tico{flex:none;width:32px;height:32px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.14)}
+.ht4-tile.on .ht4-tico{background:var(--accent);color:#fff}
+.ht4-tl{display:flex;flex-direction:column;min-width:0}
+.ht4-tl b{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ht4-tl small{font-size:11.5px;opacity:.7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ht4-slider{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:14px;background:rgba(255,255,255,.08)}
+.ht4-sl{display:flex;align-items:center;gap:6px;min-width:76px;font-size:13px}
+.ht4-slider input{flex:1;min-width:0}
+.ht4-ccfoot{display:flex;align-items:center;gap:8px}
+.ht4-ccfoot b{flex:1;font-weight:600}
+.ht4-round{width:32px;height:32px;border:0;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.12);color:#fff!important;cursor:pointer}
+.ht4-round:hover{background:rgba(255,255,255,.22)}
+/* 通知センター（右から） */
+.ht4-nc{position:absolute;top:36px;right:8px;bottom:8px;z-index:150000;width:min(360px,calc(100% - 16px));display:flex;flex-direction:column;gap:12px;padding:16px;box-sizing:border-box;overflow:auto;border-radius:18px;color:#f2f3f5;background:rgba(26,28,36,.72);-webkit-backdrop-filter:blur(26px) saturate(1.5);backdrop-filter:blur(26px) saturate(1.5);border:1px solid rgba(255,255,255,.14);box-shadow:0 16px 40px rgba(0,0,0,.4);animation:ht4-ncin .22s cubic-bezier(.3,.8,.4,1)}
+.ht4-nc.leaving{animation:ht4-ncout .16s ease-in forwards!important}
+@keyframes ht4-ncin{from{transform:translateX(30px);opacity:0}}
+@keyframes ht4-ncout{to{transform:translateX(30px);opacity:0}}
+.ht4-big{display:flex;flex-direction:column}
+.ht4-big b{font-size:40px;font-weight:300;line-height:1.1;font-variant-numeric:tabular-nums}
+.ht4-big span{opacity:.75}
+.ht4-cal{padding:10px;border-radius:14px;background:rgba(255,255,255,.08)}
+.ht4-mhead{display:flex;align-items:center;gap:4px;margin-bottom:4px}
+.ht4-mhead b{flex:1;font-size:14px}
+.ht4-mini{border:0;background:none;color:inherit!important;cursor:pointer;border-radius:6px;padding:3px 7px;display:inline-flex;align-items:center;font-size:12px}
+.ht4-mini:hover{background:rgba(255,255,255,.14)}
+.ht4-days{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center;font-variant-numeric:tabular-nums}
+.ht4-wd{font-size:11px;opacity:.6;padding:2px 0}
+.ht4-day{padding:4px 0;border-radius:8px;font-size:12.5px;min-height:1.3em}
+.ht4-day.sun,.ht4-wd.sun{color:#ff8a8a}
+.ht4-day.sat,.ht4-wd.sat{color:#8ab8ff}
+.ht4-day.today{background:var(--accent);color:#fff!important;font-weight:700}
+.ht4-nhead{display:flex;align-items:center;justify-content:space-between}
+.ht4-nlist{display:flex;flex-direction:column;gap:10px}
+.ht4-nempty{display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px;opacity:.55}
+.ht4-ngroup{display:flex;flex-direction:column;gap:6px;padding:8px;border-radius:14px;background:rgba(255,255,255,.08)}
+.ht4-nghead{display:flex;align-items:center;gap:8px;padding:0 4px}
+.ht4-nghead b{flex:1;font-size:12.5px}
+.ht4-nghead small{opacity:.6;font-size:11.5px}
+.ht4-note{display:flex;align-items:flex-start;gap:8px;padding:8px;border-radius:10px;background:rgba(255,255,255,.07)}
+.ht4-nico{flex:none;width:26px;height:26px;border-radius:7px;display:grid;place-items:center;background:var(--accent);color:#fff}
+.ht4-ntext{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.ht4-ntext span{opacity:.8;overflow-wrap:anywhere}
+.ht4-ntext small{opacity:.55;font-size:11px}
+.ht4-dnd{display:flex;align-items:center;gap:6px;margin-top:auto;padding-top:8px;border-top:1px solid rgba(255,255,255,.12)}
+/* ウィジェット */
+.ht4-widgets{position:absolute;inset:0;z-index:1;pointer-events:none}
+.bw{position:absolute;pointer-events:auto;box-sizing:border-box;padding:12px 14px;border-radius:18px;color:#f4f5f7;background:rgba(24,26,34,.42);-webkit-backdrop-filter:blur(20px) saturate(1.4);backdrop-filter:blur(20px) saturate(1.4);border:1px solid rgba(255,255,255,.14);box-shadow:0 8px 24px rgba(0,0,0,.22);cursor:grab;user-select:none;touch-action:none}
+.bw.drag{cursor:grabbing;box-shadow:0 16px 36px rgba(0,0,0,.35);z-index:2}
+.bw-time{font-size:44px;font-weight:250;line-height:1.05;font-variant-numeric:tabular-nums;letter-spacing:.01em}
+.bw-time small{font-size:18px;opacity:.6;margin-left:4px}
+.bw-date{opacity:.8;font-size:13px}
+.bw-title{font-weight:650;font-size:13px;margin-bottom:6px}
+.bw-meter{height:7px;border-radius:4px;background:rgba(255,255,255,.18);overflow:hidden;margin-bottom:8px}
+.bw-meter i{display:block;height:100%;border-radius:4px;background:var(--accent)}
+.bw-dl{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:0;font-size:12.5px}
+.bw-dl dt{opacity:.65}
+.bw-dl dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
+.bw-ta{display:block;width:100%;min-height:110px;box-sizing:border-box;border:0;outline:0;resize:vertical;background:none!important;box-shadow:none!important;color:#3d3416!important;font:13.5px/1.5 var(--ui);padding:0}
+.bw-ta{user-select:text;cursor:text}
+.bw-ta::placeholder{color:rgba(61,52,22,.55)}
+.bw.bw-note{background:rgba(255,226,120,.88);border-color:rgba(255,255,255,.4)}
+.phone .ht4-widgets{display:none}
+.de-htui:not(.dock-off) .toast{bottom:92px}
+.touch .de-htui .toast{bottom:22px}
+.ht4-cc{width:min(372px,calc(100% - 16px))}
+.ht4-tl b{font-size:12.5px}
+.bw-ta,.bw-ta:focus,.bw-ta:focus-visible{outline:0!important;border:0!important}
+.ht4-side{overflow:hidden}
+.ht4-app{overflow:hidden}
+.phone .ht4-app{display:none}
