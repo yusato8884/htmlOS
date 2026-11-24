@@ -47,9 +47,10 @@
           const p = await navigator.serial.requestPort();
           await p.open({ baudRate: Number(baud.value) });
           port = p; writer = p.writable.getWriter();
+          const dn = OS.dev ? OS.dev.attach(p, { read: () => text.slice(-8192), write: s => send(s) }) : null; // 7.2: /dev/ttyACM0 などからも読み書きできる
           bConn.textContent = '切断'; bConn.classList.remove('primary'); baud.disabled = true;
           status.textContent = '接続中 ・ ' + baud.value + ' bps ・ 黒い画面をクリックしてキーを打つと、そのまま送信します';
-          note('接続しました'); out.focus();
+          note('接続しました' + (dn ? '（/dev/' + dn + '）' : '')); out.focus();
           readLoop(p);
         } catch (e) {
           if (e && e.name === 'NotFoundError') return; // ポート選択をキャンセルした
@@ -68,11 +69,13 @@
         } catch (e) { if (port === p) { note('切断されました（' + (e && e.message || e) + '）'); cleanup(); } }
       }
       function cleanup() {
+        if (port && OS.dev) OS.dev.detach(port);
         port = null; writer = null;
         bConn.textContent = '接続'; bConn.classList.add('primary'); baud.disabled = false; status.textContent = '未接続';
       }
       async function disconnect(quiet) {
         const p = port; if (!p) return;
+        if (OS.dev) OS.dev.detach(p);
         port = null;
         try { if (reader) await reader.cancel(); } catch (e) { /* 無視 */ }
         try { if (writer) { writer.releaseLock(); } } catch (e) { /* 無視 */ }

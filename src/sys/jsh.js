@@ -100,6 +100,9 @@
         this.proc = OS.proc.spawn({ name: 'jsh', cmd: (this.opt.login ? '-jsh' : 'jsh') + (tty === OS.tty1 ? '（tty1）' : ''), kind: 'shell', ppid: this.opt.ppid || 1,
           onsignal: sig => { if (self.opt.onsignal) return self.opt.onsignal(sig); throw new Error('ログインシェルは kill では終了できません（exit で抜けてください）'); } });
         Object.defineProperty(this.proc, 'user', { get: () => self.user }); // su で変わる
+        // 7.2: /proc/<PID>/cwd・environ と /dev/tty のため
+        Object.defineProperty(this.proc, 'cwd', { get: () => self.cwd });
+        this.proc.environ = () => self.vars; this.proc.tty = tty;
       }
     }
     get home() { return users.home(this.user); }
@@ -372,6 +375,7 @@
           if (ri >= 0) { redir = { append: args[ri] === '>>', file: args[ri + 1] }; args = args.slice(0, ri); if (!redir.file) throw new Error('リダイレクト先のファイル名がありません'); }
         }
         const cap = !last || !!redir;
+        if (this.proc) OS.procSelf = this.proc.pid; // /proc/self・/dev/tty が指すプロセス（7.2）
         if (cap) tty.capture = [];
         this.stdin = data; result = undefined;
         try { result = await this.env[sg.name](...args); }
@@ -380,7 +384,12 @@
           if (cap) { const c = tty.capture ? tty.capture.join('') : ''; tty.capture = cap0; const f = result === undefined ? '' : this.format(result); data = c + f + (f && !f.endsWith('\n') ? '\n' : ''); }
         }
         if (cap) result = undefined;
-        if (redir) { const dest = this.abs(redir.file); this.fs.write(dest, (redir.append && this.fs.exists(dest) ? this.fs.read(dest) : '') + data); }
+        if (redir) {
+          const dest = this.abs(redir.file), dst = this.fs.exists(dest) ? fs0.stat(dest) : null;
+          if (this.proc) OS.procSelf = this.proc.pid;
+          // デバイスファイル（/dev/null・/dev/ttyACM0 など）には >> でも前の中身をつけずに渡す
+          this.fs.write(dest, (redir.append && dst && !dst.x ? this.fs.read(dest) : '') + data);
+        }
       }
       return result;
     }
@@ -645,7 +654,7 @@
       def('rm', 'rm [-r] パス...', '削除', (...args) => { const o = flags(args); if (!o.rest.length) throw new Error('削除するパスを指定してください'); o.rest.forEach(p => fs.rm(A(p), { recursive: o.f.includes('r') })); });
       def('cp', 'cp コピー元 コピー先', 'コピー（ディレクトリも可）', (a, b) => { if (a == null || b == null) throw new Error('cp コピー元 コピー先'); fs.cp(A(a), A(b)); });
       def('mv', 'mv 移動元 移動先', '移動・名前変更', (a, b) => { if (a == null || b == null) throw new Error('mv 移動元 移動先'); fs.mv(A(a), A(b)); });
-      def('stat', 'stat パス', 'ファイル情報（モード・所有者・グループも）', p => { const q = A(p), s = fs.stat(q); if (!s) throw new Error(q + ': そのようなファイルはありません'); const rq = fs0.real(q), PM = OS.perm; return { path: q, type: s.t === 'd' ? 'directory' : s.t === 'p' ? 'fifo' : 'file', mode: PM.oct(PM.def(rq, s)) + ' (' + PM.str(s, rq) + ')', owner: s.o || 'root', group: PM.group(s), size: s.t === 'f' ? s.c.length : undefined, binary: !!s.b, modified: fmtDate(s.m) }; });
+      def('stat', 'stat パス', 'ファイル情報（モード・所有者・グループも）', p => { const q = A(p), s = fs.stat(q); if (!s) throw new Error(q + ': そのようなファイルはありません'); const rq = fs0.real(q), PM = OS.perm; return { path: q, type: s.t === 'd' ? 'directory' : s.t === 'p' ? 'fifo' : s.x === 'c' ? 'character device' : s.x === 'b' ? 'block device' : 'file', mode: PM.oct(PM.def(rq, s)) + ' (' + PM.str(s, rq) + ')', owner: s.o || 'root', group: PM.group(s), size: s.t === 'f' ? s.c.length : undefined, binary: !!s.b, modified: fmtDate(s.m) }; });
       // grep: ファイルを省くとパイプ（|）の入力から探す。-i 大文字小文字を区別しない / -v 一致しない行 / -n 行番号 / -c 数だけ
       def('grep', 'grep [-i] [-v] [-n] [-c] パターン [ファイル...]', '一致する行を表示（ファイルを省くとパイプの入力から探す）', (...a) => {
         const g = getopts(a), pat = g.rest.shift();
@@ -843,6 +852,7 @@
       def('hstore', 'hstore', 'パッケージマネージャ', () => { OS.launch('hstore'); });
       def('hbackup', 'hbackup', 'バックアップ', () => { OS.launch('hbackup'); });
       def('hserial', 'hserial', 'シリアルモニター', () => { OS.launch('hserial'); });
+      def('hmicropy', 'hmicropy [ファイル.py]', 'MicroPython 開発（RP2040・RP2350・ESP32 などを Web Serial でつなぐ）', f => { OS.launch('hmicropy', f ? A(f) : undefined); });
       def('hmd', 'hmd [ファイル]', 'Markdown エディター（コードとプレビュー）', p => { OS.launch('hmd', p == null ? null : A(p)); });
       def('hmines', 'hmines', 'マインスイーパー風のゲーム', () => { OS.launch('hmines'); });
       def('htictactoe', 'htictactoe', '三目並べ（CPU・二人で対戦、マスの数を変えられる）', () => { OS.launch('htictactoe'); });
@@ -1143,7 +1153,20 @@
       const lines = t => { const l = String(t).split('\n'); if (l.length && l[l.length - 1] === '') l.pop(); return l; };
       const out = l => l.join('\n');
       Object.defineProperty(env, '__getopts', { value: getopts, enumerable: false });
-      def('head', 'head [-n 行数] [ファイル...]', '先頭の行を表示（既定 10 行）', (...a) => { const g = getopts(a, 'n'); return out(lines(input(g.rest)).slice(0, Number(g.o.n || 10))); });
+      def('head', 'head [-n 行数] [-c 文字数] [ファイル...]', '先頭の行を表示（既定 10 行。-c は先頭の文字数）', (...a) => { const g = getopts(a, 'nc'); if (g.o.c != null) return input(g.rest).slice(0, Number(g.o.c)); return out(lines(input(g.rest)).slice(0, Number(g.o.n || 10))); });
+      // xxd（7.2）: 16 進ダンプ。/dev/random などを見るとき用。-l で長さ
+      def('xxd', 'xxd [-l 長さ] [ファイル]', '16 進ダンプ（例: xxd -l 64 /dev/random）', (...a) => {
+        const g = getopts(a, 'l'); let t = input(g.rest);
+        if (g.o.l != null) t = t.slice(0, Number(g.o.l));
+        const b = []; for (const ch of t) { const c = ch.codePointAt(0); if (c < 256) b.push(c); else for (const x of new TextEncoder().encode(ch)) b.push(x); }
+        const rows = [];
+        for (let i = 0; i < b.length; i += 16) {
+          const r = b.slice(i, i + 16), hx = [];
+          for (let j = 0; j < 16; j += 2) hx.push(j < r.length ? r.slice(j, j + 2).map(x => x.toString(16).padStart(2, '0')).join('').padEnd(4) : '    ');
+          rows.push(i.toString(16).padStart(8, '0') + ': ' + hx.join(' ') + '  ' + r.map(x => x >= 32 && x < 127 ? String.fromCharCode(x) : '.').join(''));
+        }
+        return out(rows);
+      });
       def('tail', 'tail [-n 行数] [ファイル...]', '末尾の行を表示（既定 10 行）', (...a) => { const g = getopts(a, 'n'), n = Number(g.o.n || 10); const l = lines(input(g.rest)); return out(n ? l.slice(-n) : []); });
       def('wc', 'wc [-l] [-w] [-c] [ファイル...]', '行数・単語数・文字数を数える', (...a) => {
         const g = getopts(a), t = input(g.rest), n = { l: lines(t).length, w: (t.match(/\S+/g) || []).length, c: [...t].length };
@@ -1262,6 +1285,7 @@
           if (!ls) return p + ': そのようなファイルはありません';
           if (ls.t === 'l') return p + ': シンボリックリンク → ' + ls.c + (fs.exists(q) ? '' : '（リンク先がありません）');
           if (ls.t === 'd') return p + ': ディレクトリ';
+          if (ls.x) return p + ': ' + (ls.x === 'b' ? 'ブロック' : 'キャラクター') + 'デバイス（仮想。/dev）';
           if (ls.b) { const m = String(ls.c).match(/^data:([^;,]+)/); return p + ': バイナリ（' + (m ? m[1] : '不明') + '）' + fmtSize(ls.c.length); }
           const c = ls.c;
           if (!c.length) return p + ': 空のファイル';

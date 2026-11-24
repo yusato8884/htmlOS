@@ -3661,9 +3661,10 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
           const p = await navigator.serial.requestPort();
           await p.open({ baudRate: Number(baud.value) });
           port = p; writer = p.writable.getWriter();
+          const dn = OS.dev ? OS.dev.attach(p, { read: () => text.slice(-8192), write: s => send(s) }) : null; // 7.2: /dev/ttyACM0 などからも読み書きできる
           bConn.textContent = '切断'; bConn.classList.remove('primary'); baud.disabled = true;
           status.textContent = '接続中 ・ ' + baud.value + ' bps ・ 黒い画面をクリックしてキーを打つと、そのまま送信します';
-          note('接続しました'); out.focus();
+          note('接続しました' + (dn ? '（/dev/' + dn + '）' : '')); out.focus();
           readLoop(p);
         } catch (e) {
           if (e && e.name === 'NotFoundError') return; // ポート選択をキャンセルした
@@ -3682,11 +3683,13 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         } catch (e) { if (port === p) { note('切断されました（' + (e && e.message || e) + '）'); cleanup(); } }
       }
       function cleanup() {
+        if (port && OS.dev) OS.dev.detach(port);
         port = null; writer = null;
         bConn.textContent = '接続'; bConn.classList.add('primary'); baud.disabled = false; status.textContent = '未接続';
       }
       async function disconnect(quiet) {
         const p = port; if (!p) return;
+        if (OS.dev) OS.dev.detach(p);
         port = null;
         try { if (reader) await reader.cancel(); } catch (e) { /* 無視 */ }
         try { if (writer) { writer.releaseLock(); } } catch (e) { /* 無視 */ }
@@ -3730,6 +3733,525 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       } else {
         text = '「接続」を押して、つなぎたいシリアルポートを選んでください。\nMicroPython の REPL なら 115200 bps のままで大丈夫です。\n'; paint();
       }
+      return win;
+    }
+  });
+})();
+</script>
+<script type="text/x-htmlos" data-path="/sys/apps/81-hmicropy.js">
+/* hMicroPy（7.2 から）— MicroPython のボードを Web Serial でつないで開発するアプリ
+   ・対応: MicroPython が入ったボードならだいたい何でも。RP2040 / RP2350（Raspberry Pi Pico・Pico 2 など）、
+     ESP32（CP210x・CH340 などの USB-シリアル変換チップ経由）、ESP32-S2/S3/C3/C6（内蔵 USB）、pyboard など
+   ・左: ボードの中のファイル（開く・hFS へ保存・削除・名前変更・新しいフォルダ）、上: エディター、下: REPL（キーを打つとそのまま送る）
+   ・実行（F5）: エディターの中身をボードの RAM で実行（ファイルには書かない）。停止（Ctrl+C）
+   ・ボードに保存（Ctrl+S）: エディターの中身をボードのファイルに書く（main.py にすると電源を入れたときに動く）
+   ・ファイルのやりとりや実行には MicroPython の raw REPL（Ctrl+A）を使う（mpremote・Thonny と同じ方法）
+   ・つないでいる間は /dev/ttyACM0（ESP32 の変換チップなら /dev/ttyUSB0）としても読み書きできる（echo 'print(1)' > /dev/ttyACM0） */
+(function () {
+  const OS = window.OS, h = OS.h, path = OS.path, ui = OS.ui;
+  const enc = new TextEncoder();
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const pyStr = s => JSON.stringify(String(s)); // Python の文字列リテラル（JSON の書き方は Python でもそのまま通る）
+  const hex = b => Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+  const unhex = s => { const out = new Uint8Array(s.length >> 1); for (let i = 0; i < out.length; i++) out[i] = parseInt(s.substr(i * 2, 2), 16); return out; };
+  const fmt = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1024 ? (n / 1024).toFixed(1) + ' KB' : n + ' B';
+  const SAMPLE = '# hMicroPy へようこそ。F5 で実行、Ctrl+S でボードに保存します\n# Pico / Pico 2 の内蔵 LED を点滅させる例（ESP32 は Pin(2) などに変えてください）\nfrom machine import Pin\nimport time\n\nled = Pin("LED", Pin.OUT)\nfor i in range(10):\n    led.toggle()\n    print("toggle", i)\n    time.sleep(0.25)\n';
+
+  OS.registerApp({
+    id: 'hmicropy', name: 'hMicroPy', icon: 'chip', color: '#2f6fb3', desc: 'MicroPython 開発（RP2040・RP2350・ESP32 など）',
+    launch(arg) {
+      const fsx = OS.htui.fs, home = OS.users.home(OS.htui.user);
+      const win = OS.htui.open({ title: 'hMicroPy', icon: 'chip', w: 980, h: 620, app: 'hmicropy' });
+      const supported = 'serial' in navigator;
+      // ---- 状態
+      let port = null, reader = null, writer = null, usb = null, devName = null;
+      let mode = 'term';            // term: 受け取った文字を REPL に出す / raw: raw REPL の受け取り（rx にためる）/ quiet: 次の >>> まで捨てる
+      let rx = '', waiters = [], stream = null, busy = false, running = false;
+      let term = '', pendingEsc = '', board = null, boardDir = '/', files = [], fsInfo = null;
+      let file = null, dirty = false; // file: { where: 'board' | 'hfs', path }
+      let reconnecting = null;
+
+      // ---- 画面
+      const tb = (icon, label, fn, title) => h('button', { class: 'tbtn', type: 'button', title: title || label, onclick: fn }, icon ? OS.icon(icon, 16) : null, label);
+      const bConn = h('button', { class: 'btn small primary', type: 'button', onclick: () => (port ? disconnect() : connect()) }, '接続');
+      const baud = h('select', { class: 'sel', id: 'mp-baud-' + win.pid, title: '通信速度。USB-シリアル変換チップのボード（ESP32 など）で使います。内蔵 USB のボードは何でも動きます', 'aria-label': '通信速度' },
+        [9600, 57600, 115200, 230400, 460800, 921600].map(b => h('option', { value: String(b), selected: b === 115200 }, b + ' bps')));
+      const bRun = tb('play', '実行', () => run(), 'エディターの中身をボードで実行（F5）。ファイルには保存しません');
+      const bStop = tb('stop', '停止', () => stop(), '実行中のプログラムを止める（Ctrl+C）');
+      const bSave = tb('save', 'ボードに保存', () => saveBoard(), 'エディターの中身をボードのファイルに保存（Ctrl+S）');
+      const bReset = tb('reload', 'リセット', () => resetMenu(), 'ボードの再起動');
+      const ta = h('textarea', { class: 'he-text mp-ed', spellcheck: 'false', id: 'mp-ed-' + win.pid, 'aria-label': 'MicroPython のプログラム' });
+      const gut = h('div', { class: 'he-gutter', 'aria-hidden': 'true' }, '1');
+      const out = h('pre', { class: 'hs-out mp-term', tabindex: '0', 'aria-label': 'REPL。クリックしてキーを打つとボードに送ります' });
+      const fileList = h('div', { class: 'mp-files', role: 'listbox', 'aria-label': 'ボードのファイル' });
+      const dirLabel = h('div', { class: 'mp-dir' }, '/');
+      const fsLabel = h('div', { class: 'mp-free' });
+      const stBoard = h('span', { class: 'grow' }, supported ? '未接続' : 'Web Serial 非対応'), stFile = h('span'), stPos = h('span');
+      win.body.append(
+        h('div', { class: 'toolbar' }, bConn, baud, h('span', { class: 'sep' }), bRun, bStop, bSave, h('span', { class: 'sep' }),
+          tb('file', '新規', newDoc, '新しいプログラム'), tb('folder', '開く', openHfs, 'hFS（htmlOS のファイル）から開く'), tb('download', 'hFS に保存', saveHfs, 'エディターの中身を hFS（htmlOS のファイル）に保存'),
+          h('span', { class: 'sep' }), bReset, tb(null, 'クリア', () => { term = ''; paint(); }, 'REPL の表示を消す')),
+        h('div', { class: 'mp-main' },
+          h('div', { class: 'mp-side' },
+            h('div', { class: 'mp-side-bar' }, h('b', null, 'ボード'), h('span', { class: 'grow' }),
+              h('button', { class: 'tbtn', type: 'button', title: '上のフォルダへ', 'aria-label': '上のフォルダへ', onclick: () => { if (boardDir !== '/') { boardDir = path.dir(boardDir); refresh(); } } }, OS.icon('back', 15)),
+              h('button', { class: 'tbtn', type: 'button', title: '一覧を更新', 'aria-label': '一覧を更新', onclick: () => refresh() }, OS.icon('reload', 15)),
+              h('button', { class: 'tbtn', type: 'button', title: 'hFS のファイルをボードへ送る', 'aria-label': 'hFS のファイルをボードへ送る', onclick: () => uploadHfs() }, OS.icon('plus', 15))),
+            dirLabel, fileList, fsLabel),
+          h('div', { class: 'mp-right' },
+            h('div', { class: 'he-wrap mp-edwrap' }, gut, ta),
+            h('div', { class: 'mp-split', title: '上下の大きさを変える' }),
+            out)),
+        h('div', { class: 'statusbar' }, stBoard, stFile, stPos));
+      const right = win.body.querySelector('.mp-right'), edwrap = win.body.querySelector('.mp-edwrap');
+
+      // ---- エディター
+      let nLines = 0;
+      function edRefresh() {
+        const n = ta.value.split('\n').length;
+        if (n !== nLines) { nLines = n; const a = []; for (let i = 1; i <= n; i++) a.push(i); gut.textContent = a.join('\n'); }
+        gut.scrollTop = ta.scrollTop;
+        const before = ta.value.slice(0, ta.selectionStart).split('\n');
+        stPos.textContent = '行 ' + before.length + '、列 ' + (before[before.length - 1].length + 1);
+        stFile.textContent = (file ? (file.where === 'board' ? 'ボード:' : 'hFS:') + file.path : '無題') + (dirty ? ' ・ 未保存' : '');
+        win.setTitle((dirty ? '● ' : '') + (file ? path.base(file.path) : '無題') + ' — hMicroPy');
+      }
+      const setDirty = d => { dirty = d; edRefresh(); };
+      ta.addEventListener('input', () => setDirty(true));
+      ta.addEventListener('scroll', () => { gut.scrollTop = ta.scrollTop; });
+      ['keyup', 'click', 'select'].forEach(ev => ta.addEventListener(ev, edRefresh));
+      ta.addEventListener('keydown', e => {
+        if (e.isComposing) return;
+        const s = ta.selectionStart, v = ta.value;
+        // Tab = 空白 4 つ（Shift+Tab で戻す）、Enter は前の行の字下げを引き継ぎ、: で終わる行のあとは 1 段深くする
+        if (e.key === 'Tab' && !e.ctrlKey && !e.altKey) {
+          e.preventDefault();
+          if (e.shiftKey) { const ls = v.lastIndexOf('\n', s - 1) + 1, m = /^ {1,4}/.exec(v.slice(ls)); if (m) { ta.setRangeText('', ls, ls + m[0].length, 'end'); ta.selectionStart = ta.selectionEnd = Math.max(ls, s - m[0].length); setDirty(true); } return; }
+          ta.setRangeText('    ', s, ta.selectionEnd, 'end'); setDirty(true);
+        } else if (e.key === 'Enter' && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+          const ls = v.lastIndexOf('\n', s - 1) + 1, line = v.slice(ls, s), ind = /^[ \t]*/.exec(line)[0] + (/:\s*(#.*)?$/.test(line) ? '    ' : '');
+          e.preventDefault(); ta.setRangeText('\n' + ind, s, ta.selectionEnd, 'end'); setDirty(true);
+        }
+      });
+      win.el.addEventListener('keydown', e => {
+        if (e.key === 'F5') { e.preventDefault(); run(); return; }
+        if (!(e.ctrlKey || e.metaKey) || e.target === out) return;
+        const k = e.key.toLowerCase();
+        if (k === 's') { e.preventDefault(); if (e.shiftKey) saveHfs(); else saveBoard(); }
+        else if (k === 'o') { e.preventDefault(); openHfs(); }
+      });
+      // 上下の仕切りをドラッグ
+      win.body.querySelector('.mp-split').addEventListener('pointerdown', e => {
+        e.preventDefault(); const r = right.getBoundingClientRect();
+        const mv = ev => { const f = Math.min(0.85, Math.max(0.15, (ev.clientY - r.top) / r.height)); edwrap.style.flex = f + ' 1 0'; out.style.flex = (1 - f) + ' 1 0'; };
+        const up = () => { window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); };
+        window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
+      });
+
+      // ---- REPL の表示
+      function paint() { const stick = out.scrollTop + out.clientHeight >= out.scrollHeight - 30; out.textContent = term; if (stick) out.scrollTop = out.scrollHeight; }
+      function note(s) { term += (term && !term.endsWith('\n') ? '\n' : '') + '--- ' + s + ' ---\n'; paint(); }
+      function show(chunk) {
+        let s = pendingEsc + chunk; pendingEsc = '';
+        const cut = s.lastIndexOf('\x1b');
+        if (cut >= 0 && !/^\x1b\[[0-9;?]*[A-Za-z]/.test(s.slice(cut)) && s.length - cut < 12) { pendingEsc = s.slice(cut); s = s.slice(0, cut); }
+        s = s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '');
+        for (const ch of s) {
+          if (ch === '\r' || ch === '\x1b' || ch === '\x07' || ch === '\x04') continue;
+          if (ch === '\b') { if (term && !term.endsWith('\n')) term = term.slice(0, -1); continue; }
+          term += ch;
+        }
+        if (term.length > 150000) term = term.slice(-120000);
+        // 起動メッセージからボードの名前を拾う（MicroPython v1.24.1 on 2024-11-29; Raspberry Pi Pico with RP2040）
+        const m = /MicroPython (v[^\s;]+)[^;\n]*; ([^\n]+?)\s*\n/.exec(term.slice(-400));
+        if (m && (!board || board.name !== m[2])) { board = { ver: m[1], name: m[2] }; status(); }
+        paint();
+      }
+      // 受け取ったもの
+      let recent = ''; // /dev/ttyACM0 を読んだときに返す
+      function feed(chunk) {
+        recent = (recent + chunk).slice(-8192);
+        if (mode === 'term') { show(chunk); return; }
+        if (mode === 'quiet') {
+          rx += chunk; const i = rx.indexOf('>>> ');
+          const m = /MicroPython (v[^\s;]+)[^;\n]*; ([^\r\n]+)/.exec(rx); if (m) { board = { ver: m[1], name: m[2].trim() }; status(); }
+          if (i >= 0) { mode = 'term'; let rest = rx.slice(i); rx = ''; if (term.endsWith('>>> ')) rest = rest.slice(4); if (rest) show(rest); }
+          else if (rx.length > 4000) rx = rx.slice(-200);
+          return;
+        }
+        rx += chunk;
+        if (stream) stream();
+        waiters = waiters.filter(w => !w());
+      }
+      // rx に want が来るまで待つ（来たらそこまでを取り除いて返す）
+      function waitFor(want, ms) {
+        return new Promise((res, rej) => {
+          let done = false;
+          const check = () => {
+            const i = want instanceof RegExp ? rx.search(want) : rx.indexOf(want);
+            if (i < 0) return false;
+            const len = want instanceof RegExp ? rx.match(want)[0].length : want.length;
+            const got = rx.slice(0, i); rx = rx.slice(i + len); done = true; clearTimeout(t); res(got); return true;
+          };
+          const t = setTimeout(() => { if (done) return; waiters = waiters.filter(w => w !== check); rej(new Error('ボードから返事がありません（' + Math.round(ms / 1000) + ' 秒待ちました）')); }, ms);
+          if (!check()) waiters.push(check);
+        });
+      }
+
+      // ---- シリアルポート
+      function status() {
+        if (!port) { stBoard.textContent = supported ? '未接続' : 'Web Serial 非対応'; return; }
+        stBoard.textContent = (devName ? '/dev/' + devName + ' ・ ' : '') + (board ? board.name + '（MicroPython ' + board.ver + '）' : usb ? usb.vendor : '接続中') + (running ? ' ・ 実行中' : busy ? ' ・ 通信中…' : '');
+        bRun.disabled = !port || busy; bStop.disabled = !port; bSave.disabled = !port || busy; bReset.disabled = !port || busy;
+      }
+      async function connect(p0) {
+        try {
+          const p = p0 || await navigator.serial.requestPort();
+          await p.open({ baudRate: Number(baud.value) });
+          port = p; writer = p.writable.getWriter(); usb = OS.dev ? OS.dev.usb(p.getInfo()) : null;
+          devName = OS.dev ? OS.dev.attach(p, { read: () => recent, write: s => send(s) }) : null;
+          bConn.textContent = '切断'; bConn.classList.remove('primary'); baud.disabled = true;
+          note('接続しました' + (usb ? '（' + usb.vendor + ' [' + usb.id + ']）' : ''));
+          readLoop(p); status();
+          // REPL を出して（Ctrl+C を 2 回）、ボードの情報とファイルの一覧を読む
+          await sleep(150);
+          if (await info()) await refresh();
+        } catch (e) {
+          if (e && e.name === 'NotFoundError') return; // ポートの選択をキャンセルした
+          if (!port) { ui.alert('接続できませんでした。\n' + (e && e.message || e) + '\n\nほかのアプリ（Thonny・hSerial など）がそのポートを使っていないか確かめてください。'); return; }
+          note(e.message || String(e));
+        }
+      }
+      async function readLoop(p) {
+        const dec = new TextDecoder();
+        try {
+          while (port === p && p.readable) {
+            reader = p.readable.getReader();
+            try { for (;;) { const r = await reader.read(); if (r.done) break; feed(dec.decode(r.value, { stream: true })); } }
+            finally { try { reader.releaseLock(); } catch (e) { /* 解放済み */ } reader = null; }
+            if (port !== p) break;
+          }
+        } catch (e) {
+          if (port !== p) return;
+          const info0 = p.getInfo ? p.getInfo() : {};
+          cleanup(); note('切断されました（' + (e && e.message || e) + '）');
+          if (reconnecting) waitReconnect(info0);
+        }
+      }
+      // ボードが再起動して USB がつなぎ直されたら（内蔵 USB のボード）、同じ機器をもう一度開く
+      function waitReconnect(info0) {
+        if (!supported) return;
+        note('ボードが戻ってくるのを待っています…');
+        const until = Date.now() + 12000;
+        const tick = async () => {
+          if (port || !win.el.isConnected) return;
+          const l = await navigator.serial.getPorts().catch(() => []);
+          const p = l.find(x => { const i = x.getInfo(); return i.usbVendorId === info0.usbVendorId && i.usbProductId === info0.usbProductId; });
+          if (p) { reconnecting = null; await sleep(400); return connect(p); }
+          if (Date.now() < until) setTimeout(tick, 600); else { reconnecting = null; note('戻ってきませんでした。「接続」を押してください'); }
+        };
+        setTimeout(tick, 800);
+      }
+      function cleanup() {
+        if (port && OS.dev) OS.dev.detach(port);
+        port = null; writer = null; busy = false; running = false; stream = null; mode = 'term'; rx = ''; waiters = [];
+        bConn.textContent = '接続'; bConn.classList.add('primary'); baud.disabled = false;
+        files = []; fsInfo = null; renderFiles(); status();
+      }
+      async function disconnect(quiet) {
+        const p = port; if (!p) return;
+        if (OS.dev) OS.dev.detach(p);
+        port = null;
+        try { if (reader) await reader.cancel(); } catch (e) { /* 無視 */ }
+        try { if (writer) writer.releaseLock(); } catch (e) { /* 無視 */ }
+        try { await p.close(); } catch (e) { /* 無視 */ }
+        if (!quiet) { cleanup(); note('切断しました'); }
+      }
+      function send(s) {
+        if (!port || !writer) { ui.toast('まだ接続していません'); return false; }
+        writer.write(enc.encode(s)).catch(e => note('送信に失敗しました（' + e.message + '）'));
+        return true;
+      }
+      // 大きいものは 256 バイトずつ、少し間をあけて送る（ボードの受け取り口があふれないように）
+      async function sendSlow(s) {
+        const b = enc.encode(s);
+        for (let i = 0; i < b.length; i += 256) { if (!writer) throw new Error('切断されました'); await writer.write(b.slice(i, i + 256)); if (b.length > 256) await sleep(8); }
+      }
+
+      // ---- raw REPL
+      async function enterRaw() {
+        mode = 'raw'; rx = '';
+        await sendSlow('\r\x03'); await sleep(60); await sendSlow('\x03'); await sleep(120); rx = '';
+        await sendSlow('\x01');
+        try { await waitFor('raw REPL; CTRL-B to exit\r\n>', 1500); }
+        catch (e) { // プログラムが Ctrl+C を受け付けるまで時間がかかることがある。もう一度
+          await sendSlow('\x03\x03'); await sleep(300); rx = ''; await sendSlow('\x01');
+          await waitFor('raw REPL; CTRL-B to exit\r\n>', 2500).catch(() => { throw new Error('ボードが raw REPL に入りません。MicroPython が入っているか、通信速度が合っているか確かめてください'); });
+        }
+      }
+      async function exitRaw() { if (!port) return; mode = 'quiet'; rx = ''; await sendSlow('\x02').catch(() => {}); setTimeout(() => { if (mode === 'quiet') { mode = 'term'; rx = ''; } }, 1500); }
+      // コードを実行して { out, err } を返す（raw REPL に入っていること）
+      async function exec(code, ms) {
+        rx = '';
+        await sendSlow(code); await sendSlow('\x04');
+        await waitFor('OK', 3000).catch(() => { throw new Error('ボードがコードを受け取りませんでした'); });
+        const o = await waitFor('\x04', ms || 10000), e = await waitFor('\x04', 3000);
+        await waitFor('>', 2000).catch(() => {});
+        return { out: o.replace(/\r/g, ''), err: e.replace(/\r/g, '') };
+      }
+      async function execOk(code, ms) { const r = await exec(code, ms); if (r.err.trim()) { const l = r.err.trim().split('\n'); throw new Error(l[l.length - 1]); } return r.out; }
+      // 通信の操作をひとつずつ（raw REPL に入って、終わったら戻る）
+      async function op(fn) {
+        if (!port) { ui.toast('まだ接続していません'); return; }
+        if (busy) { ui.toast('いま別の操作をしています'); return; }
+        busy = true; status();
+        try { await enterRaw(); await fn(); return true; }
+        catch (e) { if (port) ui.alert(e.message || String(e)); return false; }
+        finally { busy = false; await exitRaw(); status(); }
+      }
+
+      async function info() {
+        return op(async () => {
+          const o = await execOk('import sys, os\nu = os.uname()\nprint(u.machine)\nprint(u.release)\ntry:\n s = os.statvfs("/")\n print(s[0] * s[2], s[0] * s[3])\nexcept Exception:\n print(0, 0)\n');
+          const l = o.trim().split('\n');
+          board = { name: l[0] || '?', ver: 'v' + (l[1] || '?') };
+          const f = (l[2] || '0 0').split(' ').map(Number); fsInfo = { total: f[0], free: f[1] };
+        });
+      }
+      const LIST = 'import os\ndef _l(d):\n for n in sorted(os.listdir(d)):\n  try:\n   s = os.stat((d.rstrip("/") + "/" + n) if d != "/" else "/" + n)\n   print("%s\\t%d\\t%d" % (n, 1 if s[0] & 0x4000 else 0, s[6]))\n  except Exception:\n   print("%s\\t0\\t0" % n)\n';
+      async function refresh() {
+        if (!port) { renderFiles(); return; }
+        await op(async () => {
+          let o;
+          try { o = await execOk(LIST + '_l(' + pyStr(boardDir) + ')\n'); }
+          catch (e) { if (boardDir !== '/') { boardDir = '/'; o = await execOk(LIST + '_l("/")\n'); } else throw e; }
+          files = o.split('\n').filter(Boolean).map(l => { const p = l.split('\t'); return { name: p[0], dir: p[1] === '1', size: Number(p[2]) || 0 }; })
+            .sort((a, b) => (b.dir - a.dir) || a.name.localeCompare(b.name));
+          try { const f = (await execOk('s = os.statvfs("/")\nprint(s[0] * s[2], s[0] * s[3])\n')).trim().split(' ').map(Number); fsInfo = { total: f[0], free: f[1] }; } catch (e) { /* statvfs がないボード */ }
+        });
+        renderFiles();
+      }
+      const bpath = n => (boardDir === '/' ? '' : boardDir) + '/' + n;
+      function renderFiles() {
+        dirLabel.textContent = boardDir;
+        fileList.textContent = '';
+        if (!port) fileList.append(h('div', { class: 'mp-empty' }, supported ? '「接続」を押してボードを選んでください' : 'このブラウザは Web Serial に対応していません'));
+        else if (!files.length) fileList.append(h('div', { class: 'mp-empty' }, '（空です）'));
+        files.forEach(f => {
+          const p = bpath(f.name);
+          const row = h('button', { class: 'mp-file' + (file && file.where === 'board' && file.path === p ? ' on' : ''), type: 'button', role: 'option', title: p,
+            ondblclick: () => f.dir ? (boardDir = p, refresh()) : openBoard(p),
+            onclick: e => { if (e.detail === 1 && OS.uiMode && OS.uiMode !== 'desktop') { if (f.dir) { boardDir = p; refresh(); } else openBoard(p); } },
+            oncontextmenu: e => { e.preventDefault(); fileMenu(e.clientX, e.clientY, f, p); } },
+          OS.icon(f.dir ? 'folder' : /\.py$/.test(f.name) ? 'script' : 'file', 15), h('span', { class: 'mp-fn' }, f.name), h('small', null, f.dir ? '' : fmt(f.size)));
+          fileList.append(row);
+        });
+        fsLabel.textContent = fsInfo && fsInfo.total ? '空き ' + fmt(fsInfo.free) + ' / ' + fmt(fsInfo.total) : '';
+      }
+      fileList.addEventListener('contextmenu', e => {
+        if (e.target !== fileList || !port) return; e.preventDefault();
+        OS.htui.menuAt(e.clientX, e.clientY, [{ label: '新しいファイル…', icon: 'file', act: newBoardFile }, { label: '新しいフォルダ…', icon: 'folder', act: mkdirBoard }, { label: 'hFS のファイルを送る…', icon: 'plus', act: uploadHfs }, { label: '更新', icon: 'reload', act: () => refresh() }]);
+      });
+      function fileMenu(x, y, f, p) {
+        const items = f.dir ? [{ label: '開く', icon: 'folder', act: () => { boardDir = p; refresh(); } }]
+          : [{ label: 'エディターで開く', icon: 'edit', act: () => openBoard(p) }, { label: 'このファイルを実行', icon: 'play', act: () => runFile(p) }, { label: 'hFS にダウンロード…', icon: 'download', act: () => download(p) }];
+        items.push({ label: '名前を変更…', icon: 'text', act: () => renameBoard(f, p) }, { label: '削除…', icon: 'trash', act: () => removeBoard(f, p) });
+        OS.htui.menuAt(x, y, items);
+      }
+
+      // ---- ボードのファイル
+      const READ = 'try:\n import binascii as _B\nexcept ImportError:\n import ubinascii as _B\n';
+      async function readBoard(p) {
+        const o = await execOk(READ + 'with open(' + pyStr(p) + ', "rb") as _f:\n while True:\n  _b = _f.read(256)\n  if not _b:\n   break\n  print(_B.hexlify(_b).decode())\n', 30000);
+        return unhex(o.replace(/\s+/g, ''));
+      }
+      async function writeBoard(p, bytes, progress) {
+        await execOk(READ + '_f = open(' + pyStr(p) + ', "wb")\n_w = lambda h: _f.write(_B.unhexlify(h))\n');
+        try { for (let i = 0; i < bytes.length; i += 512) { await execOk('_w("' + hex(bytes.slice(i, i + 512)) + '")\n'); if (progress) progress(Math.min(bytes.length, i + 512), bytes.length); } }
+        finally { await exec('_f.close()\n').catch(() => {}); }
+      }
+      async function confirmDiscard() {
+        if (!dirty) return true;
+        return ui.confirm((file ? path.base(file.path) : '無題') + ' への変更は保存されていません。破棄しますか?', { ok: '破棄', danger: true });
+      }
+      async function openBoard(p) {
+        if (!(await confirmDiscard())) return;
+        await op(async () => {
+          const b = await readBoard(p);
+          ta.value = new TextDecoder().decode(b); file = { where: 'board', path: p }; nLines = 0; setDirty(false); renderFiles();
+        });
+      }
+      async function saveBoard() {
+        if (!port) { ui.toast('ボードにつないでから保存してください（hFS に保存するなら Ctrl+Shift+S）'); return; }
+        let p = file && file.where === 'board' ? file.path : null;
+        if (!p) {
+          const n = await ui.prompt('ボードに保存するファイル名（main.py にすると、電源を入れたときに自動で動きます）', file ? path.base(file.path) : 'main.py', { title: 'ボードに保存' });
+          if (!n) return;
+          p = n.startsWith('/') ? n : bpath(n);
+          if (files.some(f => bpath(f.name) === p) && !(await ui.confirm(p + ' はすでにあります。上書きしますか?', { ok: '上書き', danger: true }))) return;
+        }
+        let ok = false;
+        await op(async () => { await writeBoard(p, enc.encode(ta.value), (a, b) => { stBoard.textContent = '保存中… ' + Math.round(a / b * 100) + '%'; }); ok = true; });
+        if (ok) { file = { where: 'board', path: p }; setDirty(false); ui.toast('ボードに保存しました: ' + p); refresh(); }
+      }
+      async function download(p) {
+        const dest = await ui.pickFile({ mode: 'save', dir: home + '/Documents', name: path.base(p) });
+        if (!dest) return;
+        await op(async () => {
+          const b = await readBoard(p);
+          let text = null; try { text = new TextDecoder('utf-8', { fatal: true }).decode(b); } catch (e) { /* バイナリ */ }
+          if (text != null && !/[\0-\x08\x0e-\x1f]/.test(text)) fsx.write(dest, text);
+          else { let s = ''; b.forEach(x => { s += String.fromCharCode(x); }); fsx.write(dest, 'data:application/octet-stream;base64,' + btoa(s), { bin: true }); }
+          ui.toast('hFS に保存しました: ' + dest);
+        });
+      }
+      // hFS のファイル → バイト列（data: URL のバイナリにも対応）
+      function hfsBytes(p) {
+        const st = OS.fs.stat(p);
+        if (st && st.b) { const m = /^data:[^,]*?(;base64)?,(.*)$/s.exec(fsx.read(p)); if (m) { if (m[1]) { const s = atob(m[2]); return Uint8Array.from(s, c => c.charCodeAt(0)); } return enc.encode(decodeURIComponent(m[2])); } }
+        return enc.encode(fsx.read(p));
+      }
+      async function uploadHfs() {
+        if (!port) { ui.toast('まだ接続していません'); return; }
+        const src = await ui.pickFile({ mode: 'open', dir: home + '/Documents' });
+        if (!src) return;
+        let bytes; try { bytes = hfsBytes(src); } catch (e) { ui.alert(e.message); return; }
+        const p = bpath(path.base(src));
+        if (files.some(f => bpath(f.name) === p) && !(await ui.confirm(p + ' はすでにあります。上書きしますか?', { ok: '上書き', danger: true }))) return;
+        await op(async () => { await writeBoard(p, bytes, (a, b) => { stBoard.textContent = '送信中… ' + Math.round(a / b * 100) + '%'; }); ui.toast('ボードへ送りました: ' + p + '（' + fmt(bytes.length) + '）'); });
+        refresh();
+      }
+      async function newBoardFile() {
+        const n = await ui.prompt('新しいファイルの名前', 'new.py', { title: '新しいファイル' }); if (!n) return;
+        const p = bpath(n);
+        await op(async () => { await writeBoard(p, new Uint8Array(0)); });
+        await refresh(); openBoard(p);
+      }
+      async function mkdirBoard() {
+        const n = await ui.prompt('新しいフォルダの名前', 'lib', { title: '新しいフォルダ' }); if (!n) return;
+        await op(() => execOk('import os\nos.mkdir(' + pyStr(bpath(n)) + ')\n')); refresh();
+      }
+      async function renameBoard(f, p) {
+        const n = await ui.prompt('新しい名前', f.name, { title: '名前を変更' }); if (!n || n === f.name) return;
+        const q = bpath(n);
+        await op(() => execOk('import os\nos.rename(' + pyStr(p) + ', ' + pyStr(q) + ')\n'));
+        if (file && file.where === 'board' && file.path === p) { file.path = q; edRefresh(); }
+        refresh();
+      }
+      async function removeBoard(f, p) {
+        if (!(await ui.confirm(p + (f.dir ? ' フォルダ（空のときだけ消せます）' : '') + ' をボードから削除しますか? 元には戻せません。', { ok: '削除', danger: true }))) return;
+        await op(() => execOk('import os\nos.' + (f.dir ? 'rmdir' : 'remove') + '(' + pyStr(p) + ')\n'));
+        if (file && file.where === 'board' && file.path === p) { file = null; edRefresh(); }
+        refresh();
+      }
+
+      // ---- 実行（出力は REPL にそのまま流す。input() には REPL で打った文字が届く）
+      async function runCode(code, label) {
+        if (!port) { ui.toast('まだ接続していません'); return; }
+        if (busy) { ui.toast('いま別の操作をしています'); return; }
+        busy = true; running = true; status();
+        try {
+          await enterRaw();
+          note('▶ ' + label + ' を実行します（停止: Ctrl+C か「停止」）');
+          rx = '';
+          await sendSlow(code); await sendSlow('\x04');
+          await waitFor('OK', 4000).catch(() => { throw new Error('ボードがコードを受け取りませんでした'); });
+          // OK のあと: 標準出力 \x04 エラー出力 \x04 >
+          await new Promise(res => {
+            let phase = 0;
+            stream = () => {
+              let s = rx; rx = '';
+              while (s && phase < 2) {
+                const i = s.indexOf('\x04');
+                if (i < 0) { show(s); s = ''; break; }
+                show(s.slice(0, i)); s = s.slice(i + 1); phase++;
+              }
+              if (phase >= 2) { stream = null; res(); }
+            };
+            stream();
+          });
+          note('■ 終了しました');
+        } catch (e) { note(e.message || String(e)); }
+        finally { stream = null; running = false; busy = false; await exitRaw(); status(); }
+      }
+      function run() { if (!ta.value.trim()) { ui.toast('エディターが空です'); return; } runCode(ta.value, file ? path.base(file.path) : 'エディターの中身'); }
+      function runFile(p) { runCode('exec(open(' + pyStr(p) + ').read(), {"__name__": "__main__"})\n', p); }
+      function stop() { if (!port) return; send('\x03'); if (!running) setTimeout(() => send('\x03'), 50); }
+
+      // ---- リセット
+      function resetMenu() {
+        const r = bReset.getBoundingClientRect();
+        OS.htui.menuAt(r.left, r.bottom + 2, [
+          { label: 'ソフトリセット（Ctrl+D。main.py をもう一度動かす）', icon: 'reload', act: softReset },
+          { label: 'ハードリセット（ボードを再起動）', icon: 'power', act: hardReset }
+        ]);
+      }
+      async function softReset() { if (!port || busy) return; mode = 'term'; send('\x03'); await sleep(80); send('\x04'); }
+      async function hardReset() {
+        if (!port || busy) return;
+        if (usb && usb.bridge && port.setSignals) {
+          // USB-シリアル変換チップ（ESP32 開発ボードなど）: RTS で EN を下げて離す（esptool と同じ。DTR は上げない = 書き込みモードに入らない）
+          note('ハードリセット（RTS）');
+          try {
+            await port.setSignals({ dataTerminalReady: false, requestToSend: true }); await sleep(120);
+            await port.setSignals({ requestToSend: false }); await sleep(60);
+            await port.setSignals({ dataTerminalReady: true, requestToSend: true }).catch(() => {});
+          } catch (e) { note('信号線を動かせませんでした（' + e.message + '）'); }
+          return;
+        }
+        // 内蔵 USB のボード（RP2040・RP2350・ESP32-S3 など）: machine.reset()。USB が一度切れるので、戻ってきたらつなぎ直す
+        note('ハードリセット（machine.reset()）');
+        reconnecting = true; mode = 'term';
+        send('\x03\x03'); await sleep(100); send('import machine; machine.reset()\r');
+      }
+
+      // ---- エディターのファイル（hFS）
+      async function newDoc() { if (!(await confirmDiscard())) return; ta.value = ''; file = null; nLines = 0; setDirty(false); renderFiles(); ta.focus(); }
+      async function openHfs() {
+        if (!(await confirmDiscard())) return;
+        const p = await ui.pickFile({ mode: 'open', dir: file && file.where === 'hfs' ? path.dir(file.path) : home + '/Documents' });
+        if (!p) return;
+        try { ta.value = fsx.read(p); file = { where: 'hfs', path: p }; nLines = 0; setDirty(false); renderFiles(); } catch (e) { ui.alert(e.message); }
+      }
+      async function saveHfs() {
+        const p = await ui.pickFile({ mode: 'save', dir: file && file.where === 'hfs' ? path.dir(file.path) : home + '/Documents', name: file ? path.base(file.path) : 'main.py' });
+        if (!p) return;
+        if (!(file && file.where === 'hfs' && file.path === p) && fsx.exists(p) && !(await ui.confirm(path.base(p) + ' はすでにあります。上書きしますか?', { ok: '上書き', danger: true }))) return;
+        try { fsx.write(p, ta.value); file = { where: 'hfs', path: p }; setDirty(false); renderFiles(); ui.toast('hFS に保存しました: ' + p); } catch (e) { ui.alert(e.message); }
+      }
+
+      // ---- REPL のキー
+      const SPECIAL = { Enter: '\r', Backspace: '\x7f', Tab: '\t', Escape: '\x1b', ArrowUp: '\x1b[A', ArrowDown: '\x1b[B', ArrowRight: '\x1b[C', ArrowLeft: '\x1b[D', Delete: '\x1b[3~', Home: '\x1b[H', End: '\x1b[F' };
+      out.addEventListener('keydown', e => {
+        if (!port || e.isComposing || e.metaKey || e.altKey || e.key === 'F5') return;
+        if (busy && !running) { e.preventDefault(); return; } // ファイルのやりとり中は打たせない
+        let s = null;
+        if (e.ctrlKey) { if (/^[a-z]$/i.test(e.key)) s = String.fromCharCode(e.key.toUpperCase().charCodeAt(0) - 64); }
+        else if (SPECIAL[e.key]) s = SPECIAL[e.key];
+        else if (e.key.length === 1) s = e.key;
+        if (s == null) return;
+        e.preventDefault(); send(s);
+      });
+      out.addEventListener('paste', e => { if (!port || (busy && !running)) return; e.preventDefault(); send((e.clipboardData.getData('text') || '').replace(/\r?\n/g, '\r')); });
+
+      // ---- ハイバーネート（エディターの中身とファイル名を覚える。ポートはつなぎ直しが必要）
+      win.onHibernate = () => ({ code: ta.value, file: file, dirty: dirty, term: term.slice(-4000) });
+      win.onDispose = () => { disconnect(true); };
+      const rs = arg && arg.resume;
+      if (rs) { ta.value = rs.code || ''; file = rs.file || null; dirty = !!rs.dirty; term = rs.term || ''; }
+      else if (arg && typeof arg === 'string' && fsx.isFile(arg)) { try { ta.value = fsx.read(arg); file = { where: 'hfs', path: arg }; } catch (e) { /* 読めない */ } }
+      else if (arg && arg.path && fsx.isFile(arg.path)) { try { ta.value = fsx.read(arg.path); file = { where: 'hfs', path: arg.path }; } catch (e) { /* 読めない */ } }
+      else ta.value = SAMPLE;
+      if (!supported) {
+        term += 'このブラウザは Web Serial に対応していないため、ボードにはつなげません。\nChrome / Edge / Chromium（パソコン版）で開いてください。エディターと hFS への保存は使えます。\n';
+        bConn.disabled = true;
+      } else if (!rs) {
+        term += '「接続」を押して、MicroPython の入ったボードのポートを選んでください。\n' +
+          '・RP2040 / RP2350（Pico・Pico 2 など）: 「Board CDC」や「USB シリアル デバイス」\n' +
+          '・ESP32: 「CP210x」「CH340」「USB JTAG/serial debug unit」など（通信速度は 115200 bps）\n' +
+          'ボードのファイルは左に出ます。ダブルクリックで開き、右クリックでほかの操作ができます。\n';
+      }
+      paint(); edRefresh(); renderFiles(); status();
       return win;
     }
   });
@@ -7761,6 +8283,9 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         this.proc = OS.proc.spawn({ name: 'jsh', cmd: (this.opt.login ? '-jsh' : 'jsh') + (tty === OS.tty1 ? '（tty1）' : ''), kind: 'shell', ppid: this.opt.ppid || 1,
           onsignal: sig => { if (self.opt.onsignal) return self.opt.onsignal(sig); throw new Error('ログインシェルは kill では終了できません（exit で抜けてください）'); } });
         Object.defineProperty(this.proc, 'user', { get: () => self.user }); // su で変わる
+        // 7.2: /proc/<PID>/cwd・environ と /dev/tty のため
+        Object.defineProperty(this.proc, 'cwd', { get: () => self.cwd });
+        this.proc.environ = () => self.vars; this.proc.tty = tty;
       }
     }
     get home() { return users.home(this.user); }
@@ -8033,6 +8558,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
           if (ri >= 0) { redir = { append: args[ri] === '>>', file: args[ri + 1] }; args = args.slice(0, ri); if (!redir.file) throw new Error('リダイレクト先のファイル名がありません'); }
         }
         const cap = !last || !!redir;
+        if (this.proc) OS.procSelf = this.proc.pid; // /proc/self・/dev/tty が指すプロセス（7.2）
         if (cap) tty.capture = [];
         this.stdin = data; result = undefined;
         try { result = await this.env[sg.name](...args); }
@@ -8041,7 +8567,12 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
           if (cap) { const c = tty.capture ? tty.capture.join('') : ''; tty.capture = cap0; const f = result === undefined ? '' : this.format(result); data = c + f + (f && !f.endsWith('\n') ? '\n' : ''); }
         }
         if (cap) result = undefined;
-        if (redir) { const dest = this.abs(redir.file); this.fs.write(dest, (redir.append && this.fs.exists(dest) ? this.fs.read(dest) : '') + data); }
+        if (redir) {
+          const dest = this.abs(redir.file), dst = this.fs.exists(dest) ? fs0.stat(dest) : null;
+          if (this.proc) OS.procSelf = this.proc.pid;
+          // デバイスファイル（/dev/null・/dev/ttyACM0 など）には >> でも前の中身をつけずに渡す
+          this.fs.write(dest, (redir.append && dst && !dst.x ? this.fs.read(dest) : '') + data);
+        }
       }
       return result;
     }
@@ -8306,7 +8837,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       def('rm', 'rm [-r] パス...', '削除', (...args) => { const o = flags(args); if (!o.rest.length) throw new Error('削除するパスを指定してください'); o.rest.forEach(p => fs.rm(A(p), { recursive: o.f.includes('r') })); });
       def('cp', 'cp コピー元 コピー先', 'コピー（ディレクトリも可）', (a, b) => { if (a == null || b == null) throw new Error('cp コピー元 コピー先'); fs.cp(A(a), A(b)); });
       def('mv', 'mv 移動元 移動先', '移動・名前変更', (a, b) => { if (a == null || b == null) throw new Error('mv 移動元 移動先'); fs.mv(A(a), A(b)); });
-      def('stat', 'stat パス', 'ファイル情報（モード・所有者・グループも）', p => { const q = A(p), s = fs.stat(q); if (!s) throw new Error(q + ': そのようなファイルはありません'); const rq = fs0.real(q), PM = OS.perm; return { path: q, type: s.t === 'd' ? 'directory' : s.t === 'p' ? 'fifo' : 'file', mode: PM.oct(PM.def(rq, s)) + ' (' + PM.str(s, rq) + ')', owner: s.o || 'root', group: PM.group(s), size: s.t === 'f' ? s.c.length : undefined, binary: !!s.b, modified: fmtDate(s.m) }; });
+      def('stat', 'stat パス', 'ファイル情報（モード・所有者・グループも）', p => { const q = A(p), s = fs.stat(q); if (!s) throw new Error(q + ': そのようなファイルはありません'); const rq = fs0.real(q), PM = OS.perm; return { path: q, type: s.t === 'd' ? 'directory' : s.t === 'p' ? 'fifo' : s.x === 'c' ? 'character device' : s.x === 'b' ? 'block device' : 'file', mode: PM.oct(PM.def(rq, s)) + ' (' + PM.str(s, rq) + ')', owner: s.o || 'root', group: PM.group(s), size: s.t === 'f' ? s.c.length : undefined, binary: !!s.b, modified: fmtDate(s.m) }; });
       // grep: ファイルを省くとパイプ（|）の入力から探す。-i 大文字小文字を区別しない / -v 一致しない行 / -n 行番号 / -c 数だけ
       def('grep', 'grep [-i] [-v] [-n] [-c] パターン [ファイル...]', '一致する行を表示（ファイルを省くとパイプの入力から探す）', (...a) => {
         const g = getopts(a), pat = g.rest.shift();
@@ -8504,6 +9035,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       def('hstore', 'hstore', 'パッケージマネージャ', () => { OS.launch('hstore'); });
       def('hbackup', 'hbackup', 'バックアップ', () => { OS.launch('hbackup'); });
       def('hserial', 'hserial', 'シリアルモニター', () => { OS.launch('hserial'); });
+      def('hmicropy', 'hmicropy [ファイル.py]', 'MicroPython 開発（RP2040・RP2350・ESP32 などを Web Serial でつなぐ）', f => { OS.launch('hmicropy', f ? A(f) : undefined); });
       def('hmd', 'hmd [ファイル]', 'Markdown エディター（コードとプレビュー）', p => { OS.launch('hmd', p == null ? null : A(p)); });
       def('hmines', 'hmines', 'マインスイーパー風のゲーム', () => { OS.launch('hmines'); });
       def('htictactoe', 'htictactoe', '三目並べ（CPU・二人で対戦、マスの数を変えられる）', () => { OS.launch('htictactoe'); });
@@ -8804,7 +9336,20 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       const lines = t => { const l = String(t).split('\n'); if (l.length && l[l.length - 1] === '') l.pop(); return l; };
       const out = l => l.join('\n');
       Object.defineProperty(env, '__getopts', { value: getopts, enumerable: false });
-      def('head', 'head [-n 行数] [ファイル...]', '先頭の行を表示（既定 10 行）', (...a) => { const g = getopts(a, 'n'); return out(lines(input(g.rest)).slice(0, Number(g.o.n || 10))); });
+      def('head', 'head [-n 行数] [-c 文字数] [ファイル...]', '先頭の行を表示（既定 10 行。-c は先頭の文字数）', (...a) => { const g = getopts(a, 'nc'); if (g.o.c != null) return input(g.rest).slice(0, Number(g.o.c)); return out(lines(input(g.rest)).slice(0, Number(g.o.n || 10))); });
+      // xxd（7.2）: 16 進ダンプ。/dev/random などを見るとき用。-l で長さ
+      def('xxd', 'xxd [-l 長さ] [ファイル]', '16 進ダンプ（例: xxd -l 64 /dev/random）', (...a) => {
+        const g = getopts(a, 'l'); let t = input(g.rest);
+        if (g.o.l != null) t = t.slice(0, Number(g.o.l));
+        const b = []; for (const ch of t) { const c = ch.codePointAt(0); if (c < 256) b.push(c); else for (const x of new TextEncoder().encode(ch)) b.push(x); }
+        const rows = [];
+        for (let i = 0; i < b.length; i += 16) {
+          const r = b.slice(i, i + 16), hx = [];
+          for (let j = 0; j < 16; j += 2) hx.push(j < r.length ? r.slice(j, j + 2).map(x => x.toString(16).padStart(2, '0')).join('').padEnd(4) : '    ');
+          rows.push(i.toString(16).padStart(8, '0') + ': ' + hx.join(' ') + '  ' + r.map(x => x >= 32 && x < 127 ? String.fromCharCode(x) : '.').join(''));
+        }
+        return out(rows);
+      });
       def('tail', 'tail [-n 行数] [ファイル...]', '末尾の行を表示（既定 10 行）', (...a) => { const g = getopts(a, 'n'), n = Number(g.o.n || 10); const l = lines(input(g.rest)); return out(n ? l.slice(-n) : []); });
       def('wc', 'wc [-l] [-w] [-c] [ファイル...]', '行数・単語数・文字数を数える', (...a) => {
         const g = getopts(a), t = input(g.rest), n = { l: lines(t).length, w: (t.match(/\S+/g) || []).length, c: [...t].length };
@@ -8923,6 +9468,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
           if (!ls) return p + ': そのようなファイルはありません';
           if (ls.t === 'l') return p + ': シンボリックリンク → ' + ls.c + (fs.exists(q) ? '' : '（リンク先がありません）');
           if (ls.t === 'd') return p + ': ディレクトリ';
+          if (ls.x) return p + ': ' + (ls.x === 'b' ? 'ブロック' : 'キャラクター') + 'デバイス（仮想。/dev）';
           if (ls.b) { const m = String(ls.c).match(/^data:([^;,]+)/); return p + ': バイナリ（' + (m ? m[1] : '不明') + '）' + fmtSize(ls.c.length); }
           const c = ls.c;
           if (!c.length) return p + ': 空のファイル';
@@ -9248,6 +9794,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 
   const ICONS = {
     pin: '<path d="M9 3h6l-1 6 4 4H6l4-4zM12 13v8"/>',
+    chip: '<rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
     camera: '<path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/>',
@@ -10142,7 +10689,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     },
     // ls -l の "drwxr-xr-x"
     str(n, q) {
-      const m = perm.def(q, n), t = n.t === 'd' ? 'd' : n.t === 'l' ? 'l' : n.t === 'p' ? 'p' : '-';
+      const m = perm.def(q, n), t = n.t === 'd' ? 'd' : n.t === 'l' ? 'l' : n.t === 'p' ? 'p' : n.x === 'c' || n.x === 'b' ? n.x : '-';
       const r = (v, s, x) => (v & 4 ? 'r' : '-') + (v & 2 ? 'w' : '-') + (s ? (v & 1 ? x : x.toUpperCase()) : (v & 1 ? 'x' : '-'));
       return t + r(m >> 6, m & 0o4000, 's') + r(m >> 3, m & 0o2000, 's') + r(m, m & 0o1000, 't');
     },
@@ -10769,7 +11316,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     if (OS.imode) apps = apps.filter(n => I_APPS.includes(n));
     const pkgs = OS.safe || OS.imode ? [] : OS.pkg.list();
     try { OS.build = (JSON.parse(store.get('meta')) || {}).build || BOOT.build || '?'; } catch (e) { OS.build = BOOT.build || '?'; }
-    const core = ['/sys/init.js', '/sys/ipc.js', '/sys/raid.js', '/sys/cursor.js', '/sys/jsh.js', '/sys/nano.js', '/sys/htui.js', '/sys/hdm.js', '/sys/shells.js'];
+    const core = ['/sys/init.js', '/sys/ipc.js', '/sys/raid.js', '/sys/procfs.js', '/sys/cursor.js', '/sys/jsh.js', '/sys/nano.js', '/sys/htui.js', '/sys/hdm.js', '/sys/shells.js'];
     const total = 2 + core.length + apps.length + pkgs.length; let done = 0;
     const step = async (s, failed) => {
       if (OS.klog) OS.klog(s, failed ? 3 : 6); else (OS._klog = OS._klog || []).push({ t: Date.now(), msg: s, prio: failed ? 3 : 6 });
@@ -11400,6 +11947,265 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     run: nano
   });
   OS.nano = { version: VERSION };
+})();
+</script>
+<script type="text/x-htmlos" data-path="/sys/procfs.js">
+/* htmlOS procfs / devfs（7.2 から）— 中身を持たない「仮想ファイルシステム」
+   ・/proc  いまの OS の状態を、読んだその時に作るファイル。cat /proc/meminfo、/proc/cpuinfo、/proc/uptime、/proc/version、
+            /proc/<PID>/status（ps に出るプロセスが 1 つずつディレクトリになる）、/proc/mounts、/proc/self など
+   ・/dev   デバイスファイル。/dev/null（捨てる）、/dev/zero、/dev/random、/dev/tty（いまの端末）、/dev/kmsg（ジャーナル）、
+            ドライブ（/dev/hdd1・hdd2・hdd3・md0）、USB シリアル（/dev/ttyACM0・/dev/ttyUSB0。hMicroPy・hSerial で開いている間は読み書きできる）
+   どちらも OS.mountStore でつなぐ「ストレージ」の形をしているので、ls・cat・hFile などはふつうのファイルと同じように扱える。
+   ストレージには何も書かない（再起動すれば消える、というより最初から無い） */
+(function () {
+  'use strict';
+  const OS = window.OS, fs = OS.fs, BOOT = window.BOOT || {};
+  const now = () => Date.now();
+  const bootT = () => OS.bootTime || now();
+  const kB = n => String(Math.round(n / 1024)).padStart(9) + ' kB';
+  const ro = (p, label) => { const e = new Error(p + ': 読み取り専用のファイルシステムです（' + label + '）'); e.code = 'EROFS'; return e; };
+
+  // ---------------------------------------------------------------- 仮想ツリー → ストレージ
+  // ツリーの節: { dir: () => ({ 名前: 節 }) } / { file: () => 文字列, write(s), mode, owner, group, dev: 'c'|'b' } / { link: () => リンク先 }
+  // m（変更日時）は、ファイルは読んだ時刻、ディレクトリは起動した時刻（プロセスのディレクトリはそのプロセスの開始時刻）
+  function vstore(at, label, root) {
+    const KEY = 'f:' + at;
+    const walk = k => {
+      if (k === KEY) return root;
+      if (!k.startsWith(KEY + '/')) return null;
+      let n = root;
+      for (const part of k.slice(KEY.length + 1).split('/')) {
+        if (!n || !n.dir) return null;
+        n = n.dir()[part];
+      }
+      return n || null;
+    };
+    const node = n => {
+      if (n.link) return JSON.stringify({ t: 'l', c: String(n.link()), m: n.m ? n.m() : bootT(), o: n.owner || 'root' });
+      if (n.dir) { const o = { t: 'd', m: n.m ? n.m() : bootT(), o: n.owner || 'root', p: n.mode == null ? 0o555 : n.mode }; if (n.group) o.g = n.group; return JSON.stringify(o); }
+      let c = '';
+      try { c = String(n.file()); } catch (e) { c = ''; }
+      const o = { t: 'f', c: c, m: now(), o: n.owner || 'root', p: n.mode == null ? 0o444 : n.mode };
+      if (n.group) o.g = n.group;
+      if (n.dev) o.x = n.dev;
+      return JSON.stringify(o);
+    };
+    return {
+      name: label, label: label, virtual: true,
+      get(k) { try { const n = walk(k); return n ? node(n) : null; } catch (e) { return null; } },
+      set(k, v) {
+        const n = walk(k), p = k.slice(2);
+        if (!n || !n.write) throw ro(p, label);
+        let c = ''; try { c = JSON.parse(v).c || ''; } catch (e) { /* 中身なし */ }
+        n.write(String(c));
+      },
+      del(k) { throw ro(k.slice(2), label); },
+      // fs.list が使うのは「直下の名前」だけなので、prefix のディレクトリの直下だけを返す（深くは掘らない）
+      keys(prefix) {
+        prefix = prefix || '';
+        if (KEY.startsWith(prefix) && prefix.length <= KEY.length) return prefix.endsWith('/') && KEY.slice(prefix.length).includes('/') ? [] : [KEY];
+        if (!prefix.endsWith('/')) return [];
+        const n = walk(prefix.slice(0, -1));
+        if (!n || !n.dir) return [];
+        return Object.keys(n.dir()).map(x => prefix + x);
+      },
+      flush: () => Promise.resolve(),
+      pending: () => false
+    };
+  }
+  const F = (fn, o) => Object.assign({ file: fn }, o || {});
+  const D = (fn, o) => Object.assign({ dir: typeof fn === 'function' ? fn : () => fn }, o || {});
+  const L = (fn, o) => Object.assign({ link: fn }, o || {});
+
+  // ---------------------------------------------------------------- /proc の中身
+  const sdk = () => (OS.htui && OS.htui.sdk && OS.htui.sdk.full) || 'HTUi SDK';
+  const rootDrive = () => OS.store.disk ? 'hdd1' : OS.store.idb ? 'hdd2' : OS.store.ram ? 'ram0' : 'hdd0';
+  function versionText() {
+    return 'htmlOS version ' + OS.version + ' (' + (OS.codename || '-') + ') build ' + (OS.build || BOOT.build || '?') + ' — ' + sdk() + ' — ' + navigator.userAgent + '\n';
+  }
+  function cpuinfo() {
+    const n = navigator.hardwareConcurrency || 1, ua = navigator.userAgentData;
+    const plat = (ua && ua.platform) || navigator.platform || 'unknown';
+    const brand = ua && ua.brands ? ua.brands.filter(b => !/Not.?A.?Brand/i.test(b.brand)).map(b => b.brand + ' ' + b.version).join(', ') : '';
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      out.push(['processor\t: ' + i, 'model name\t: ' + plat + ' の論理プロセッサー（ブラウザは機種名を教えてくれません）', 'cpu cores\t: ' + n,
+        'flags\t\t: js wasm' + (typeof SharedArrayBuffer !== 'undefined' ? ' sab' : '') + (window.isSecureContext ? ' secure' : '') + (navigator.gpu ? ' webgpu' : '') + ('serial' in navigator ? ' webserial' : '') + (window.showDirectoryPicker ? ' fsa' : ''),
+        'runtime\t\t: ' + (brand || navigator.userAgent)].join('\n'));
+    }
+    return out.join('\n\n') + '\n';
+  }
+  function meminfo() {
+    const pm = performance.memory, dm = navigator.deviceMemory, u = fs.usage(), rows = [];
+    if (dm) rows.push('MemTotal:      ' + kB(dm * 1024 * 1024 * 1024) + '   （ブラウザが教える目安。実際より少なめに丸められます）');
+    if (pm) {
+      rows.push('JSHeapLimit:   ' + kB(pm.jsHeapSizeLimit));
+      rows.push('JSHeapTotal:   ' + kB(pm.totalJSHeapSize));
+      rows.push('JSHeapUsed:    ' + kB(pm.usedJSHeapSize));
+      rows.push('JSHeapFree:    ' + kB(pm.jsHeapSizeLimit - pm.usedJSHeapSize));
+    } else rows.push('JSHeap:        （このブラウザは JS ヒープの量を教えてくれません）');
+    rows.push('Storage(' + (u.drive || (OS.store.ram ? 'RAM' : 'LS')) + '):' + ' '.repeat(Math.max(1, 6 - String(u.drive || 'LS').length)) + kB(u.used) + (u.total ? ' / ' + kB(u.total).trim() : ''));
+    rows.push('Processes:     ' + String(OS.proc ? OS.proc.list().length : 0).padStart(9));
+    return rows.join('\n') + '\n';
+  }
+  function uptime() { const s = (now() - bootT()) / 1000; return s.toFixed(2) + ' ' + (s * 0.9).toFixed(2) + '\n'; }
+  function loadavg() {
+    const l = OS.proc ? OS.proc.list() : [], run = l.filter(p => /^R/.test(OS.proc.stat(p))).length;
+    const v = Math.min(9.99, run * 0.5).toFixed(2);
+    return v + ' ' + v + ' ' + v + ' ' + run + '/' + l.length + ' ' + (l.length ? l[l.length - 1].pid : 0) + '\n';
+  }
+  function mountsText() {
+    const rows = ['/dev/' + rootDrive() + ' / ' + (OS.store.disk ? 'hdd1fs' : OS.store.idb ? 'idbfs' : OS.store.ram ? 'ramfs' : 'lsfs') + ' rw 0 0'];
+    (OS.mounts ? OS.mounts() : []).forEach(m => {
+      const v = m.at === '/proc' ? 'proc /proc proc ro' : m.at === '/dev' ? 'devfs /dev devfs rw' : (m.at === '/mnt/raid' ? '/dev/md0' : m.at === '/mnt/hdd1' ? '/dev/hdd1' : m.at === '/mnt/hdd3' ? '/dev/hdd3' : m.name) + ' ' + m.at + ' ' + (m.at === '/mnt/raid' ? 'mdfs' : 'folderfs') + ' rw';
+      rows.push(v + ' 0 0');
+    });
+    return rows.join('\n') + '\n';
+  }
+  function filesystems() { return ['idbfs', 'lsfs', 'ramfs', 'hdd1fs', 'folderfs', 'mdfs', 'nodev\tproc', 'nodev\tdevfs'].map(x => x.includes('\t') ? x : '\t' + x).join('\n') + '\n'; }
+  function cmdline() {
+    return 'BOOT_IMAGE=/sys/kernel.js root=/dev/' + rootDrive() + (OS.live ? ' live' : '') + (OS.safe ? ' safe' : '') + (OS.imode ? ' imode' : '') + ' lang=ja_JP.UTF-8 init=/sys/init.js\n';
+  }
+  function kmsg() { return OS.journal ? OS.journal.entries({}).map(e => OS.journal.format(e)).join('\n') + '\n' : ''; }
+  function services() {
+    if (!OS.init) return '';
+    return OS.init.units().filter(u => u.type !== 'target').map(u => { const s = OS.init.state(u.name); return u.name.padEnd(26) + ' ' + s.active.padEnd(9) + ' ' + (s.pid || '-'); }).join('\n') + '\n';
+  }
+  // プロセス 1 つ分のディレクトリ
+  const STATE = { R: 'R (running)', S: 'S (sleeping)', T: 'T (stopped)' };
+  function procDir(p) {
+    const own = { owner: p.user || 'root', m: () => p.start };
+    const status = () => {
+      const st = OS.proc.stat(p), lines = ['Name:\t' + p.name, 'State:\t' + (STATE[st[0]] || st), 'Pid:\t' + p.pid, 'PPid:\t' + p.ppid, 'Uid:\t' + (p.user || 'root'), 'Kind:\t' + p.kind];
+      if (p.unit) lines.push('Unit:\t' + p.unit + '（' + (OS.init ? OS.init.state(p.unit).active : '?') + '）');
+      if (p.win) lines.push('Window:\t' + (p.win.title || '') + (p.win.app ? '（' + p.win.app + '）' : ''));
+      lines.push('Started:\t' + new Date(p.start).toLocaleString('ja-JP'), 'Elapsed:\t' + OS.proc.time(p));
+      return lines.join('\n') + '\n';
+    };
+    const kids = {
+      status: F(status, { owner: own.owner }),
+      cmdline: F(() => p.cmd + '\n', { owner: own.owner }),
+      comm: F(() => p.name + '\n', { owner: own.owner }),
+      stat: F(() => [p.pid, '(' + p.name + ')', OS.proc.stat(p)[0], p.ppid, Math.floor((p.start - bootT()) / 10)].join(' ') + '\n', { owner: own.owner })
+    };
+    if (p.unit) kids.unit = F(() => p.unit + '\n', { owner: own.owner });
+    if (typeof p.cwd === 'string') kids.cwd = L(() => p.cwd, { owner: own.owner });
+    if (typeof p.environ === 'function') kids.environ = F(() => { const v = p.environ() || {}; return Object.keys(v).map(k => k + '=' + v[k]).join('\n') + '\n'; }, { owner: own.owner, mode: 0o400 });
+    return D(kids, Object.assign({ mode: 0o555 }, own));
+  }
+  const PROC = D(() => {
+    const t = {
+      version: F(versionText), cpuinfo: F(cpuinfo), meminfo: F(meminfo), uptime: F(uptime), loadavg: F(loadavg),
+      mounts: F(mountsText), filesystems: F(filesystems), cmdline: F(cmdline), services: F(services),
+      kmsg: F(kmsg, { mode: 0o400 }),
+      self: L(() => String(OS.procSelf || 1)),
+      sys: D({
+        kernel: D({
+          hostname: F(() => OS.hostname() + '\n'), ostype: F(() => 'htmlOS\n'),
+          osrelease: F(() => OS.version + '\n'), version: F(() => '#' + (OS.build || '?') + ' ' + (OS.codename || '') + '\n')
+        })
+      })
+    };
+    if (OS.proc) OS.proc.list().forEach(p => { t[String(p.pid)] = procDir(p); });
+    return t;
+  });
+
+  // ---------------------------------------------------------------- /dev の中身
+  const rnd = n => { const b = new Uint8Array(n); crypto.getRandomValues(b); let s = ''; for (const x of b) s += String.fromCharCode(x); return s; };
+  const fmt = n => n >= 1073741824 ? (n / 1073741824).toFixed(1) + ' GB' : n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n >= 1024 ? (n / 1024).toFixed(1) + ' KB' : n + ' B';
+  function console_(s) {
+    if (OS.journal) OS.journal.log('console', s.replace(/\n$/, ''), { prio: 5 });
+    if (OS.tty1 && OS.tty1.print) { try { OS.tty1.print(s); } catch (e) { /* 表示できなくてもよい */ } }
+  }
+  // ドライブ（ブロックデバイス）。読むと中身ではなく説明が出る（本物の生データは読めない）
+  function disks() {
+    const d = {}, blk = (txt) => F(txt, { dev: 'b', mode: 0o660, group: 'disk' });
+    const u = fs.usage();
+    if (OS.store.idb) d.hdd2 = blk(() => 'HDD2（IndexedDB）' + (OS.store.idb && !OS.store.disk ? ' — / にマウント' : '') + '\n使用 ' + fmt(u.used) + (u.total ? ' / ' + fmt(u.total) : '') + '\n');
+    else if (OS.store.ram) d.ram0 = blk(() => 'RAM ディスク — / にマウント（再読み込みで消えます）\n');
+    else if (!OS.store.disk) d.hdd0 = blk(() => 'HDD0（LocalStorage）— / にマウント\n');
+    if (OS.hdd && (OS.hdd.root || OS.hdd.mounted || OS.hdd.waiting)) d.hdd1 = blk(() => 'HDD1（PC のフォルダ' + (OS.hdd.name ? '「' + OS.hdd.name + '」' : '') + '）— ' + (OS.hdd.root ? '/ にマウント' : OS.hdd.mounted ? OS.hdd.at + ' にマウント' : '未接続（「' + OS.hdd.waiting + '」の許可待ち）') + '\n');
+    const raid3 = () => OS.storage && OS.storage.hdd3Use && OS.storage.hdd3Use() === 'raid' && OS.raid && OS.raid.status && OS.raid.status();
+    if (OS.hdd3 && (OS.hdd3.mounted || OS.hdd3.waiting || raid3())) d.hdd3 = blk(() => 'HDD3（PC のフォルダ' + (OS.hdd3.name ? '「' + OS.hdd3.name + '」' : '') + '）— ' + (OS.hdd3.mounted ? OS.hdd3.at + ' にマウント' : raid3() ? 'RAID のメンバー' : '未接続') + '\n');
+    try {
+      const st = OS.raid && OS.raid.status();
+      if (st) d.md0 = blk(() => { const s = OS.raid.status(); return s ? 'md0 — ' + OS.raid.levels[s.level].name + ' ' + OS.raid.stateName(s.state) + '\nドライブ: ' + s.members.map(m => m.label + (m.ok ? ' [U]' : ' [_]')).join('  ') + '\n場所: ' + s.at + (s.used != null ? '  使用 ' + fmt(s.used) : '') + '\n' : 'md0 — 停止中\n'; });
+    } catch (e) { /* RAID なし */ }
+    return d;
+  }
+  // 追加のデバイス（アプリが OS.dev.add で足す。USB シリアルなど）
+  const extra = new Map();
+  const DEV = D(() => {
+    const t = {
+      null: F(() => '', { dev: 'c', mode: 0o666, write: () => {} }),
+      zero: F(() => '\0'.repeat(1024), { dev: 'c', mode: 0o666, write: () => {} }),
+      full: F(() => '\0'.repeat(1024), { dev: 'c', mode: 0o666, write: () => { const e = new Error('/dev/full: デバイスに空き領域がありません（ENOSPC）'); e.code = 'ENOSPC'; throw e; } }),
+      random: F(() => rnd(512), { dev: 'c', mode: 0o666, write: () => {} }),
+      urandom: F(() => rnd(512), { dev: 'c', mode: 0o666, write: () => {} }),
+      tty: F(() => '', { dev: 'c', mode: 0o666, write: s => { const sh = OS.procSelf && OS.proc && OS.proc.get(OS.procSelf); if (sh && sh.tty) sh.tty.print(s); } }),
+      console: F(() => '', { dev: 'c', mode: 0o600, write: console_ }),
+      kmsg: F(kmsg, { dev: 'c', mode: 0o644, write: s => { if (OS.journal) s.split('\n').filter(Boolean).forEach(l => OS.journal.log('kmsg', l, { prio: 5 })); } })
+    };
+    Object.assign(t, disks());
+    extra.forEach((n, name) => { t[name] = n; });
+    return t;
+  }, { mode: 0o755 });
+
+  // ---------------------------------------------------------------- OS.dev（デバイスを足す・USB シリアルの名前）
+  // USB の製造元 ID → 名前と、どちらの名前（ttyACM = USB をじかに話すマイコン、ttyUSB = USB-シリアル変換チップ）にするか
+  const USB = {
+    0x2e8a: ['Raspberry Pi（RP2040 / RP2350）', 'ACM'], 0x303a: ['Espressif（ESP32-S2/S3/C3/C6 の内蔵 USB）', 'ACM'],
+    0x239a: ['Adafruit', 'ACM'], 0x1209: ['pid.codes（オープンソースのボード）', 'ACM'], 0xf055: ['MicroPython（pyboard など）', 'ACM'], 0x2341: ['Arduino', 'ACM'], 0x16c0: ['Teensy など', 'ACM'],
+    0x10c4: ['Silicon Labs CP210x（USB-シリアル変換。ESP32 開発ボードに多い）', 'USB'], 0x1a86: ['WCH CH340 / CH9102（USB-シリアル変換。ESP32 開発ボードに多い）', 'USB'],
+    0x0403: ['FTDI（USB-シリアル変換）', 'USB'], 0x067b: ['Prolific PL2303（USB-シリアル変換）', 'USB']
+  };
+  const serial = new Map(); // port → { name, info, io }
+  const dev = OS.dev = {
+    usb(info) {
+      info = info || {};
+      const v = USB[info.usbVendorId];
+      const hex = n => n == null ? '????' : n.toString(16).padStart(4, '0');
+      return { vendor: v ? v[0] : info.usbVendorId != null ? '不明な機器' : 'USB 以外（Bluetooth など）', kind: v ? v[1] : 'ACM', id: hex(info.usbVendorId) + ':' + hex(info.usbProductId), bridge: !!v && v[1] === 'USB' };
+    },
+    // 名前をつける。同じポートには同じ名前（ttyACM0, ttyACM1…）
+    serialName(port) {
+      const s = serial.get(port); if (s) return s.name;
+      const u = dev.usb(port.getInfo ? port.getInfo() : {}), used = new Set([...serial.values()].map(x => x.name));
+      let i = 0; while (used.has('tty' + u.kind + i)) i++;
+      const name = 'tty' + u.kind + i;
+      serial.set(port, { name: name, usb: u, io: null });
+      extra.set(name, F(() => { const e = serial.get(port); return e && e.io ? e.io.read() : ''; }, { dev: 'c', mode: 0o666, owner: 'root', group: 'dialout',
+        write: s => { const e = serial.get(port); if (!e || !e.io) throw new Error('/dev/' + name + ': ポートが開かれていません（hMicroPy か hSerial で接続してください）'); e.io.write(s); } }));
+      return name;
+    },
+    // アプリがポートを開いたら io（read() → 最近受け取った文字、write(s) → 送る）をつなぐ
+    attach(port, io) { const name = dev.serialName(port); serial.get(port).io = io; return name; },
+    detach(port) { const s = serial.get(port); if (s) s.io = null; },
+    forget(port) { const s = serial.get(port); if (!s) return; extra.delete(s.name); serial.delete(port); },
+    serialPorts: () => [...serial.entries()].map(([port, s]) => ({ port: port, name: s.name, usb: s.usb, open: !!s.io })),
+    // ほかのデバイスを足す: OS.dev.add('名前', { read: () => 文字列, write: s => {}, mode: 0o666 })
+    add(name, o) { extra.set(name, F(o.read || (() => ''), { dev: o.block ? 'b' : 'c', mode: o.mode == null ? 0o666 : o.mode, write: o.write, owner: o.owner, group: o.group })); },
+    remove(name) { extra.delete(name); }
+  };
+
+  OS.mountStore('/proc', vstore('/proc', 'proc', PROC));
+  OS.mountStore('/dev', vstore('/dev', 'devfs', DEV));
+  if (OS.klog) OS.klog('proc を /proc に、devfs を /dev にマウントしました');
+
+  // ---------------------------------------------------------------- udevd.service: USB シリアルの抜き差しを見張って /dev に出す
+  if (OS.init && OS.init.register) OS.init.register({
+    name: 'udevd.service', desc: 'デバイスの見張り（USB シリアルを /dev に出す）', wantedBy: 'basic.target', restart: 'on-failure',
+    start(ctx) {
+      if (!('serial' in navigator)) { ctx.log('このブラウザは Web Serial に対応していないので、USB シリアルは見張りません'); return () => {}; }
+      const S = navigator.serial;
+      const add = (p, how) => { const n = dev.serialName(p), u = dev.usb(p.getInfo()); ctx.log('/dev/' + n + ': ' + u.vendor + ' [' + u.id + ']' + (how ? ' がつながりました' : '')); };
+      const on = e => add(e.target || e.port, true);
+      const off = e => { const p = e.target || e.port, s = serial.get(p); if (s) { ctx.log('/dev/' + s.name + ' が外れました'); dev.forget(p); } };
+      S.addEventListener('connect', on); S.addEventListener('disconnect', off);
+      S.getPorts().then(l => l.forEach(p => add(p, false))).catch(() => {});
+      return () => { S.removeEventListener('connect', on); S.removeEventListener('disconnect', off); };
+    }
+  });
 })();
 </script>
 <script type="text/x-htmlos" data-path="/sys/raid.js">
@@ -14200,6 +15006,29 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 .hs-send{flex:none;display:flex;gap:6px;padding:6px;background:var(--surface-2);border-top:1px solid var(--line)}
 .hs-send .inp{font-family:var(--mono)}
 .sel{font:inherit;color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:6px;padding:3px 6px}
+/* ---- hMicroPy */
+.mp-main{flex:1;min-height:0;display:flex}
+.mp-side{flex:none;width:210px;display:flex;flex-direction:column;border-right:1px solid var(--line);background:var(--surface-2)}
+.mp-side-bar{display:flex;align-items:center;gap:2px;padding:4px 4px 4px 10px;font-size:13px}
+.mp-side-bar .grow{flex:1}
+.mp-side-bar .tbtn{padding:3px 5px}
+.mp-dir{padding:0 10px 4px;font:12px var(--mono);color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mp-files{flex:1;min-height:0;overflow:auto;padding:2px 4px}
+.mp-file{display:flex;align-items:center;gap:6px;width:100%;padding:4px 6px;border:0;border-radius:6px;background:none;text-align:left;cursor:pointer;color:var(--ink);font-size:13px}
+.mp-file:hover{background:rgba(0,0,0,.06)}
+.mp-file.on{background:var(--accent);color:#fff}
+.mp-file.on small{color:rgba(255,255,255,.85)}
+.mp-fn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mp-file small{flex:none;font-size:11px;color:var(--ink-2)}
+.mp-empty{padding:14px 8px;font-size:12.5px;color:var(--ink-2);text-align:center}
+.mp-free{flex:none;padding:4px 10px;font-size:11.5px;color:var(--ink-2);border-top:1px solid var(--line)}
+.mp-right{flex:1;min-width:0;display:flex;flex-direction:column}
+.mp-edwrap{flex:3 1 0}
+.mp-ed{tab-size:4}
+.mp-split{flex:none;height:5px;cursor:row-resize;background:var(--surface-2);border-top:1px solid var(--line);border-bottom:1px solid var(--line);touch-action:none}
+.mp-term{flex:2 1 0}
+.phone .mp-main{flex-direction:column}
+.phone .mp-side{width:auto;max-height:30%;border-right:0;border-bottom:1px solid var(--line)}
 
 /* ---- タブレット / スマートフォンモード（#os-root に .touch と .tablet か .phone が付く） */
 .p-title,.tabbar,.touch-only{display:none}
@@ -15884,7 +16713,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 (function () {
   'use strict';
   // コードネーム: htmlOS は恒星の名前（3.2 = Sirius、4.0 = Vega）、描画エンジン HTUi SDK は惑星の名前（2 = Jupiter、3.0 = Venus）
-  var MEDIA_VERSION = '7.1.1', MEDIA_BUILD = '64', MEDIA_CODENAME = 'Polaris';
+  var MEDIA_VERSION = '7.2.0', MEDIA_BUILD = '65', MEDIA_CODENAME = 'Polaris';
   var BOOT = window.BOOT = {};
   var P = 'htmlos:';
 

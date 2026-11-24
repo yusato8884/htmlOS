@@ -4,6 +4,24 @@
 
 **▶ 使ってみる: GitHub Pages で公開中**（このリポジトリの Pages の URL を開くと htmlOS i が起動し、「htmlOSを試す」か「インストール」を選べます）
 
+## htmlOS 7.2.0 の新しいところ
+
+- **hMicroPy**: MicroPython のボードを Web Serial（USB）でつないで開発するアプリです（Chrome / Edge などパソコン版のブラウザ）
+  - 対応: MicroPython が入ったボードならだいたい何でも。**RP2040 / RP2350**（Raspberry Pi Pico・Pico 2 など）、**ESP32**（CP210x・CH340 などの USB-シリアル変換チップ経由）、**ESP32-S2/S3/C3/C6**（内蔵 USB）、pyboard など。USB の ID から機器の種類を見分けます
+  - 左にボードの中のファイル（ダブルクリックで開く・右クリックで実行／hFS にダウンロード／名前変更／削除・新しいファイルとフォルダ・hFS のファイルを送る・空き容量）
+  - 上はエディター（Tab で空白 4 つ、`:` で終わる行のあとは自動で字下げ）、下は REPL（クリックしてキーを打つとそのままボードへ）
+  - **実行（F5）**: エディターの中身をボードの RAM で実行。出力は REPL に流れ、`input()` には REPL で打った文字が届きます。**停止** は Ctrl+C
+  - **ボードに保存（Ctrl+S）**: ボードのファイルに書きます（`main.py` にすると電源を入れたときに動きます）。hFS への保存・hFS から開くことも
+  - **リセット**: ソフトリセット（Ctrl+D）とハードリセット。ESP32 の変換チップでは RTS 線で EN を下げて再起動、内蔵 USB のボードでは `machine.reset()` のあと自動でつなぎ直します
+  - ファイルのやりとりと実行には MicroPython の raw REPL を使います（mpremote・Thonny と同じ方法）。jsh では `hmicropy [ファイル.py]`
+- **/proc と /dev（仮想ファイルシステム）**: 読んだその時に中身を作る、ストレージには何も書かないファイルです
+  - `/proc`: `version`・`cpuinfo`・`meminfo`・`uptime`・`loadavg`・`mounts`・`filesystems`・`cmdline`・`services`（サービスと状態）・`kmsg`（ジャーナル。root だけ）・`sys/kernel/hostname` など
+  - `/proc/<PID>/`: ps に出るプロセスが 1 つずつディレクトリになります（`status`・`cmdline`・`comm`・`stat`、サービスなら `unit`、シェルなら `cwd`・`environ`）。`/proc/self` はいまのシェル
+  - `/dev`: `null`（書いたものを捨てる）・`zero`・`full`・`random`・`urandom`・`tty`（いまの端末。`echo hi > /dev/tty`）・`console`・`kmsg`（書くとジャーナルへ）、ドライブ（`hdd1`・`hdd2`・`hdd3`・`md0`。読むと説明が出ます）
+  - **USB シリアル**: 許可したポートが `/dev/ttyACM0`（内蔵 USB のマイコン）・`/dev/ttyUSB0`（変換チップ）として出ます。新しい `udevd.service` が抜き差しを見張ってジャーナルに残します。hMicroPy・hSerial でつないでいる間は、`echo 'print(1)' > /dev/ttyACM0` で送ったり `cat` で最近受け取った内容を読んだりできます
+  - `ls -l` ではデバイスが `c`（キャラクター）・`b`（ブロック）と出ます。`stat`・`file` もデバイスを見分けます
+- jsh: `xxd`（16 進ダンプ。例 `xxd -l 64 /dev/random`）、`head -c 文字数`
+
 ## htmlOS 7.1.1: 新しい壁紙
 
 - 設定 → 外観 の壁紙に「7.1-Polaris」のグループを追加しました（`/usr/share/backgrounds/7.1-Polaris/`）
@@ -331,6 +349,7 @@
 | hStore | パッケージマネージャ |
 | hBackup | バックアップと復元 |
 | hSerial | シリアルモニター（Web Serial） |
+| hMicroPy | MicroPython 開発（RP2040・RP2350・ESP32 などを Web Serial でつなぐ。7.2） |
 | hCron | cron のジョブの一覧・追加・編集（7.0） |
 
 ## 注意
@@ -338,7 +357,7 @@
 - データはブラウザの IndexedDB（HDD2、最大 10GB）に保存されます。ブラウザのデータを消すと htmlOS の中身も消えるので、大事なものは hBackup で書き出してください。
 - パスワードはハッシュ化して保存していますが、ブラウザの開発者ツールからは IndexedDB を直接読めます。本格的なセキュリティはありません。
 - hBrowser のプロキシモードは外部の無料 CORS プロキシを使います。止まっていることがあります（Settings → ネットワーク で変更可）。
-- hSerial は Chrome / Edge など Web Serial に対応したブラウザでのみ動きます。
+- hSerial・hMicroPy は Chrome / Edge など Web Serial に対応したブラウザでのみボードにつなげます。
 
 ## ビルド
 

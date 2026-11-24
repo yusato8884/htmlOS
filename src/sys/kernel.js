@@ -56,6 +56,7 @@
 
   const ICONS = {
     pin: '<path d="M9 3h6l-1 6 4 4H6l4-4zM12 13v8"/>',
+    chip: '<rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
     camera: '<path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/>',
@@ -950,7 +951,7 @@
     },
     // ls -l の "drwxr-xr-x"
     str(n, q) {
-      const m = perm.def(q, n), t = n.t === 'd' ? 'd' : n.t === 'l' ? 'l' : n.t === 'p' ? 'p' : '-';
+      const m = perm.def(q, n), t = n.t === 'd' ? 'd' : n.t === 'l' ? 'l' : n.t === 'p' ? 'p' : n.x === 'c' || n.x === 'b' ? n.x : '-';
       const r = (v, s, x) => (v & 4 ? 'r' : '-') + (v & 2 ? 'w' : '-') + (s ? (v & 1 ? x : x.toUpperCase()) : (v & 1 ? 'x' : '-'));
       return t + r(m >> 6, m & 0o4000, 's') + r(m >> 3, m & 0o2000, 's') + r(m, m & 0o1000, 't');
     },
@@ -1577,7 +1578,7 @@
     if (OS.imode) apps = apps.filter(n => I_APPS.includes(n));
     const pkgs = OS.safe || OS.imode ? [] : OS.pkg.list();
     try { OS.build = (JSON.parse(store.get('meta')) || {}).build || BOOT.build || '?'; } catch (e) { OS.build = BOOT.build || '?'; }
-    const core = ['/sys/init.js', '/sys/ipc.js', '/sys/raid.js', '/sys/cursor.js', '/sys/jsh.js', '/sys/nano.js', '/sys/htui.js', '/sys/hdm.js', '/sys/shells.js'];
+    const core = ['/sys/init.js', '/sys/ipc.js', '/sys/raid.js', '/sys/procfs.js', '/sys/cursor.js', '/sys/jsh.js', '/sys/nano.js', '/sys/htui.js', '/sys/hdm.js', '/sys/shells.js'];
     const total = 2 + core.length + apps.length + pkgs.length; let done = 0;
     const step = async (s, failed) => {
       if (OS.klog) OS.klog(s, failed ? 3 : 6); else (OS._klog = OS._klog || []).push({ t: Date.now(), msg: s, prio: failed ? 3 : 6 });
