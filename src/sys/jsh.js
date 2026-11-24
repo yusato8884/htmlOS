@@ -773,6 +773,40 @@
         if (!OS.htui.running || !OS.htui.user || !OS.htui.screenshot) throw new Error('screenshot: デスクトップ（HTUi）でだけ使えます');
         return '保存しました: ' + await OS.htui.screenshot();
       });
+      // フレームバッファー（7.2.1）: /dev/fb0。中身は OS.fb（/sys/fb.js）
+      const FB = () => { if (!OS.fb) throw new Error('フレームバッファー（/sys/fb.js）がありません'); return OS.fb; };
+      def('fbset', 'fbset [-g 幅 高さ] [show|hide|clear]', 'フレームバッファー /dev/fb0 の大きさを表示・変更（show 表示 / hide 隠す / clear 黒く消す）', (...a) => {
+        const f = FB(), g = getopts(a, 'g');
+        if (g.o.g != null) { f.resize(g.o.g, g.rest.shift()); }
+        const sub = g.rest[0];
+        if (sub === 'show') { f.show(); return; } if (sub === 'hide') { f.hide(); return; } if (sub === 'clear') { f.clear(); return; }
+        if (sub) throw new Error('fbset: ' + sub + ': 使えるのは show / hide / clear です');
+        return f.info().replace(/\n$/, '');
+      });
+      def('fbtest', 'fbtest [bars|gradient|noise|plasma|logo]', 'フレームバッファーにテスト模様を描いて表示する（Esc で閉じる）', kind => { FB().test(kind || 'bars'); });
+      def('fbi', 'fbi 画像ファイル', '画像をフレームバッファーに表示する（Esc で閉じる）', async p => {
+        if (p == null) throw new Error('fbi 画像ファイル');
+        const f = FB(), q = A(p);
+        if (fs.kind(q) !== 'image') throw new Error(q + ': 画像ファイルではありません');
+        fs.read(q); // 読む許可を確かめる
+        const img = new Image();
+        await new Promise((res, rej) => { img.onload = res; img.onerror = () => rej(new Error(q + ': 画像を読めませんでした')); img.src = fs0.dataURL(q); });
+        f.drawFit(img, img.naturalWidth || f.width, img.naturalHeight || f.height); f.commit();
+        return q + '（' + img.naturalWidth + '×' + img.naturalHeight + '）を ' + f.width + '×' + f.height + ' に表示しました';
+      });
+      def('fbgrab', 'fbgrab [-d] [ファイル.png]', 'フレームバッファーを PNG に保存（-d でデスクトップの画面をフレームバッファーに写してから）', async (...a) => {
+        const f = FB(), g = getopts(a);
+        if (g.o.d) {
+          if (!OS.htui.running || !OS.htui.user || !OS.htui.screenshot) throw new Error('fbgrab -d: デスクトップ（HTUi）でだけ使えます');
+          const c = await OS.htui.screenshot({ canvas: true });
+          f.drawFit(c, c.width, c.height); f.commit({ quiet: true });
+        }
+        const d = new Date(), z = n => String(n).padStart(2, '0');
+        const out0 = g.rest[0] ? A(g.rest[0]) : self.home + '/Pictures/fb0-' + d.getFullYear() + z(d.getMonth() + 1) + z(d.getDate()) + '-' + z(d.getHours()) + z(d.getMinutes()) + z(d.getSeconds()) + '.png';
+        if (!fs.isDir(path.dir(out0))) fs.mkdir(path.dir(out0), { parents: true });
+        fs.write(out0, f.png(), { bin: true });
+        return '保存しました: ' + out0 + '（' + f.width + '×' + f.height + '）';
+      });
       // crontab（7.0）: 自分の cron のジョブ。root は -u で他のユーザーのものも
       def('crontab', 'crontab [-u ユーザー] -l | -e | -r | -a "分 時 日 月 曜日 コマンド" | -d 行 | -n | ファイル', 'cron のジョブ（-l 一覧 / -a 追加 / -d 削除 / -e 編集 / -r 全部消す / -n 次の予定）', async (...a) => {
         if (!OS.cron) throw new Error('crontab: cron がありません');

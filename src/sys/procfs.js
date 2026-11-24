@@ -31,12 +31,17 @@
     const node = n => {
       if (n.link) return JSON.stringify({ t: 'l', c: String(n.link()), m: n.m ? n.m() : bootT(), o: n.owner || 'root' });
       if (n.dir) { const o = { t: 'd', m: n.m ? n.m() : bootT(), o: n.owner || 'root', p: n.mode == null ? 0o555 : n.mode }; if (n.group) o.g = n.group; return JSON.stringify(o); }
+      // key があれば、key が変わるまで作った JSON を使い回す（/dev/fb0 のように大きいもの用）
+      const ck = n.key ? n.key() : null;
+      if (ck != null && n._k === ck && n._json) return n._json;
       let c = '';
       try { c = String(n.file()); } catch (e) { c = ''; }
       const o = { t: 'f', c: c, m: now(), o: n.owner || 'root', p: n.mode == null ? 0o444 : n.mode };
       if (n.group) o.g = n.group;
       if (n.dev) o.x = n.dev;
-      return JSON.stringify(o);
+      const j = JSON.stringify(o);
+      if (ck != null) { n._k = ck; n._json = j; }
+      return j;
     };
     return {
       name: label, label: label, virtual: true,
@@ -141,6 +146,7 @@
     if (typeof p.environ === 'function') kids.environ = F(() => { const v = p.environ() || {}; return Object.keys(v).map(k => k + '=' + v[k]).join('\n') + '\n'; }, { owner: own.owner, mode: 0o400 });
     return D(kids, Object.assign({ mode: 0o555 }, own));
   }
+  const procExtra = new Map(); // OS.dev.proc で足す /proc のファイル（/proc/fb など）
   const PROC = D(() => {
     const t = {
       version: F(versionText), cpuinfo: F(cpuinfo), meminfo: F(meminfo), uptime: F(uptime), loadavg: F(loadavg),
@@ -154,6 +160,7 @@
         })
       })
     };
+    procExtra.forEach((fn, name) => { t[name] = F(fn); });
     if (OS.proc) OS.proc.list().forEach(p => { t[String(p.pid)] = procDir(p); });
     return t;
   });
@@ -232,7 +239,9 @@
     forget(port) { const s = serial.get(port); if (!s) return; extra.delete(s.name); serial.delete(port); },
     serialPorts: () => [...serial.entries()].map(([port, s]) => ({ port: port, name: s.name, usb: s.usb, open: !!s.io })),
     // ほかのデバイスを足す: OS.dev.add('名前', { read: () => 文字列, write: s => {}, mode: 0o666 })
-    add(name, o) { extra.set(name, F(o.read || (() => ''), { dev: o.block ? 'b' : 'c', mode: o.mode == null ? 0o666 : o.mode, write: o.write, owner: o.owner, group: o.group })); },
+    add(name, o) { extra.set(name, F(o.read || (() => ''), { dev: o.block ? 'b' : 'c', mode: o.mode == null ? 0o666 : o.mode, write: o.write, owner: o.owner, group: o.group, key: o.key })); },
+    // /proc にファイルを足す: OS.dev.proc('fb', () => 文字列)
+    proc(name, fn) { procExtra.set(name, fn); },
     remove(name) { extra.delete(name); }
   };
 

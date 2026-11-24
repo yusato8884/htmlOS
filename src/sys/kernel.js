@@ -1578,7 +1578,7 @@
     if (OS.imode) apps = apps.filter(n => I_APPS.includes(n));
     const pkgs = OS.safe || OS.imode ? [] : OS.pkg.list();
     try { OS.build = (JSON.parse(store.get('meta')) || {}).build || BOOT.build || '?'; } catch (e) { OS.build = BOOT.build || '?'; }
-    const core = ['/sys/init.js', '/sys/ipc.js', '/sys/raid.js', '/sys/procfs.js', '/sys/cursor.js', '/sys/jsh.js', '/sys/nano.js', '/sys/htui.js', '/sys/hdm.js', '/sys/shells.js'];
+    const core = ['/sys/init.js', '/sys/ipc.js', '/sys/raid.js', '/sys/procfs.js', '/sys/fb.js', '/sys/cursor.js', '/sys/jsh.js', '/sys/nano.js', '/sys/htui.js', '/sys/hdm.js', '/sys/shells.js'];
     const total = 2 + core.length + apps.length + pkgs.length; let done = 0;
     const step = async (s, failed) => {
       if (OS.klog) OS.klog(s, failed ? 3 : 6); else (OS._klog = OS._klog || []).push({ t: Date.now(), msg: s, prio: failed ? 3 : 6 });

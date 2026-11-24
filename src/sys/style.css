@@ -396,6 +396,11 @@
 .hs-send{flex:none;display:flex;gap:6px;padding:6px;background:var(--surface-2);border-top:1px solid var(--line)}
 .hs-send .inp{font-family:var(--mono)}
 .sel{font:inherit;color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:6px;padding:3px 6px}
+/* ---- フレームバッファー /dev/fb0（7.2.1） */
+.fb-ov{position:fixed;inset:0;z-index:2147483000;background:#000;display:grid;place-items:center;cursor:none}
+.fb-view{width:100vw;height:100vh;object-fit:contain;image-rendering:pixelated}
+.fb-hint{position:absolute;left:50%;bottom:18px;translate:-50% 0;padding:6px 14px;border-radius:8px;background:rgba(0,0,0,.6);color:#ddd;font:12.5px var(--mono);pointer-events:none;transition:opacity .6s}
+.fb-hint.gone{opacity:0}
 /* ---- hMicroPy */
 .mp-main{flex:1;min-height:0;display:flex}
 .mp-side{flex:none;width:210px;display:flex;flex-direction:column;border-right:1px solid var(--line);background:var(--surface-2)}
