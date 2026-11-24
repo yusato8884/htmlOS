@@ -4,7 +4,7 @@
 
 **▶ 使ってみる: GitHub Pages で公開中**（このリポジトリの Pages の URL を開くと htmlOS i が起動し、「htmlOSを試す」か「インストール」を選べます）
 
-## htmlOS 7.2.1 の新しいところ
+## htmlOS 7.2.2 の新しいところ
 
 - **フレームバッファー `/dev/fb0`**: Linux の fbdev と同じ 32bpp BGRX（既定 640×360）。読むと画素のバイト列、書くと先頭から画素を置き換えて全画面に表示します（Esc かクリックで閉じる）。`/proc/fb` も
   - jsh: `fbset [-g 幅 高さ] [show|hide|clear]`、`fbtest bars|gradient|noise|plasma|logo`、`fbi 画像`、`fbgrab [-d] ファイル.png`（-d でデスクトップを写す）
