@@ -425,7 +425,7 @@
       notify: (c, o, t) => { note(c, o, t, M(84), 0.35, 0.35); note(c, o, t + 0.09, M(88), 0.6, 0.35); }
     };
     const last = {}, LEN = { boot: 3.4, shutdown: 2.8, error: 0.7, bell: 0.4 };
-    const MAX_VOICES = 8; let voices = 0;
+    const MAX_VOICES = 8; let voices = 0, endAt = 0, holdT = 0; // endAt: いま鳴っている効果音（響きの残りも含む）が鳴り終わる時刻
     function play(name, force) {
       const p = prefs();
       if (!SOUNDS[name] || (!p.on && !force) || p.vol <= 0) return false;
@@ -439,7 +439,7 @@
         out.gain.value = p.vol * 0.5;
         send.gain.value = name === 'bell' ? 0.12 : 0.28; // ベルは響きを少なめに
         out.connect(bus.dry); out.connect(send); send.connect(bus.rev);
-        voices++;
+        voices++; endAt = Math.max(endAt, Date.now() + ((LEN[name] || 1.6) + 1.2) * 1000);
         try { SOUNDS[name](c, out, c.currentTime + 0.02); } catch (e) { /* 鳴らせなくても続ける */ }
         // 鳴り終わったら外す（響きの残りは共通の残響が鳴らす）
         setTimeout(() => { voices = Math.max(0, voices - 1); try { out.disconnect(); send.disconnect(); } catch (e) { /* もう外れている */ } }, ((LEN[name] || 1.6) + 0.4) * 1000);
@@ -450,8 +450,16 @@
     }
     return { play: play, prefs: prefs, names: NAMES, list: () => Object.keys(SOUNDS), _ctx: () => { const c = ctx(); watch(c); return c; }, _reverb: reverb, _note: note, _tone: tone, M: M,
       reset: reset, get voices() { return voices; },
+      // 7.2.1: 鳴っている効果音が鳴り終わるまでの残り（ミリ秒）。シャットダウン・再起動はこれを待つ
+      left: () => Math.max(0, endAt - Date.now()),
       // soundd.service が止める・動かす（止めているあいだは起こし直さない）
-      hold(v) { held = !!v; const c = BOOT.audio; if (!c) return; if (held) { if (c.state === 'running') c.suspend().catch(() => { /* 無視 */ }); } else wake(c); } };
+      // 止めるときは、鳴っている効果音（シャットダウンの音など）が終わってから止める（7.2.1。前は途中で切れていた）
+      hold(v) {
+        held = !!v; clearTimeout(holdT); const c = BOOT.audio; if (!c) return;
+        if (!held) { wake(c); return; }
+        const stop = () => { if (held && c.state === 'running') c.suspend().catch(() => { /* 無視 */ }); };
+        const wait = endAt - Date.now(); if (wait > 0) holdT = setTimeout(stop, wait); else stop();
+      } };
   })();
 
   // ---------- アンビエントサウンド（BGM。5.2 から）。効果音と同じく、音のファイルを使わずにその場で合成する
@@ -1449,9 +1457,11 @@
       msg.textContent = steps[i]; bar.style.width = (100 - (i + 1) / steps.length * 100) + '%';
       await nap(190);
     }
-    const rest = 1300 - (Date.now() - t0);
-    if (rest > 0) await nap(rest);
+    // シャットダウン・再起動の音が鳴り終わるまで待つ（7.2.1。前は 1.3 秒で切っていたので音が途中で切れていた）
+    const rest = Math.max(1300 - (Date.now() - t0), OS.sound.left ? OS.sound.left() : 0);
+    if (rest > 0) await nap(Math.min(rest, 6000));
     if (reboot) { if (BOOT.warmBoot) BOOT.warmBoot(); else location.reload(); return; }
+    if (BOOT.exitFull) BOOT.exitFull(); // 電源が切れたら全画面をやめる（7.2.1）
     OS.root.textContent = '';
     OS.root.append(h('div', { class: 'poweroff' },
       h('button', { class: 'pw-btn', type: 'button', title: '電源を入れる', 'aria-label': '電源を入れる', onclick: () => (BOOT.warmBoot ? BOOT.warmBoot() : location.reload()) }, OS.icon('power', 34)),

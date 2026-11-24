@@ -7,6 +7,8 @@
 <style>
 /* ブートローダ / インストーラ専用の最小スタイル。OS本体のスタイルは /sys/style.css にあります */
 html,body{height:100%;margin:0;overscroll-behavior:none}
+/* 7.2.1: カーソルを指定していない所（BIOS・POST・起動中・電源が切れたあとの画面など）は透明のカーソル。指定のある所（ボタンやメニュー、OS の画面）はそちらが優先 */
+html,body,body *{cursor:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/%3E") 0 0,none}
 body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono","Noto Sans Mono CJK JP",Menlo,Consolas,monospace;overflow:hidden}
 #boot{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;overflow:auto}
 #boot.inst{background:#1c3f94}
@@ -4322,7 +4324,9 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     '#os-root :is(button,input,select,textarea):disabled{cursor:var(--c-no)}',
     '#os-root :is(.rz-e,.rz-w){cursor:var(--c-ew)}', '#os-root :is(.rz-n,.rz-s){cursor:var(--c-ns)}',
     '#os-root :is(.rz-nw,.rz-se){cursor:var(--c-nwse)}', '#os-root :is(.rz-ne,.rz-sw){cursor:var(--c-nesw)}',
-    '#os-root .pt-canvas{cursor:var(--c-cross)}', '#os-root .pt-canvas.hand{cursor:var(--c-move)}'
+    '#os-root .pt-canvas{cursor:var(--c-cross)}', '#os-root .pt-canvas.hand{cursor:var(--c-move)}',
+    // 7.2.1: 指定のない画面（起動・終了のスプラッシュ、電源が切れた画面の何もない所）は透明
+    '#os-root :is(#splash,#splash *,.poweroff,.poweroff :not(.pw-btn,.pw-btn *)){cursor:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%271%27 height=%271%27/%3E") 0 0,none}'
   ].join('\n');
   OS.cursorThemes = Object.keys(THEMES);
   const old = document.getElementById('htmlos-cursors'); if (old) old.remove();
@@ -10346,7 +10350,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       notify: (c, o, t) => { note(c, o, t, M(84), 0.35, 0.35); note(c, o, t + 0.09, M(88), 0.6, 0.35); }
     };
     const last = {}, LEN = { boot: 3.4, shutdown: 2.8, error: 0.7, bell: 0.4 };
-    const MAX_VOICES = 8; let voices = 0;
+    const MAX_VOICES = 8; let voices = 0, endAt = 0, holdT = 0; // endAt: いま鳴っている効果音（響きの残りも含む）が鳴り終わる時刻
     function play(name, force) {
       const p = prefs();
       if (!SOUNDS[name] || (!p.on && !force) || p.vol <= 0) return false;
@@ -10360,7 +10364,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         out.gain.value = p.vol * 0.5;
         send.gain.value = name === 'bell' ? 0.12 : 0.28; // ベルは響きを少なめに
         out.connect(bus.dry); out.connect(send); send.connect(bus.rev);
-        voices++;
+        voices++; endAt = Math.max(endAt, Date.now() + ((LEN[name] || 1.6) + 1.2) * 1000);
         try { SOUNDS[name](c, out, c.currentTime + 0.02); } catch (e) { /* 鳴らせなくても続ける */ }
         // 鳴り終わったら外す（響きの残りは共通の残響が鳴らす）
         setTimeout(() => { voices = Math.max(0, voices - 1); try { out.disconnect(); send.disconnect(); } catch (e) { /* もう外れている */ } }, ((LEN[name] || 1.6) + 0.4) * 1000);
@@ -10371,8 +10375,16 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     }
     return { play: play, prefs: prefs, names: NAMES, list: () => Object.keys(SOUNDS), _ctx: () => { const c = ctx(); watch(c); return c; }, _reverb: reverb, _note: note, _tone: tone, M: M,
       reset: reset, get voices() { return voices; },
+      // 7.2.1: 鳴っている効果音が鳴り終わるまでの残り（ミリ秒）。シャットダウン・再起動はこれを待つ
+      left: () => Math.max(0, endAt - Date.now()),
       // soundd.service が止める・動かす（止めているあいだは起こし直さない）
-      hold(v) { held = !!v; const c = BOOT.audio; if (!c) return; if (held) { if (c.state === 'running') c.suspend().catch(() => { /* 無視 */ }); } else wake(c); } };
+      // 止めるときは、鳴っている効果音（シャットダウンの音など）が終わってから止める（7.2.1。前は途中で切れていた）
+      hold(v) {
+        held = !!v; clearTimeout(holdT); const c = BOOT.audio; if (!c) return;
+        if (!held) { wake(c); return; }
+        const stop = () => { if (held && c.state === 'running') c.suspend().catch(() => { /* 無視 */ }); };
+        const wait = endAt - Date.now(); if (wait > 0) holdT = setTimeout(stop, wait); else stop();
+      } };
   })();
 
   // ---------- アンビエントサウンド（BGM。5.2 から）。効果音と同じく、音のファイルを使わずにその場で合成する
@@ -11370,9 +11382,11 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       msg.textContent = steps[i]; bar.style.width = (100 - (i + 1) / steps.length * 100) + '%';
       await nap(190);
     }
-    const rest = 1300 - (Date.now() - t0);
-    if (rest > 0) await nap(rest);
+    // シャットダウン・再起動の音が鳴り終わるまで待つ（7.2.1。前は 1.3 秒で切っていたので音が途中で切れていた）
+    const rest = Math.max(1300 - (Date.now() - t0), OS.sound.left ? OS.sound.left() : 0);
+    if (rest > 0) await nap(Math.min(rest, 6000));
     if (reboot) { if (BOOT.warmBoot) BOOT.warmBoot(); else location.reload(); return; }
+    if (BOOT.exitFull) BOOT.exitFull(); // 電源が切れたら全画面をやめる（7.2.1）
     OS.root.textContent = '';
     OS.root.append(h('div', { class: 'poweroff' },
       h('button', { class: 'pw-btn', type: 'button', title: '電源を入れる', 'aria-label': '電源を入れる', onclick: () => (BOOT.warmBoot ? BOOT.warmBoot() : location.reload()) }, OS.icon('power', 34)),
@@ -17566,7 +17580,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     store = realStore = hdd2 || lsStore; BOOT.store = store; BOOT.hddReady = false;
     BOOT.live = false; BOOT.imode = false; BOOT.safe = false; BOOT.offerUpdate = false; BOOT.offerMigrate = false; BOOT.hddSkip = false; BOOT.hold = null; BOOT.wantMenu = false;
     keyHandler = null; scr.textContent = ''; scr.className = ''; scr.removeAttribute('style');
-    BOOT.warm = (BOOT.warm || 0) + 1;
+    BOOT.warm = (BOOT.warm || 0) + 1; BOOT.offScreen = false;
     start();
   }
   // 電源を入れたとき・再起動: HDD2（IndexedDB）を読み込んでから POST へ
@@ -17604,15 +17618,23 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       .catch(function (err) { try { console.warn('htmlOS: 全画面・キーボードの捕捉ができませんでした', err); } catch (e) { /* 無視 */ } });
   }
   BOOT.goFull = goFull;
+  // 7.2.1: シャットダウン（電源を切る・休止）したら全画面とキーボードの捕捉をやめる。電源ボタン以外のクリックではもう全画面にしない
+  BOOT.exitFull = function () {
+    BOOT.offScreen = true;
+    try { if (navigator.keyboard && navigator.keyboard.unlock) navigator.keyboard.unlock(); } catch (e) { /* 無視 */ }
+    if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(function () { /* 無視 */ });
+  };
   function noAuto() { return navigator.webdriver && !window.__kblockTest; }
   document.addEventListener('pointerdown', function (e) {
     if (e.pointerType !== 'mouse' || e.button !== 0 || noAuto()) return;
+    if (BOOT.offScreen && !(e.target && e.target.closest && e.target.closest('.pw-btn'))) return; // 電源が切れている画面
     if (!navigator.keyboard || !navigator.keyboard.lock) return; // Keyboard Lock がないブラウザでは、クリックで全画面にはしない
     goFull();
   }, true);
   document.addEventListener('pointerup', function (e) {
     if (e.pointerType === 'mouse' || noAuto()) return;
     if (!(window.OS && window.OS.touch)) return;
+    if (BOOT.offScreen && !(e.target && e.target.closest && e.target.closest('.pw-btn'))) return;
     goFull();
   }, true);
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }

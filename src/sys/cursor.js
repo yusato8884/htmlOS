@@ -62,7 +62,9 @@
     '#os-root :is(button,input,select,textarea):disabled{cursor:var(--c-no)}',
     '#os-root :is(.rz-e,.rz-w){cursor:var(--c-ew)}', '#os-root :is(.rz-n,.rz-s){cursor:var(--c-ns)}',
     '#os-root :is(.rz-nw,.rz-se){cursor:var(--c-nwse)}', '#os-root :is(.rz-ne,.rz-sw){cursor:var(--c-nesw)}',
-    '#os-root .pt-canvas{cursor:var(--c-cross)}', '#os-root .pt-canvas.hand{cursor:var(--c-move)}'
+    '#os-root .pt-canvas{cursor:var(--c-cross)}', '#os-root .pt-canvas.hand{cursor:var(--c-move)}',
+    // 7.2.1: 指定のない画面（起動・終了のスプラッシュ、電源が切れた画面の何もない所）は透明
+    '#os-root :is(#splash,#splash *,.poweroff,.poweroff :not(.pw-btn,.pw-btn *)){cursor:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%271%27 height=%271%27/%3E") 0 0,none}'
   ].join('\n');
   OS.cursorThemes = Object.keys(THEMES);
   const old = document.getElementById('htmlos-cursors'); if (old) old.remove();
