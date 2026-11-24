@@ -450,10 +450,10 @@
     }
     return { play: play, prefs: prefs, names: NAMES, list: () => Object.keys(SOUNDS), _ctx: () => { const c = ctx(); watch(c); return c; }, _reverb: reverb, _note: note, _tone: tone, M: M,
       reset: reset, get voices() { return voices; },
-      // 7.2.1: 鳴っている効果音が鳴り終わるまでの残り（ミリ秒）。シャットダウン・再起動はこれを待つ
+      // 7.2.2: 鳴っている効果音が鳴り終わるまでの残り（ミリ秒）。シャットダウン・再起動はこれを待つ
       left: () => Math.max(0, endAt - Date.now()),
       // soundd.service が止める・動かす（止めているあいだは起こし直さない）
-      // 止めるときは、鳴っている効果音（シャットダウンの音など）が終わってから止める（7.2.1。前は途中で切れていた）
+      // 止めるときは、鳴っている効果音（シャットダウンの音など）が終わってから止める（7.2.2。前は途中で切れていた）
       hold(v) {
         held = !!v; clearTimeout(holdT); const c = BOOT.audio; if (!c) return;
         if (!held) { wake(c); return; }
@@ -1457,11 +1457,11 @@
       msg.textContent = steps[i]; bar.style.width = (100 - (i + 1) / steps.length * 100) + '%';
       await nap(190);
     }
-    // シャットダウン・再起動の音が鳴り終わるまで待つ（7.2.1。前は 1.3 秒で切っていたので音が途中で切れていた）
+    // シャットダウン・再起動の音が鳴り終わるまで待つ（7.2.2。前は 1.3 秒で切っていたので音が途中で切れていた）
     const rest = Math.max(1300 - (Date.now() - t0), OS.sound.left ? OS.sound.left() : 0);
     if (rest > 0) await nap(Math.min(rest, 6000));
     if (reboot) { if (BOOT.warmBoot) BOOT.warmBoot(); else location.reload(); return; }
-    if (BOOT.exitFull) BOOT.exitFull(); // 電源が切れたら全画面をやめる（7.2.1）
+    if (BOOT.exitFull) BOOT.exitFull(); // 電源が切れたら全画面をやめる（7.2.2）
     OS.root.textContent = '';
     OS.root.append(h('div', { class: 'poweroff' },
       h('button', { class: 'pw-btn', type: 'button', title: '電源を入れる', 'aria-label': '電源を入れる', onclick: () => (BOOT.warmBoot ? BOOT.warmBoot() : location.reload()) }, OS.icon('power', 34)),

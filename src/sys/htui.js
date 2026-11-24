@@ -2263,7 +2263,7 @@
     const g = cv.getContext('2d'); g.scale(dpr, dpr);
     g.fillStyle = getComputedStyle(body).backgroundColor || '#000'; g.fillRect(0, 0, W, H);
     g.drawImage(img, 0, 0, W, H);
-    if (o.canvas) return cv; // 7.2.1: fbgrab -d（フレームバッファーに写す）用。保存しない
+    if (o.canvas) return cv; // 7.2.2: fbgrab -d（フレームバッファーに写す）用。保存しない
     let url; try { url = cv.toDataURL('image/png'); } catch (e) { throw new Error('このブラウザでは画面を画像にできません（' + e.message + '）'); }
     const d = new Date(), p2 = n => String(n).padStart(2, '0');
     const dir = users.home(htui.user) + '/Pictures/Screenshots', name = 'スクリーンショット ' + d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + ' ' + p2(d.getHours()) + '.' + p2(d.getMinutes()) + '.' + p2(d.getSeconds()) + '.png';

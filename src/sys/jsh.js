@@ -773,7 +773,7 @@
         if (!OS.htui.running || !OS.htui.user || !OS.htui.screenshot) throw new Error('screenshot: デスクトップ（HTUi）でだけ使えます');
         return '保存しました: ' + await OS.htui.screenshot();
       });
-      // フレームバッファー（7.2.1）: /dev/fb0。中身は OS.fb（/sys/fb.js）
+      // フレームバッファー（7.2.2）: /dev/fb0。中身は OS.fb（/sys/fb.js）
       const FB = () => { if (!OS.fb) throw new Error('フレームバッファー（/sys/fb.js）がありません'); return OS.fb; };
       def('fbset', 'fbset [-g 幅 高さ] [show|hide|clear]', 'フレームバッファー /dev/fb0 の大きさを表示・変更（show 表示 / hide 隠す / clear 黒く消す）', (...a) => {
         const f = FB(), g = getopts(a, 'g');

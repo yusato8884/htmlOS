@@ -7,7 +7,7 @@
 <style>
 /* ブートローダ / インストーラ専用の最小スタイル。OS本体のスタイルは /sys/style.css にあります */
 html,body{height:100%;margin:0;overscroll-behavior:none}
-/* 7.2.1: カーソルを指定していない所（BIOS・POST・起動中・電源が切れたあとの画面など）は透明のカーソル。指定のある所（ボタンやメニュー、OS の画面）はそちらが優先 */
+/* 7.2.2: カーソルを指定していない所（BIOS・POST・起動中・電源が切れたあとの画面など）は透明のカーソル。指定のある所（ボタンやメニュー、OS の画面）はそちらが優先 */
 html,body,body *{cursor:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/%3E") 0 0,none}
 body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono","Noto Sans Mono CJK JP",Menlo,Consolas,monospace;overflow:hidden}
 #boot{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;overflow:auto}
@@ -4325,7 +4325,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     '#os-root :is(.rz-e,.rz-w){cursor:var(--c-ew)}', '#os-root :is(.rz-n,.rz-s){cursor:var(--c-ns)}',
     '#os-root :is(.rz-nw,.rz-se){cursor:var(--c-nwse)}', '#os-root :is(.rz-ne,.rz-sw){cursor:var(--c-nesw)}',
     '#os-root .pt-canvas{cursor:var(--c-cross)}', '#os-root .pt-canvas.hand{cursor:var(--c-move)}',
-    // 7.2.1: 指定のない画面（起動・終了のスプラッシュ、電源が切れた画面の何もない所）は透明
+    // 7.2.2: 指定のない画面（起動・終了のスプラッシュ、電源が切れた画面の何もない所）は透明
     '#os-root :is(#splash,#splash *,.poweroff,.poweroff :not(.pw-btn,.pw-btn *)){cursor:url("data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%271%27 height=%271%27/%3E") 0 0,none}'
   ].join('\n');
   OS.cursorThemes = Object.keys(THEMES);
@@ -4334,7 +4334,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 })();
 </script>
 <script type="text/x-htmlos" data-path="/sys/fb.js">
-/* htmlOS フレームバッファー（7.2.1 から）— /dev/fb0
+/* htmlOS フレームバッファー（7.2.2 から）— /dev/fb0
    ・Linux の fbdev と同じく、画面の画素を並べたバイト列。1 画素 4 バイト（B, G, R, X の順 = 32bpp BGRX）、左上から右へ、上から下へ
    ・既定の大きさは 640×360。jsh の fbset -g 幅 高さ で変えられる（16〜1920 × 16〜1080）
    ・/dev/fb0 を読むと、いまの画素（幅×高さ×4 バイト）が返る。書くと先頭から画素を置き換え、画面いっぱいに表示する
@@ -7078,7 +7078,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     const g = cv.getContext('2d'); g.scale(dpr, dpr);
     g.fillStyle = getComputedStyle(body).backgroundColor || '#000'; g.fillRect(0, 0, W, H);
     g.drawImage(img, 0, 0, W, H);
-    if (o.canvas) return cv; // 7.2.1: fbgrab -d（フレームバッファーに写す）用。保存しない
+    if (o.canvas) return cv; // 7.2.2: fbgrab -d（フレームバッファーに写す）用。保存しない
     let url; try { url = cv.toDataURL('image/png'); } catch (e) { throw new Error('このブラウザでは画面を画像にできません（' + e.message + '）'); }
     const d = new Date(), p2 = n => String(n).padStart(2, '0');
     const dir = users.home(htui.user) + '/Pictures/Screenshots', name = 'スクリーンショット ' + d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + ' ' + p2(d.getHours()) + '.' + p2(d.getMinutes()) + '.' + p2(d.getSeconds()) + '.png';
@@ -9109,7 +9109,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         if (!OS.htui.running || !OS.htui.user || !OS.htui.screenshot) throw new Error('screenshot: デスクトップ（HTUi）でだけ使えます');
         return '保存しました: ' + await OS.htui.screenshot();
       });
-      // フレームバッファー（7.2.1）: /dev/fb0。中身は OS.fb（/sys/fb.js）
+      // フレームバッファー（7.2.2）: /dev/fb0。中身は OS.fb（/sys/fb.js）
       const FB = () => { if (!OS.fb) throw new Error('フレームバッファー（/sys/fb.js）がありません'); return OS.fb; };
       def('fbset', 'fbset [-g 幅 高さ] [show|hide|clear]', 'フレームバッファー /dev/fb0 の大きさを表示・変更（show 表示 / hide 隠す / clear 黒く消す）', (...a) => {
         const f = FB(), g = getopts(a, 'g');
@@ -10375,10 +10375,10 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     }
     return { play: play, prefs: prefs, names: NAMES, list: () => Object.keys(SOUNDS), _ctx: () => { const c = ctx(); watch(c); return c; }, _reverb: reverb, _note: note, _tone: tone, M: M,
       reset: reset, get voices() { return voices; },
-      // 7.2.1: 鳴っている効果音が鳴り終わるまでの残り（ミリ秒）。シャットダウン・再起動はこれを待つ
+      // 7.2.2: 鳴っている効果音が鳴り終わるまでの残り（ミリ秒）。シャットダウン・再起動はこれを待つ
       left: () => Math.max(0, endAt - Date.now()),
       // soundd.service が止める・動かす（止めているあいだは起こし直さない）
-      // 止めるときは、鳴っている効果音（シャットダウンの音など）が終わってから止める（7.2.1。前は途中で切れていた）
+      // 止めるときは、鳴っている効果音（シャットダウンの音など）が終わってから止める（7.2.2。前は途中で切れていた）
       hold(v) {
         held = !!v; clearTimeout(holdT); const c = BOOT.audio; if (!c) return;
         if (!held) { wake(c); return; }
@@ -11382,11 +11382,11 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       msg.textContent = steps[i]; bar.style.width = (100 - (i + 1) / steps.length * 100) + '%';
       await nap(190);
     }
-    // シャットダウン・再起動の音が鳴り終わるまで待つ（7.2.1。前は 1.3 秒で切っていたので音が途中で切れていた）
+    // シャットダウン・再起動の音が鳴り終わるまで待つ（7.2.2。前は 1.3 秒で切っていたので音が途中で切れていた）
     const rest = Math.max(1300 - (Date.now() - t0), OS.sound.left ? OS.sound.left() : 0);
     if (rest > 0) await nap(Math.min(rest, 6000));
     if (reboot) { if (BOOT.warmBoot) BOOT.warmBoot(); else location.reload(); return; }
-    if (BOOT.exitFull) BOOT.exitFull(); // 電源が切れたら全画面をやめる（7.2.1）
+    if (BOOT.exitFull) BOOT.exitFull(); // 電源が切れたら全画面をやめる（7.2.2）
     OS.root.textContent = '';
     OS.root.append(h('div', { class: 'poweroff' },
       h('button', { class: 'pw-btn', type: 'button', title: '電源を入れる', 'aria-label': '電源を入れる', onclick: () => (BOOT.warmBoot ? BOOT.warmBoot() : location.reload()) }, OS.icon('power', 34)),
@@ -15212,7 +15212,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 .hs-send{flex:none;display:flex;gap:6px;padding:6px;background:var(--surface-2);border-top:1px solid var(--line)}
 .hs-send .inp{font-family:var(--mono)}
 .sel{font:inherit;color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:6px;padding:3px 6px}
-/* ---- フレームバッファー /dev/fb0（7.2.1） */
+/* ---- フレームバッファー /dev/fb0（7.2.2） */
 .fb-ov{position:fixed;inset:0;z-index:2147483000;background:#000;display:grid;place-items:center;cursor:none}
 .fb-view{width:100vw;height:100vh;object-fit:contain;image-rendering:pixelated}
 .fb-hint{position:absolute;left:50%;bottom:18px;translate:-50% 0;padding:6px 14px;border-radius:8px;background:rgba(0,0,0,.6);color:#ddd;font:12.5px var(--mono);pointer-events:none;transition:opacity .6s}
@@ -17618,7 +17618,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       .catch(function (err) { try { console.warn('htmlOS: 全画面・キーボードの捕捉ができませんでした', err); } catch (e) { /* 無視 */ } });
   }
   BOOT.goFull = goFull;
-  // 7.2.1: シャットダウン（電源を切る・休止）したら全画面とキーボードの捕捉をやめる。電源ボタン以外のクリックではもう全画面にしない
+  // 7.2.2: シャットダウン（電源を切る・休止）したら全画面とキーボードの捕捉をやめる。電源ボタン以外のクリックではもう全画面にしない
   BOOT.exitFull = function () {
     BOOT.offScreen = true;
     try { if (navigator.keyboard && navigator.keyboard.unlock) navigator.keyboard.unlock(); } catch (e) { /* 無視 */ }
