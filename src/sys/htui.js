@@ -779,7 +779,7 @@
 
   // ---------- デスクトップ: ~/Desktop の中身を並べるファイル置き場（タッチモードの HTUi だけはアプリのランチャー）
   //   左上（hAqua は右上）から、ホーム・/（ルート）・ゴミ箱（HTUi と hWin）・~/Desktop のファイルの順に並ぶ
-  const KIND_COLOR = { text: '#5e5c64', html: '#e66100', image: '#2ec27e', audio: '#9141ac', video: '#c01c28', other: '#77767b' };
+  const KIND_COLOR = { text: '#5e5c64', html: '#e66100', image: '#2ec27e', audio: '#9141ac', video: '#c01c28', archive: '#986a44', other: '#77767b' };
   const deskDir = () => users.home(htui.user) + '/Desktop';
   htui.refreshApps = function () {
     if (htui.shell && htui.shell.onApps) htui.shell.onApps();
@@ -879,6 +879,7 @@
     const k = fs.kind(o.path), items = [{ head: o.name + (o.link ? '（リンク）' : '') }, { label: '開く', icon: o.icon, act: () => openDesk(o) }];
     if (!o.dir && (k === 'text' || k === 'html' || k === 'other')) items.push({ label: 'hedit で開く', icon: 'edit', act: () => run('hedit', o.path) });
     if (o.dir) items.push({ label: 'ここで Terminal を開く', icon: 'terminal', act: () => run('terminal', { cmd: 'cd "' + o.path + '"' }) });
+    if (OS.archive) items.push({ sep: true }, ...OS.archive.menuItems(o.path, o.dir)); // 7.3: 展開・圧縮
     items.push({ sep: true },
       { label: 'コピー', act: () => { htui.fileClip = { path: o.path, cut: false }; ui.toast(o.name + ' をコピーしました'); } },
       { label: '切り取り', act: () => { htui.fileClip = { path: o.path, cut: true }; ui.toast(o.name + ' を切り取りました'); } },
@@ -2413,7 +2414,7 @@
     setTimeout(() => t.remove(), 3500);
   };
 
-  // ファイル選択ダイアログ。mode: 'open' | 'save'。戻り値は絶対パス（キャンセルは null）
+  // ファイル選択ダイアログ。mode: 'open' | 'save' | 'dir'（7.3: フォルダを選ぶ。いま開いているフォルダを返す）。戻り値は絶対パス（キャンセルは null）
   ui.pickFile = function (o) {
     o = o || {};
     const fsx = htui.fs, home = users.home(htui.user);
@@ -2430,7 +2431,7 @@
       if (dir !== '/') list.append(h('button', { class: 'fp-item', type: 'button', onclick: () => go(path.dir(dir)) }, OS.icon('up', 16), '..（上へ）'));
       const rows = names.filter(n => !n.startsWith('.')).map(n => ({ n: n, p: path.join(dir, n), d: fs.isDir(path.join(dir, n)) })).sort((a, b) => (b.d - a.d) || a.n.localeCompare(b.n));
       rows.forEach(r => {
-        if (!r.d && o.kinds && !o.kinds.includes(fs.kind(r.p))) return;
+        if (!r.d && (o.mode === 'dir' || (o.kinds && !o.kinds.includes(fs.kind(r.p))))) return;
         const b = h('button', { class: 'fp-item', type: 'button', role: 'option' }, OS.icon(r.d ? 'folder' : fileIcon(r.p), 16), r.n);
         b.addEventListener('click', () => {
           if (r.d) return go(r.p);
@@ -2442,6 +2443,7 @@
       });
     }
     function result() {
+      if (o.mode === 'dir') return dir;
       if (o.mode === 'save') {
         const n = name.value.trim();
         if (!n || n.includes('/')) { err.textContent = 'ファイル名を入力してください（/ は使えません）。'; return ui.KEEP; }
@@ -2458,9 +2460,9 @@
     const places = h('div', { class: 'fp-places' }, [['ホーム', home], ['Documents', home + '/Documents'], ['Downloads', home + '/Downloads'], ['Pictures', home + '/Pictures'], ['Music', home + '/Music'], ['Videos', home + '/Videos'], ['/', '/']]
       .map(x => h('button', { class: 'btn small', type: 'button', onclick: () => go(x[1]) }, x[0])));
     return ui.modal({
-      title: o.title || (o.mode === 'save' ? '名前を付けて保存' : 'ファイルを開く'), width: 460,
+      title: o.title || (o.mode === 'save' ? '名前を付けて保存' : o.mode === 'dir' ? 'フォルダを選ぶ' : 'ファイルを開く'), width: 460,
       body: [places, pathEl, list, o.mode === 'save' ? name : null, err],
-      buttons: [{ label: 'キャンセル', cancel: true, value: null }, { label: o.mode === 'save' ? '保存' : '開く', primary: true, value: result }],
+      buttons: [{ label: 'キャンセル', cancel: true, value: null }, { label: o.mode === 'save' ? '保存' : o.mode === 'dir' ? 'このフォルダを選ぶ' : '開く', primary: true, value: result }],
       onOpen: done => { finish = done; if (o.mode === 'save') { name.focus(); const i = name.value.lastIndexOf('.'); name.setSelectionRange(0, i > 0 ? i : name.value.length); } }
     });
   };

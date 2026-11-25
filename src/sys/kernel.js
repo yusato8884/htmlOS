@@ -58,6 +58,7 @@
     pin: '<path d="M9 3h6l-1 6 4 4H6l4-4zM12 13v8"/>',
     chip: '<rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    alarm: '<circle cx="12" cy="13" r="7.5"/><path d="M12 9.5V13l2.5 1.5M4.5 4.5 2.5 6.5M19.5 4.5l2 2M7 19.5 5.5 21M17 19.5l1.5 1.5"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
     camera: '<path d="M4 8h3l2-3h6l2 3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13" r="3.5"/>',
     raid: '<rect x="3" y="4" width="18" height="5" rx="1"/><rect x="3" y="10" width="18" height="5" rx="1"/><rect x="3" y="16" width="18" height="4" rx="1"/><path d="M7 6.5h.01M7 12.5h.01M7 18h.01"/>',
@@ -154,9 +155,10 @@
     html: ['html', 'htm'],
     image: 'png jpg jpeg gif webp svg bmp ico avif'.split(' '),
     audio: 'mp3 wav ogg oga m4a flac aac opus'.split(' '),
-    video: 'mp4 webm ogv mov m4v'.split(' ')
+    video: 'mp4 webm ogv mov m4v'.split(' '),
+    archive: 'zip tar gz tgz'.split(' ') // 7.3: hArchive で開く
   };
-  const MIME = { svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif', mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', oga: 'audio/ogg', m4a: 'audio/mp4', flac: 'audio/flac', aac: 'audio/aac', opus: 'audio/ogg', mp4: 'video/mp4', webm: 'video/webm', ogv: 'video/ogg', mov: 'video/quicktime', m4v: 'video/mp4', html: 'text/html', htm: 'text/html', css: 'text/css', js: 'text/javascript', json: 'application/json' };
+  const MIME = { svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', ico: 'image/x-icon', avif: 'image/avif', mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', oga: 'audio/ogg', m4a: 'audio/mp4', flac: 'audio/flac', aac: 'audio/aac', opus: 'audio/ogg', mp4: 'video/mp4', webm: 'video/webm', ogv: 'video/ogg', mov: 'video/quicktime', m4v: 'video/mp4', html: 'text/html', htm: 'text/html', css: 'text/css', js: 'text/javascript', json: 'application/json', zip: 'application/zip', gz: 'application/gzip', tgz: 'application/gzip', tar: 'application/x-tar', pdf: 'application/pdf' };
   // ファイルが変わったことを知らせる（デスクトップや hFile が表示を更新するため）。まとめて 1 回にする
   const watchers = new Set(); let changedPaths = new Set(), changeTimer = 0;
   function changed(p) {
@@ -1296,6 +1298,7 @@
     if (k === 'image' || k === 'audio' || k === 'video') return OS.launch('hplayer', p);
     if (k === 'html') return OS.launch('hbrowser', 'hfs:' + p);
     if (path.ext(p) === 'md' && OS.apps.hmd) return OS.launch('hmd', p);
+    if (k === 'archive' && OS.apps.harchive) return OS.launch('harchive', p); // 7.3
     const s = fs.stat(p);
     if (s && s.b) throw new Error(path.base(p) + ': このバイナリファイルを開けるアプリがありません');
     return OS.launch('hedit', p);
@@ -1588,7 +1591,7 @@
     if (OS.imode) apps = apps.filter(n => I_APPS.includes(n));
     const pkgs = OS.safe || OS.imode ? [] : OS.pkg.list();
     try { OS.build = (JSON.parse(store.get('meta')) || {}).build || BOOT.build || '?'; } catch (e) { OS.build = BOOT.build || '?'; }
-    const core = ['/sys/init.js', '/sys/ipc.js', '/sys/raid.js', '/sys/procfs.js', '/sys/fb.js', '/sys/cursor.js', '/sys/jsh.js', '/sys/nano.js', '/sys/htui.js', '/sys/hdm.js', '/sys/shells.js'];
+    const core = ['/sys/init.js', '/sys/ipc.js', '/sys/raid.js', '/sys/procfs.js', '/sys/fb.js', '/sys/cursor.js', '/sys/archive.js', '/sys/jsh.js', '/sys/nano.js', '/sys/htui.js', '/sys/hdm.js', '/sys/shells.js'];
     const total = 2 + core.length + apps.length + pkgs.length; let done = 0;
     const step = async (s, failed) => {
       if (OS.klog) OS.klog(s, failed ? 3 : 6); else (OS._klog = OS._klog || []).push({ t: Date.now(), msg: s, prio: failed ? 3 : 6 });

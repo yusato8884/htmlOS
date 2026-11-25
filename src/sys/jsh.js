@@ -78,6 +78,13 @@
       'if や for は JavaScript で書きます。{ ( [ が閉じるまでの行は 1 つにまとめて実行するので、複数行のブロックも書けます。exit 1 でスクリプトを終わります。\n' +
       '~/bin か /bin に置いたスクリプトは、名前だけで実行できます（hello.jsh → hello）。./hello.jsh のようにパスで実行することもできます。',
       e: ['run ~/hello.jsh 悠', './backup.jsh', 'hello 悠'] },
+    zip: { d: 'フォルダを指定すると中身ごと入れます（-r はあってもなくても同じです）。相対パスで書いたものはそのパスのまま、/ や ~ から書いたものは最後の名前だけで入ります。\nファイル名は UTF-8 で入れるので、Windows・macOS・Linux のどれでも日本語の名前のまま開けます。シンボリックリンクはリンク先の中身を入れます。', e: ['zip memo.zip memo.txt', 'zip -q backup.zip ~/Documents', 'cd ~ && zip pics.zip Pictures'] },
+    unzip: { d: 'すでにあるファイルは上書きせずに飛ばします（-o で上書き）。名前を続けて書くと、そのファイル・フォルダだけを展開します。\n.. を含む名前や、展開先の外を指す名前（ZIP スリップ）は展開しません。古い Windows で作った Shift_JIS の名前も読めます。', e: ['unzip -l memo.zip', 'unzip photos.zip -d ~/Pictures', 'unzip -o site.zip index.html'] },
+    tar: { d: '-c まとめる、-x 展開する、-t 一覧。-z を付けるか、出力の名前を .tar.gz / .tgz にすると gzip で圧縮します（展開と一覧は自動で見分けます）。\n-v で 1 つずつ表示、-C で展開先、-k ですでにあるファイルを残します。シンボリックリンクはリンクのまま入れます。tar czf のようにハイフンを省いても書けます。', e: ['tar -czf docs.tar.gz ~/Documents', 'tar -tvf docs.tar.gz', 'tar -xzf docs.tar.gz -C /tmp', 'tar xf old.tar'] },
+    gzip: { d: 'ファイル 1 つを圧縮して 名前.gz にします。元のファイルは消えるので、残すときは -k。フォルダをまとめるときは tar -czf を使います。', e: ['gzip log.txt', 'gzip -k data.csv', 'gzip -d log.txt.gz', 'gzip -l log.txt.gz'] },
+    zcat: { e: ['zcat log.txt.gz | grep error', 'zcat notes.md.gz | head'] },
+    timer: { d: '時間は 90（秒）、5m、1h30m、1:30（分:秒）、1:00:00 のように書けます。終わると音と通知でお知らせします（デスクトップにログインしているとき）。\nhClock を閉じても動き続けます。', e: ['timer 3m カップ麺', 'timer 25m 集中', 'timer', 'timer stop 1'] },
+    alarm: { d: '時刻は 7:00 のように 24 時間で書きます。曜日は 平日 / 毎日 / 土日 か、月水金 のように書きます（書かなければ 1 回だけ）。', e: ['alarm 7:00 起きる', 'alarm 6:30 平日 朝練', 'alarm', 'alarm off 1', 'alarm del 2'] },
     cmd: { d: 'JavaScript の中からシェル風のコマンドを実行して、その出力を文字列で受け取ります。シェル風の行では $( ) と同じです。', e: ['const n = await cmd("ls ~ | wc -l")', 'echo ファイルは $(ls ~ | wc -l) 個'] }
   };
 
@@ -892,6 +899,52 @@
       def('htictactoe', 'htictactoe', '三目並べ（CPU・二人で対戦、マスの数を変えられる）', () => { OS.launch('htictactoe'); });
       alias('ttt', 'htictactoe');
       def('hreversi', 'hreversi', 'リバーシ（CPU・二人で対戦）', () => { OS.launch('hreversi'); });
+      def('harchive', 'harchive [アーカイブ]', 'アーカイブマネージャー（ZIP・tar・tar.gz・gz を開く・作る・展開する）', p => { OS.launch('harchive', p == null ? null : A(p)); });
+      def('hclock', 'hclock [alarm|timer|stopwatch|world]', '時計（アラーム・タイマー・ストップウォッチ・世界時計）', tab => { OS.launch('hclock', tab ? { tab: String(tab) } : null); });
+      // hClock（7.3）: timer / alarm。中身は OS.clock（/sys/apps/71-hclock.js）、鳴らすのは hclock.service（そのユーザーがデスクトップにログインしているとき）
+      const CK = () => { if (!OS.clock) throw new Error('hClock（/sys/apps/71-hclock.js）が読み込まれていません'); return OS.clock; };
+      const ckWarn = () => OS.htui && OS.htui.running && OS.htui.user === self.user ? '' : '\n（いまはデスクトップにログインしていないので、' + self.user + ' でログインしているあいだに鳴ります）';
+      const ckTime = t => new Date(t).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+      def('timer', 'timer [時間 [名前]] | timer pause|resume|reset|stop 番号', 'タイマー（例: timer 3m カップ麺）。何も付けないと一覧', (...a) => {
+        const K = CK(), u = self.user, sub = a[0] == null ? null : String(a[0]);
+        if (sub == null || sub === 'list') {
+          const st = K.load(u);
+          if (!st.timers.length) return 'タイマーはありません（timer 3m カップ麺 のように始めます）';
+          return out(st.timers.map(t => String(t.id).padStart(3) + '  ' + K.fmtDur(K.timerLeft(t)).padStart(8) + '  ' + (t.done ? '終了  ' : t.run ? '動作中' : '停止中') + '  ' + (t.label || K.fmtDur(t.dur) + ' のタイマー')));
+        }
+        const act = { stop: 'removeTimer', rm: 'removeTimer', del: 'removeTimer', pause: 'pauseTimer', resume: 'resumeTimer', reset: 'resetTimer' }[sub];
+        if (act) { if (a[1] == null) throw new Error('番号を指定してください（timer で一覧が出ます）'); K[act](a[1], u); return; }
+        const sec = K.parseDur(sub);
+        if (!(sec > 0)) throw new Error(sub + ': 時間の書き方が正しくありません（例: 90、5m、1h30m、1:30）');
+        const t = K.addTimer(sec, a.slice(1).join(' '), u);
+        return 'タイマー ' + t.id + ': ' + K.fmtDur(t.dur) + (t.label ? '（' + t.label + '）' : '') + ' — ' + ckTime(t.end) + ' に鳴ります' + ckWarn();
+      });
+      const parseDays = s => {
+        s = String(s).toLowerCase();
+        const named = { '毎日': [0, 1, 2, 3, 4, 5, 6], daily: [0, 1, 2, 3, 4, 5, 6], '平日': [1, 2, 3, 4, 5], weekdays: [1, 2, 3, 4, 5], '土日': [0, 6], '週末': [0, 6], weekends: [0, 6] };
+        if (named[s]) return named[s];
+        if (/^[日月火水木金土]+$/.test(s)) return [...new Set([...s].map(c => '日月火水木金土'.indexOf(c)))];
+        return null;
+      };
+      def('alarm', 'alarm [時刻 [曜日] [名前]] | alarm on|off|del 番号', 'アラーム（例: alarm 7:00 平日 起きる）。何も付けないと一覧', (...a) => {
+        const K = CK(), u = self.user, sub = a[0] == null ? null : String(a[0]);
+        if (sub == null || sub === 'list') {
+          const st = K.load(u);
+          if (!st.alarms.length) return 'アラームはありません（alarm 7:00 起きる のように追加します）';
+          return out(st.alarms.map(x => { const n = K.nextOf(x); return String(x.id).padStart(3) + '  ' + (x.on ? 'オン ' : 'オフ') + '  ' + (x.h + ':' + String(x.m).padStart(2, '0')).padStart(5) + '  ' + K.describeDays(x.days).padEnd(10) + '  ' + (x.label || '') + (n ? '  （' + K.untilText(n - Date.now()) + '）' : ''); }));
+        }
+        if (/^(on|off|del|rm)$/.test(sub)) {
+          if (a[1] == null) throw new Error('番号を指定してください（alarm で一覧が出ます）');
+          if (sub === 'del' || sub === 'rm') K.removeAlarm(a[1], u); else K.updateAlarm(a[1], { on: sub === 'on' }, u);
+          return;
+        }
+        const m = /^(\d{1,2}):(\d{2})$/.exec(sub);
+        if (!m || +m[1] > 23 || +m[2] > 59) throw new Error(sub + ': 時刻は 7:00 のように 24 時間で書いてください');
+        let rest = a.slice(1).map(String), days = [];
+        if (rest.length && parseDays(rest[0])) { days = parseDays(rest[0]); rest = rest.slice(1); }
+        const x = K.addAlarm({ h: +m[1], m: +m[2], days: days, label: rest.join(' ') }, u), n = K.nextOf(x);
+        return 'アラーム ' + x.id + ': ' + x.h + ':' + String(x.m).padStart(2, '0') + '（' + K.describeDays(x.days) + '）' + (x.label ? ' ' + x.label : '') + (n ? ' — ' + K.untilText(n - Date.now()) + 'で鳴ります' : '') + ckWarn();
+      });
       // ---- HTUi Studio の TUI（矢印キー・Enter・Esc で操作する CLI 版）
       async function studioTui(S, startDir) {
         const scr = tty.screen();
@@ -1335,6 +1388,99 @@
           }
           return p + ': ' + kind + '、' + lines(c).length + ' 行、' + ([...c].every(ch => ch.charCodeAt(0) < 128) ? 'ASCII' : 'UTF-8');
         }).join('\n');
+      });
+
+      // ======== アーカイブ（7.3）: zip / unzip / tar / gzip / gunzip / zcat。中身は OS.archive（/sys/archive.js）
+      const AR = () => { if (!OS.archive) throw new Error('アーカイブの機能（/sys/archive.js）が読み込まれていません'); return OS.archive; };
+      // アーカイブの中の名前: 相対パスで書いたらそのパス（../ は外す）、/ や ~ から書いたら最後の名前だけ
+      const arcName = x => { x = String(x); if (x.startsWith('/') || x.startsWith('~')) return path.base(A(x)); return path.norm(x, '/').slice(1); };
+      const pct = (a, b) => b ? Math.max(0, Math.round((1 - a / b) * 100)) + '%' : '0%';
+      const arcList = (arc, long) => {
+        const files = arc.entries.filter(e => !e.implied);
+        if (!long) return out(files.map(e => e.name + (e.dir ? '/' : '')));
+        const rows = files.map(e => String(e.dir ? '' : e.size).padStart(10) + '  ' + fmtDate(e.mtime) + '  ' + e.name + (e.dir ? '/' : e.link != null ? ' -> ' + e.link : ''));
+        let total = 0; files.forEach(e => { total += e.dir ? 0 : e.size; });
+        return out(['    サイズ  日時              名前', '----------  ----------------  ----'].concat(rows, ['----------                    ----', String(total).padStart(10) + '                    ' + files.filter(e => !e.dir).length + ' 個のファイル（' + arc.format + '）']));
+      };
+      def('zip', 'zip [-0] [-q] 出力.zip パス...', 'ZIP にまとめる（フォルダは中身ごと。-0 は圧縮しない、-q は静かに）', async (...a) => {
+        const g = getopts(a), r0 = g.rest;
+        if (r0.length < 2) throw new Error('使い方: zip [-0] [-q] 出力.zip パス...');
+        let o = A(r0[0]); if (!/\.zip$/i.test(o)) o += '.zip';
+        const src = r0.slice(1).map(x => { const q = A(x); if (!fs.exists(q) && !fs.isLink(q)) throw new Error(q + ': そのようなファイルはありません'); return { path: q, name: arcName(x) }; });
+        const r = await AR().create(fs, src, o, { format: 'zip', level: g.o.n === '0' ? 0 : 6,
+          progress: g.o.q ? null : (e, i, n, x) => { tty.println('  追加: ' + e.name + (e.dir ? '/' : '') + (x && x.method === 8 ? '（' + pct(x.csize, x.size) + ' 縮みました）' : e.dir ? '' : '（そのまま）')); } });
+        return g.o.q ? undefined : o + ': ' + r.count + ' 個のファイル、' + fmtSize(r.raw) + ' → ' + fmtSize(r.size) + (r.size < r.raw ? '（' + pct(r.size, r.raw) + ' 縮みました）' : '');
+      });
+      def('unzip', 'unzip [-l] [-o] [-q] [-d 展開先] ファイル.zip [名前...]', 'ZIP を展開（-l 中身の一覧、-o 上書きする、-d 展開先）', async (...a) => {
+        const g = getopts(a, 'd'), f = g.rest[0];
+        if (f == null) throw new Error('使い方: unzip [-l] [-o] [-d 展開先] ファイル.zip [名前...]');
+        const arc = await AR().open(fs, A(f));
+        if (g.o.l) return arcList(arc, true);
+        const dest = A(g.o.d && g.o.d !== true ? g.o.d : '.');
+        const r = await AR().extract(fs, arc, dest, { overwrite: !!g.o.o, only: g.rest.slice(1), skipImplied: true,
+          progress: g.o.q ? null : (e, i, n, st) => { if (!e.dir) tty.println((st === 'skip' ? '  飛ばしました（すでにあります）: ' : '  展開: ') + e.name); } });
+        return [g.o.q ? null : r.files + ' 個のファイルを ' + dest + ' に展開しました',
+          r.skipped.length ? r.skipped.length + ' 個はすでにあったので飛ばしました（上書きするときは -o）' : null,
+          r.unsafe.length ? '危ない名前（.. を含む・展開先の外）の ' + r.unsafe.length + ' 個は展開しませんでした' : null].filter(Boolean).join('\n') || undefined;
+      });
+      def('tar', 'tar -c|-x|-t [-z] [-v] [-k] -f アーカイブ [-C 展開先] [パス...]', 'tar にまとめる（-c）・展開（-x）・一覧（-t）。-z で gzip（tar.gz）', async (...a) => {
+        if (a.length && typeof a[0] === 'string' && /^[ctxzvfkC]+$/.test(a[0])) a = ['-' + a[0]].concat(a.slice(1)); // tar czf … のようにハイフンなしでも書ける
+        const g = getopts(a, 'fC'), o = g.o;
+        const mode = o.c ? 'c' : o.x ? 'x' : o.t ? 't' : null;
+        if (!mode) throw new Error('使い方: tar -czf 出力.tar.gz パス... ／ tar -xf アーカイブ [-C 展開先] ／ tar -tvf アーカイブ');
+        if (!o.f || o.f === true) throw new Error('-f でアーカイブのファイル名を指定してください');
+        const file = A(o.f);
+        if (mode === 'c') {
+          if (!g.rest.length) throw new Error('まとめるファイルかフォルダを指定してください');
+          const fmt = o.z || /\.(tgz|gz)$/i.test(file) ? 'tar.gz' : 'tar';
+          const src = g.rest.map(x => { const q = A(x); if (!fs.exists(q) && !fs.isLink(q)) throw new Error(q + ': そのようなファイルはありません'); return { path: q, name: arcName(x) }; });
+          const r = await AR().create(fs, src, file, { format: fmt, progress: o.v ? e => { tty.println(e.name + (e.dir ? '/' : '')); } : null });
+          return o.v ? file + ': ' + (r.count + r.dirs) + ' 個、' + fmtSize(r.size) : undefined;
+        }
+        const arc = await AR().open(fs, file);
+        if (mode === 't') {
+          if (!o.v) return arcList(arc, false);
+          return out(arc.entries.filter(e => !e.implied).map(e => (e.dir ? 'd' : e.link != null ? 'l' : '-') + (OS.perm ? OS.perm.str({ t: 'f', p: e.mode == null ? 0o644 : e.mode }, '/x').slice(1) : '') + ' ' + String(e.owner || 'root').padEnd(8) + String(e.size).padStart(10) + ' ' + fmtDate(e.mtime) + ' ' + e.name + (e.dir ? '/' : e.link != null ? ' -> ' + e.link : '')));
+        }
+        const dest = A(o.C && o.C !== true ? o.C : '.');
+        const r = await AR().extract(fs, arc, dest, { overwrite: !o.k, only: g.rest, skipImplied: true, progress: o.v ? (e, i, n, st) => { tty.println(e.name + (e.dir ? '/' : '') + (st === 'skip' ? '（すでにあるので飛ばしました）' : '')); } : null });
+        const msg = [r.unsafe.length ? '危ない名前（.. を含む・展開先の外）の ' + r.unsafe.length + ' 個は展開しませんでした' : null, r.skipped.length ? r.skipped.length + ' 個はすでにあったので飛ばしました' : null].filter(Boolean);
+        return msg.join('\n') || undefined;
+      });
+      def('gzip', 'gzip [-d] [-k] [-f] [-l] ファイル...', 'gzip で圧縮して ファイル.gz にする（元は消える。-k で残す、-d で展開、-l で圧縮率）', async (...a) => {
+        const g = getopts(a), o = g.o;
+        if (!g.rest.length) throw new Error('ファイルを指定してください');
+        const res = [];
+        for (const x of g.rest) {
+          const q = A(x);
+          if (fs.isDir(q)) throw new Error(q + ': ディレクトリです（フォルダは tar -czf でまとめてください）');
+          if (o.l) { const u = await AR().readBytes(fs, q), raw = await AR().gunzip(u); res.push(String(u.length).padStart(10) + String(raw.length).padStart(12) + pct(u.length, raw.length).padStart(7) + '  ' + q.replace(/\.gz$/i, '')); continue; }
+          if (o.d) {
+            if (!/\.(gz|tgz)$/i.test(q)) throw new Error(q + ': 拡張子が .gz ではありません');
+            const d = /\.tgz$/i.test(q) ? q.replace(/\.tgz$/i, '.tar') : q.replace(/\.gz$/i, '');
+            if (fs.exists(d) && !o.f) throw new Error(d + ' はすでにあります（上書きするときは -f）');
+            AR().writeBytes(fs, d, await AR().gunzip(await AR().readBytes(fs, q)));
+            if (!o.k) fs.rm(q);
+            if (o.v) res.push(q + ' → ' + d);
+          } else {
+            if (/\.(gz|tgz)$/i.test(q)) { res.push(q + ': すでに .gz なので飛ばしました'); continue; }
+            const d = q + '.gz';
+            if (fs.exists(d) && !o.f) throw new Error(d + ' はすでにあります（上書きするときは -f）');
+            const u = await AR().readBytes(fs, q), z = await AR().gzip(u);
+            fs.write(d, 'data:application/gzip;base64,' + AR().bytesToB64(z), { bin: true });
+            if (!o.k) fs.rm(q);
+            if (o.v) res.push(q + ': ' + pct(z.length, u.length) + ' 縮みました → ' + d);
+          }
+        }
+        if (o.l) res.unshift('  圧縮後    圧縮前   縮み  名前');
+        return res.join('\n') || undefined;
+      });
+      def('gunzip', 'gunzip [-k] [-f] ファイル.gz...', 'gzip を展開する（gzip -d と同じ。元の .gz は消える。-k で残す）', (...a) => env.gzip('-d', ...a));
+      def('zcat', 'zcat ファイル.gz...', 'gzip の中身をテキストとして表示（元のファイルはそのまま）', async (...a) => {
+        if (!a.length) throw new Error('ファイルを指定してください');
+        let t = '';
+        for (const x of a) t += new TextDecoder().decode(await AR().gunzip(await AR().readBytes(fs, A(x))));
+        return t;
       });
 
       // sed: s/パターン/置き換え/フラグ だけ使える。パターンは JavaScript の正規表現、置き換えでは $1 や $& が使える

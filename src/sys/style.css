@@ -2097,3 +2097,119 @@
 .ht4-side{overflow:hidden}
 .ht4-app{overflow:hidden}
 .phone .ht4-app{display:none}
+
+/* ---- hClock（7.3）: アラーム・タイマー・ストップウォッチ・世界時計 */
+.hk{display:flex;flex-direction:column;height:100%;min-height:0}
+.hk-page{flex:1;min-height:0;display:flex;flex-direction:column;gap:10px;padding:12px 14px;overflow:auto;background:var(--surface)}
+.hk-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.hk-next{flex:1;min-width:160px;color:var(--ink-2);font-size:13px;font-variant-numeric:tabular-nums}
+.hk-list{display:flex;flex-direction:column;gap:6px;min-height:0}
+.hk-empty{margin:6px 0;color:var(--ink-2);font-size:13px;line-height:1.7}
+.hk-al{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#fff}
+.hk-al.off .hk-al-time,.hk-al.off .hk-al-sub{opacity:.45}
+.hk-al.snz{border-style:dashed}
+.hk-al-main{flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:1px;border:0;background:none;padding:0;text-align:left;cursor:pointer}
+div.hk-al-main{cursor:default}
+.hk-al-time{font-size:30px;font-weight:300;line-height:1.1;font-variant-numeric:tabular-nums;letter-spacing:.02em}
+.hk-al-sub{font-size:12.5px;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.hk-sw{position:relative;display:inline-flex;flex:none;cursor:pointer}
+.hk-sw input{position:absolute;opacity:0;width:1px;height:1px}
+.hk-knob{width:40px;height:22px;border-radius:11px;background:#c0c1c7;position:relative;transition:background .15s}
+.hk-knob::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .15s}
+.hk-sw input:checked+.hk-knob{background:var(--accent)}
+.hk-sw input:checked+.hk-knob::after{transform:translateX(18px)}
+.hk-sw input:focus-visible+.hk-knob{outline:2px solid var(--accent);outline-offset:2px}
+.hk-foot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:auto;padding-top:8px;border-top:1px solid var(--line);font-size:13px}
+.hk-foot label{display:inline-flex;align-items:center;gap:6px}
+.hk-foot select{width:auto}
+.hk-foot input[type=range]{width:110px}
+.hk-form{display:flex;flex-direction:column;gap:10px}
+.hk-f{display:grid;grid-template-columns:76px 1fr;gap:8px;align-items:start}
+.hk-f>span{padding-top:5px;color:var(--ink-2);font-size:13px}
+.hk-fv{display:flex;flex-direction:column;gap:6px;min-width:0}
+.hk-fv>.btn{align-self:flex-start}
+.hk-time{font-size:22px;padding:4px 8px;width:auto;align-self:flex-start;font-variant-numeric:tabular-nums}
+.hk-days{display:flex;gap:4px;flex-wrap:wrap}
+.hk-day{width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:#fff;cursor:pointer;padding:0}
+.hk-day.sun{color:#c01c28}.hk-day.sat{color:#1c71d8}
+.hk-day.on{background:var(--accent);border-color:transparent;color:#fff!important}
+.hk-quick{display:flex;gap:4px;flex-wrap:wrap}
+.hk-desc{color:var(--ink-2)}
+.hk-tform{display:flex;flex-direction:column;gap:8px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+.hk-pre{display:flex;gap:5px;flex-wrap:wrap}
+.hk-custom{display:flex;align-items:center;gap:5px;flex-wrap:wrap;font-size:13px}
+.hk-num{width:58px;text-align:right}
+.hk-custom .inp:not(.hk-num){flex:1;min-width:120px;width:auto}
+.hk-tm{display:flex;align-items:center;gap:12px;padding:8px 10px;border:1px solid var(--line);border-radius:12px;background:#fff}
+.hk-tm.done{border-color:#e66100;background:#fff6ee}
+.hk-tring svg{display:block;transform:rotate(-90deg)}
+.hk-track{fill:none;stroke:var(--surface-2);stroke-width:6}
+.hk-arc{fill:none;stroke:var(--accent);stroke-width:6;stroke-linecap:round;transition:stroke-dashoffset .25s linear}
+.hk-tm.done .hk-arc{stroke:#e66100}
+.hk-tm:not(.run):not(.done) .hk-arc{stroke:#9a9ba3}
+.hk-tinfo{flex:1;min-width:0;display:flex;flex-direction:column}
+.hk-tleft{font-size:28px;font-weight:300;line-height:1.1;font-variant-numeric:tabular-nums}
+.hk-tinfo b{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hk-tsub{font-size:12px;color:var(--ink-2)}
+.hk-tbtns{display:flex;align-items:center;gap:4px;flex-wrap:wrap;justify-content:flex-end}
+.hk-stopwatch{align-items:center}
+.hk-swt{font-size:clamp(40px,11vw,64px);font-weight:200;font-variant-numeric:tabular-nums;letter-spacing:.02em;margin-top:8px;line-height:1.1}
+.hk-swlap{min-height:1.5em;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.hk-swbtns{display:flex;gap:40px;margin:4px 0 6px}
+.hk-round{width:84px;height:84px;border-radius:50%;border:1px solid var(--line);background:#fff;cursor:pointer;font-weight:600}
+.hk-round.go{background:#26a269;border-color:transparent;color:#fff!important}
+.hk-round.stop{background:#c01c28;border-color:transparent;color:#fff!important}
+.hk-round:disabled{opacity:.45;cursor:default}
+.hk-stopwatch .hk-list{width:min(440px,100%)}
+.hk-laps tr.best td{color:#26a269}
+.hk-laps tr.worst td{color:#c01c28}
+.hk-whead{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+.hk-dial{fill:#fff;stroke:var(--line);stroke-width:2}
+.hk-tk{stroke:#a6a8b0;stroke-width:1}
+.hk-tk5{stroke:var(--ink);stroke-width:2.5}
+.hk-num-t{font:600 15px var(--ui);fill:var(--ink);text-anchor:middle}
+.hk-hh{stroke:var(--ink);stroke-width:6;stroke-linecap:round}
+.hk-mh{stroke:var(--ink);stroke-width:4;stroke-linecap:round}
+.hk-sh{stroke:#e66100;stroke-width:1.6;stroke-linecap:round}
+.hk-pin{fill:#e66100}
+.hk-wbig{font-size:36px;font-weight:300;font-variant-numeric:tabular-nums;line-height:1.15}
+.hk-wdate{color:var(--ink-2)}
+.hk-wtz{color:var(--ink-2)}
+.hk-zone{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#fff}
+.hk-zname{flex:1;min-width:0;display:flex;flex-direction:column}
+.hk-zsub{font-size:12px;color:var(--ink-2)}
+.hk-ztime{font-size:28px;font-weight:300;font-variant-numeric:tabular-nums}
+.hk-zbtns{display:flex;gap:2px}
+.hk-ring{display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 0;text-align:center;color:var(--ink)}
+.hk-ring .ico{color:#e66100;animation:hk-shake .5s ease-in-out infinite alternate}
+.hk-ring-t{font-size:40px;font-weight:300;font-variant-numeric:tabular-nums;line-height:1.1}
+.hk-ring-l{color:var(--ink-2);overflow-wrap:anywhere}
+@keyframes hk-shake{from{transform:rotate(-12deg)}to{transform:rotate(12deg)}}
+@media (prefers-reduced-motion:reduce){.hk-ring .ico{animation:none}}
+
+/* ---- hArchive（7.3） */
+.ha{display:flex;flex-direction:column;height:100%;min-height:0}
+.ha-nav{flex:none;display:flex;align-items:center;gap:4px;padding:4px 8px;border-bottom:1px solid var(--line);background:var(--surface);overflow:hidden}
+.ha-crumbs{display:flex;align-items:center;gap:2px;min-width:0;overflow-x:auto;scrollbar-width:none;white-space:nowrap}
+.ha-crumb{display:inline-flex;align-items:center;gap:4px;border:0;background:none;padding:2px 6px;border-radius:5px;cursor:pointer}
+.ha-crumb:hover{background:var(--surface-2)}
+.ha-crumb:last-child{font-weight:600}
+.ha-sepch{color:var(--ink-2)}
+.ha-view{flex:1;min-height:0;overflow:auto;background:var(--surface);position:relative}
+.ha-tbl th{top:0}
+.ha-row{cursor:default;user-select:none}
+.ha-row:hover td{background:color-mix(in srgb,var(--accent) 6%,transparent)}
+.ha-row:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.ha-nm{display:inline-flex;align-items:center;gap:6px;overflow-wrap:anywhere}
+.ha-bad{color:#c01c28}
+.ha-none{color:var(--ink-2);text-align:center;padding:24px 8px!important}
+.ha-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:20px;text-align:center;color:var(--ink-2)}
+.ha-empty[hidden]{display:none}
+.ha-empty .ico{color:#986a44;opacity:.8}
+.ha-empty p{margin:0;color:var(--ink)}
+.ha-ebtns{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+.ha-chk{display:inline-flex;align-items:center;gap:6px;font-size:13px}
+.ha-srcs{overflow-wrap:anywhere;max-height:90px;overflow:auto}
+.ha-busy .ha-view{opacity:.6;pointer-events:none}
+.ha-busy .toolbar{pointer-events:none}
+.ha-drop .ha-view{outline:3px dashed var(--accent);outline-offset:-6px}

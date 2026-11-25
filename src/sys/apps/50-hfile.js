@@ -87,6 +87,7 @@
         const items = [{ head: r.n + (link ? '（リンク）' : '') }, { label: '開く', icon: r.d ? 'folder' : OS.htui.fileIcon(r.p), act: () => open(r.p) }];
         if (!r.d && (kind === 'text' || kind === 'html' || kind === 'other')) items.push({ label: 'hedit で開く', icon: 'edit', act: () => OS.launch('hedit', r.p) });
         if (r.d) items.push({ label: 'ここで Terminal を開く', icon: 'terminal', act: () => OS.launch('terminal', { cmd: 'cd "' + r.p + '"' }) });
+        if (OS.archive && !trash.inside(dir)) items.push({ sep: true }, ...OS.archive.menuItems(r.p, r.d)); // 7.3: 展開・圧縮（終わったら作ったものを選ぶ）
         if (trash.inside(dir)) {
           items.splice(1, items.length - 1, { label: '元に戻す', icon: 'back', act: restore }, { label: '完全に削除…', icon: 'trash', act: () => del(true) }, { sep: true });
         } else items.push({ sep: true },
