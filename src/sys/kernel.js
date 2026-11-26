@@ -95,6 +95,7 @@
     brush: '<path d="M4 20c3 0 5-1 5-4a3 3 0 0 0-3-3c-2 0-2 3-4 4 0 2 1 3 2 3zM9 14L20 3l1 1-11 11"/>',
     box: '<path d="M3 8l9-5 9 5v8l-9 5-9-5zM3 8l9 5 9-5M12 13v8"/>',
     archive: '<rect x="3" y="4" width="18" height="5"/><path d="M5 9v11h14V9M10 13h4"/>',
+    backup: '<rect x="3" y="14" width="18" height="6.5" rx="1.5"/><path d="M12 3v8.5M8.3 6.7 12 3l3.7 3.7"/><path d="M7 17.25h.01"/>', // 7.3.1: hBackup（hArchive と分ける）
     plug: '<path d="M9 3v5M15 3v5M6 8h12v4a6 6 0 0 1-12 0zM12 18v3"/>',
     phone: '<rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/>',
     tablet: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M18.5 11v2"/>',
@@ -1242,7 +1243,13 @@
   // ---------- コード実行
   OS.exec = function (code, name) { return (0, eval)(code + '\n//# sourceURL=hfs://' + name); };
   OS.loadFile = function (p) { return OS.exec(fs.read(p), p); };
-  OS.registerApp = function (def) { def.pkg = OS._loading || null; OS.apps[def.id] = def; };
+  OS.registerApp = function (def) {
+    def.pkg = OS._loading || null;
+    // 7.3.1: パッケージ（/apps）は標準のアプリ（/sys/apps）を上書きできない（7.2 までの hStore のサンプル hclock.js が 7.3 の hClock を隠していた）
+    const cur = OS.apps[def.id];
+    if (def.pkg && cur && !cur.pkg) throw new Error('アプリの ID「' + def.id + '」は標準のアプリ（' + cur.name + '）が使っているので、パッケージでは使えません');
+    OS.apps[def.id] = def;
+  };
   // jsh のコマンドを足す（4.0）。run(args, sh) の sh には print / read / stdin / cwd / abs / fs / cmd / getopts などが入る
   //   OS.registerCommand({ name: 'hello', usage: 'hello [名前]', desc: 'あいさつ', run(args, sh) { return 'こんにちは ' + (args[0] || sh.user); } })
   OS.commands = {};
@@ -1256,6 +1263,7 @@
   // ---------- パッケージ（あとから入れるアプリ。/apps/*.js に置かれ、起動時に読み込まれる）
   OS.pkg = {
     dir: '/apps',
+    errors: {}, // 起動のときに読み込めなかったパッケージ: 名前 → 理由（hStore に出す）
     list() { return fs.isDir('/apps') ? fs.list('/apps').filter(n => n.endsWith('.js')) : []; },
     load(name) { OS._loading = name; try { OS.exec(fs.read('/apps/' + name), '/apps/' + name); } finally { OS._loading = null; } },
     _admin(user) { if (!users.isRoot(user)) throw new Error('パッケージの追加・削除には root 権限が必要です（jsh では su で root になってください）'); },
@@ -1272,7 +1280,7 @@
       const old = fs.exists('/apps/' + name) ? fs.read('/apps/' + name) : null;
       OS.pkg._unregister(name);
       fs.write('/apps/' + name, code, { owner: user });
-      try { OS.pkg.load(name); }
+      try { OS.pkg.load(name); delete OS.pkg.errors[name]; }
       catch (e) { OS.pkg._unregister(name); if (old == null) fs.rm('/apps/' + name); else { fs.write('/apps/' + name, old); try { OS.pkg.load(name); } catch (e2) { /* 元も壊れている */ } } throw new Error('パッケージの読み込みに失敗しました: ' + e.message); }
       if (OS.htui && OS.htui.refreshApps) OS.htui.refreshApps();
       return name;
@@ -1280,7 +1288,7 @@
     remove(name, user) {
       OS.pkg._admin(user);
       if (!fs.exists('/apps/' + name)) throw new Error(name + ': そのようなパッケージはありません');
-      fs.rm('/apps/' + name); OS.pkg._unregister(name);
+      fs.rm('/apps/' + name); OS.pkg._unregister(name); delete OS.pkg.errors[name];
       if (OS.htui && OS.htui.refreshApps) OS.htui.refreshApps();
     }
   };
@@ -1610,7 +1618,7 @@
     }
     for (const n of pkgs) {
       try { OS.pkg.load(n); await step('パッケージ ' + n); }
-      catch (e) { OS.pkg._unregister(n); await step('パッケージ ' + n + ': ' + e.message, true); }
+      catch (e) { OS.pkg._unregister(n); OS.pkg.errors[n] = e.message; await step('パッケージ ' + n + ': ' + e.message, true); }
     }
     users.ensureRoot();
     users.list().forEach(u => users.ensureHome(u.name));

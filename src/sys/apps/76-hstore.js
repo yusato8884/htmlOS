@@ -25,11 +25,12 @@
 
   // hStore に最初から入っているサンプル
   const CATALOG = [
-    { file: 'hclock.js', name: 'hClock', desc: '大きなデジタル時計', code: [
+    // 7.3.1: 標準の hClock（アラームなど）とぶつからないように hBigClock に改名
+    { file: 'hbigclock.js', name: 'hBigClock', desc: '大きなデジタル時計', code: [
       'OS.registerApp({',
-      "  id: 'hclock', name: 'hClock', icon: 'reload', color: '#1c71d8', desc: '時計',",
+      "  id: 'hbigclock', name: 'hBigClock', icon: 'clock', color: '#613583', desc: '大きなデジタル時計',",
       '  launch() {',
-      "    const win = OS.htui.open({ title: 'hClock', icon: 'reload', w: 340, h: 200, app: 'hclock' });",
+      "    const win = OS.htui.open({ title: 'hBigClock', icon: 'clock', w: 340, h: 200, app: 'hbigclock' });",
       "    const t = OS.h('div', { style: 'font:600 52px/1 var(--mono);font-variant-numeric:tabular-nums' });",
       "    const d = OS.h('div', { style: 'color:var(--ink-2)' });",
       "    win.body.append(OS.h('div', { style: 'flex:1;display:flex;flex-direction:column;gap:10px;align-items:center;justify-content:center' }, t, d));",
@@ -93,7 +94,17 @@
                 if (!(await ui.asRoot(a.pkg + ' を削除します。'))) return;
                 try { OS.htui.wins.filter(w => w.app === a.id).forEach(w => w.close(true)); OS.pkg.remove(a.pkg, 'root'); render(); } catch (e) { ui.alert(e.message); }
               } }, '削除') : null)));
-          pane.append(h('p', null, 'システムのアプリは /sys/apps、あとから入れたパッケージは /apps にあります。'), h('table', { class: 'tbl' }, h('tbody', null, rows)));
+          // 読み込めなかったパッケージ（標準のアプリと同じ ID など）。消せるように出しておく
+          const broken = Object.keys(OS.pkg.errors).filter(n => OS.pkg.list().includes(n)).map(n => h('tr', null,
+            h('td', null, h('span', { class: 'app-ico', style: 'width:28px;height:28px;border-radius:7px;background:#c01c28' }, OS.icon('x', 16))),
+            h('td', null, h('b', null, n), h('br'), h('small', { style: 'color:#c01c28' }, '読み込めませんでした: ' + OS.pkg.errors[n])),
+            h('td', null, h('span', { class: 'badge' }, n)),
+            h('td', { class: 'num' }, h('button', { class: 'btn small danger', type: 'button', onclick: async () => {
+              if (!(await ui.confirm(n + ' を削除しますか?', { ok: '削除', danger: true, title: 'パッケージの削除' }))) return;
+              if (!(await ui.asRoot(n + ' を削除します。'))) return;
+              try { OS.pkg.remove(n, 'root'); render(); } catch (e) { ui.alert(e.message); }
+            } }, '削除'))));
+          pane.append(h('p', null, 'システムのアプリは /sys/apps、あとから入れたパッケージは /apps にあります。'), h('table', { class: 'tbl' }, h('tbody', null, broken, rows)));
         },
         add() {
           pane.append(

@@ -3,11 +3,11 @@
   const OS = window.OS, h = OS.h, ui = OS.ui;
   const fmtSize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : n < 1073741824 ? (n / 1048576).toFixed(2) + ' MB' : (n / 1073741824).toFixed(2) + ' GB';
   OS.registerApp({
-    id: 'hbackup', name: 'hBackup', icon: 'archive', color: '#986a44', desc: 'バックアップと復元',
+    id: 'hbackup', name: 'hBackup', icon: 'backup', color: '#1a5fb4', desc: 'バックアップと復元',
     launch() {
       const user = OS.htui.user, home = OS.users.home(user);
       const admin = () => !!(OS.users.get(user) || {}).admin;
-      const win = OS.htui.open({ title: 'hBackup', icon: 'archive', w: 560, h: 440, app: 'hbackup' });
+      const win = OS.htui.open({ title: 'hBackup', icon: 'backup', w: 560, h: 440, app: 'hbackup' });
       const pane = h('div', { class: 'pane' });
       win.body.append(pane);
       const pick = h('input', { type: 'file', accept: '.json,application/json', id: 'hbk-file-' + win.pid, style: 'display:none' });
@@ -29,7 +29,7 @@
           const url = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
           const a = h('a', { href: url, download: name }); document.body.append(a); a.click(); a.remove();
           setTimeout(() => URL.revokeObjectURL(url), 5000);
-          OS.notify({ app: 'hBackup', icon: 'archive', title: 'バックアップを書き出しました', body: name + '（' + fmtSize(data.length) + '）' });
+          OS.notify({ app: 'hBackup', icon: 'backup', title: 'バックアップを書き出しました', body: name + '（' + fmtSize(data.length) + '）' });
         } catch (e) { ui.alert('書き出せませんでした。\n' + e.message); }
       }
       pick.addEventListener('change', async () => {
@@ -51,7 +51,7 @@
               if (b.user !== user) { try { const node = JSON.parse(v); node.o = user; v = JSON.stringify(node); } catch (e) { /* そのまま */ } }
               OS.store.set(dest, v); n++;
             }
-            OS.notify({ app: 'hBackup', icon: 'archive', title: '復元しました', body: n + ' 項目を復元しました' }); render();
+            OS.notify({ app: 'hBackup', icon: 'backup', title: '復元しました', body: n + ' 項目を復元しました' }); render();
           } else {
             if (!b.entries.meta || !b.entries['f:/sys/kernel.js']) throw new Error('システム全体のバックアップとしては中身が足りません');
             if (!(await ui.confirm('今の htmlOS（全ユーザー・全ファイル・設定）をすべて消して、バックアップの内容に置き換えます。元に戻せません。終わると再起動します。\n\n' + info, { ok: 'すべて置き換えて再起動', danger: true, title: 'システム全体の復元' }))) return;
