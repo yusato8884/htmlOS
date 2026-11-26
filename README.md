@@ -405,3 +405,5 @@ python3 build.py
 [MIT License](LICENSE)
 
 7.0.0 の公開時に [SCANOSS](https://www.scanoss.com/)（scanoss-py 1.54.3、`--all-extensions`）で全ファイル（45 個）をスキャンし、既存のオープンソースコードとの一致がないことを確認しています。
+
+7.3.0 は、SCANOSS の無料サーバー（OSSKB）が混雑していて（2026-11-25〜26、「at capacity」）スキャンできなかったため、SCANOSS では確認していません。代わりに [ScanCode Toolkit](https://github.com/aboutcode-org/scancode-toolkit) 32.5.0 で全ファイル（55 個）を調べ、MIT と Yu Sato 以外のライセンス表示・著作権表示がないことを確認しています（ScanCode はファイルに書かれた表示を調べるもので、公開されているコードとの照合はしていません）。
