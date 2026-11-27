@@ -1618,6 +1618,8 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
    ページの表示には HTUi SDK 3.0 の WebView（OS.htui.WebView）を使います。
    直接モード: iframe にそのまま表示（速いが、埋め込みを拒否するサイトは真っ白になる）
    プロキシモード: CORSプロキシ経由でHTMLを取得して表示（埋め込み拒否のサイトも読める。スクリプトの多いサイトは崩れる）
+   IWA モード（Nightly・試験中）: htmlOS Shell（IWA）の中では、http(s) のページを外枠の Controlled Frame に任せて
+   このウインドウの上に重ねて表示する（プロキシなしで、埋め込みを拒否するサイトも表示できる。OS.iwa）
    ダウンロードは hFS の ~/Downloads に保存します。 */
 (function () {
   const OS = window.OS, h = OS.h, path = OS.path, ui = OS.ui;
@@ -1635,6 +1637,9 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       let cfg = { marks: DEFAULT_MARKS, proxy: false };
       try { cfg = Object.assign(cfg, JSON.parse(fsx.read(cfgPath))); } catch (e) { /* 初回 */ }
       const saveCfg = () => { try { fsx.mkdir(home + '/.config', { parents: true }); fsx.write(cfgPath, JSON.stringify(cfg, null, 1)); } catch (e) { /* 保存できなくても続行 */ } };
+      // ホームページ（7.4）: ネットにつながっていれば DuckDuckGo、つながっていなければ hBrowser のホーム（about:hbrowser、ブックマーク一覧）
+      const DDG_HOME = 'https://html.duckduckgo.com/html/', DDG_HOME_IWA = 'https://duckduckgo.com/';
+      let homeTry = false; // いま DuckDuckGo のホームを開こうとしているところか（失敗したら hBrowser のホームにする）
 
       // キャプションボタン（HTUi SDK 3.0）: ブックマークとプロキシをタイトルバーにも置く
       const win = OS.htui.open({ title: 'hBrowser', icon: 'globe', w: 860, h: 540, app: 'hbrowser', buttons: [
@@ -1649,10 +1654,11 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         onstatus: t => { status.textContent = t; },
         onnavigate: u => go(u),
         ondownload: u => download(u),
-        onerror: (e, u, forced) => {
+        onerror: (e, u) => {
+          if (homeTry && cur === 'about:home') { homeTry = false; homePage(true); return true; } // DuckDuckGo のホームを開けなかった
           showMsg('ページを取得できませんでした', [u, e.message, 'プロキシは外部の無料サービスです。止まっている場合は、設定 → ネットワーク で別のプロキシに変更できます。'],
             [h('button', { class: 'btn', type: 'button', onclick: () => go(cur, false) }, '再試行'),
-              u.startsWith('hfs:') || forced ? null : h('button', { class: 'btn', type: 'button', onclick: () => setProxy(false) }, '直接モードに切り替え')]);
+              u.startsWith('hfs:') ? null : h('button', { class: 'btn', type: 'button', onclick: () => setProxy(false) }, '直接モードに切り替え')]);
           return true;
         }
       });
@@ -1664,14 +1670,52 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         h('form', { class: 'toolbar', onsubmit: e => { e.preventDefault(); go(url.value); } },
           bBack, bFwd, tb('reload', '再読み込み', () => go(cur, false)), tb('home', 'ホーム', () => go('about:home')),
           h('span', { class: 'grow' }, url), bProxy,
-          tb('star', 'このページをブックマーク', addMark),
+          h('button', { class: 'tbtn', type: 'button', title: 'ブックマーク', 'aria-label': 'ブックマーク', onclick: e => OS.htui.menu(e.currentTarget, [
+            { label: 'このページをブックマーク', icon: 'star', act: addMark },
+            { label: 'hBrowser のホーム（ブックマーク一覧）', icon: 'home', act: () => go('about:hbrowser') }
+          ].concat(cfg.marks.length ? [{ sep: true }] : [], cfg.marks.slice(0, 15).map(m => ({ label: m.title, icon: 'globe', act: () => go(m.url) }))), true) }, OS.icon('star', 16)),
           h('button', { class: 'tbtn', type: 'button', title: 'ダウンロード', 'aria-label': 'ダウンロード', onclick: e => OS.htui.menu(e.currentTarget, [
             { label: 'このページのHTMLを保存', icon: 'save', act: savePage },
             { label: 'URLを指定してダウンロード', icon: 'download', act: async () => { const u = await ui.prompt('ダウンロードするURL', /^https?:/.test(cur) ? cur : 'https://', { title: 'ダウンロード' }); if (u) download(u); } },
             { label: 'Downloads フォルダを開く', icon: 'folder', act: () => OS.htui.run('hfile', home + '/Downloads') }
           ], true) }, OS.icon('download', 16))));
       wv.attach(win);
+      // DuckDuckGo はプロキシなしで開く（7.4）。DuckDuckGo は埋め込みを拒否することがあり、そのときは真っ白になるので案内を出す
+      let ddgHintOff = false;
+      const ddgHint = h('div', { class: 'hb-hint', hidden: true }, OS.icon('shield', 14),
+        h('span', { class: 'grow' }, 'DuckDuckGo が真っ白なときや「接続が拒否されました」と出るときは、プロキシをオンにしてください（DuckDuckGo はほかのページへの埋め込みを断っています）。'),
+        h('button', { class: 'btn small primary', type: 'button', onclick: () => setProxy(true) }, 'プロキシをオンにする'),
+        h('button', { class: 'tbtn', type: 'button', title: '閉じる', 'aria-label': '案内を閉じる', onclick: () => { ddgHintOff = true; ddgHint.hidden = true; } }, OS.icon('x', 14)));
+      wv.el.before(ddgHint);
+      const isDdg = u => { try { return /(^|\.)duckduckgo\.com$/.test(new URL(u).hostname); } catch (e) { return false; } };
       win.body.append(h('div', { class: 'statusbar' }, status));
+
+      // ---- IWA モード（htmlOS Shell の中だけ）
+      const iwaOn = () => !!(OS.iwa && OS.iwa.available);
+      let iv = null, ivUrl = null, ivFresh = false; // 重ねて表示しているページ、いまのURL、こちらから開いた直後か（転送は履歴を増やさない）
+      const ivHost = h('div', { class: 'hb-iwa' }, h('div', { class: 'hb-iwa-msg' }, OS.icon('globe', 28), h('p', { class: 'hb-iwa-t' }, ''), h('small', null, 'ほかのウインドウやメニューが重なっているあいだは、ページを隠しています')));
+      function ivState(s) {
+        if (s.url && /^https?:/i.test(s.url) && s.url !== ivUrl) {
+          ivUrl = s.url;
+          if (s.url !== cur) {
+            if (ivFresh) hist[hi] = s.url; // 開いた直後の転送（http → https など）は置き換える
+            else { hist.splice(hi + 1); hist.push(s.url); hi = hist.length - 1; } // ページの中のリンクで移動した
+            cur = s.url; url.value = s.url; paint();
+          }
+        }
+        if (s.loading === false) ivFresh = false;
+        if (s.title != null) win.setTitle((s.title || cur.replace(/^https?:\/\//, '')) + ' — hBrowser');
+        ivHost.querySelector('.hb-iwa-t').textContent = s.title || cur;
+        status.textContent = s.error ? '読み込めませんでした: ' + s.error : s.loading ? '読み込み中… （IWA）' : 'IWA（Controlled Frame）で表示中';
+        if (s.error && homeTry && cur === 'about:home') { homeTry = false; iv.hide(); homePage(true); }
+      }
+      function ivLoad(u) {
+        if (!iv) iv = OS.iwa.View(ivHost, { root: win.el, onstate: ivState, onnewwindow: nu => OS.launch('hbrowser', nu) });
+        wv.show(ivHost); ivHost.querySelector('.hb-iwa-t').textContent = u;
+        ivUrl = u; ivFresh = true; iv.load(u); iv.show();
+        status.textContent = '読み込み中… （IWA）';
+      }
+      win.onDispose = () => { if (iv) iv.destroy(); };
 
       function setProxy(on) {
         cfg.proxy = !!on; wv.proxy = cfg.proxy; saveCfg(); paint(); go(cur, false);
@@ -1679,6 +1723,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       function paint() {
         bBack.disabled = hi <= 0; bFwd.disabled = hi >= hist.length - 1;
         bProxy.classList.toggle('on', !!cfg.proxy);
+        bProxy.hidden = iwaOn(); // IWA モードではプロキシは使わない
         if (win.captionButtons && win.captionButtons[1]) win.captionButtons[1].active = !!cfg.proxy;
       }
       function showMsg(title, lines, actions) {
@@ -1687,38 +1732,54 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
 
       function go(u, push) {
         u = String(u || '').trim();
-        u = !u || u === 'about:home' ? 'about:home' : wv.resolve(u);
+        u = !u || u === 'about:home' ? 'about:home' : u === 'about:hbrowser' ? u : wv.resolve(u);
         if (push !== false) { hist.splice(hi + 1); hist.push(u); hi = hist.length - 1; }
-        cur = u; url.value = u === 'about:home' ? '' : u;
+        cur = u; url.value = u === 'about:home' || u === 'about:hbrowser' ? '' : u;
         paint(); status.textContent = '';
-        win.setTitle((u === 'about:home' ? 'ホーム' : u.replace(/^https?:\/\//, '').replace(/^hfs:/, '')) + ' — hBrowser');
-        if (u === 'about:home') return homePage();
+        homeTry = false;
+        ddgHint.hidden = ddgHintOff || cfg.proxy || iwaOn() || !(u === 'about:home' ? navigator.onLine !== false : isDdg(u));
+        win.setTitle((u === 'about:home' || u === 'about:hbrowser' ? 'ホーム' : u.replace(/^https?:\/\//, '').replace(/^hfs:/, '')) + ' — hBrowser');
+        if (u === 'about:home' && navigator.onLine !== false) { // ホームは DuckDuckGo（開けなければ hBrowser のホーム）
+          homeTry = true;
+          if (iwaOn()) return ivLoad(DDG_HOME_IWA);
+          if (iv) iv.hide();
+          return wv.load(DDG_HOME).then(() => { if (homeTry && cur === 'about:home' && wv.url && wv.url !== DDG_HOME) { cur = wv.url; url.value = cur; } homeTry = false; });
+        }
+        if (iwaOn() && /^https?:/i.test(u)) return ivLoad(u);
+        if (iv) iv.hide();
+        if (u === 'about:home') return homePage(true); // ネットにつながっていない
+        if (u === 'about:hbrowser') return homePage();
         return wv.load(u).then(() => { if (wv.url && wv.url !== cur) { cur = wv.url; url.value = cur; } });
       }
 
-      function homePage() {
+      function homePage(offline) {
         const q = h('input', { class: 'inp', id: 'hb-q-' + win.pid, placeholder: 'URL または検索語', 'aria-label': 'URL または検索語' });
         const marks = h('div', { class: 'hb-marks' });
         cfg.marks.forEach((m, i) => marks.append(h('span', { class: 'hb-mark' },
           h('button', { class: 'btn', type: 'button', title: m.url, onclick: () => go(m.url) }, m.title),
           h('button', { class: 'del', type: 'button', title: 'ブックマークを削除', 'aria-label': m.title + ' を削除', onclick: () => { cfg.marks.splice(i, 1); saveCfg(); homePage(); } }, OS.icon('x', 12)))));
+        win.setTitle('ホーム — hBrowser');
         wv.show(h('div', { class: 'hb-page' }, h('h1', null, 'hBrowser'),
+          offline ? h('p', { class: 'hb-offline' }, OS.icon('globe', 14), ' インターネット（またはプロキシ）につながらないため、hBrowser のホームを表示しています。 ', h('button', { class: 'btn small', type: 'button', onclick: () => go('about:home', false) }, 'もう一度 DuckDuckGo を開く')) : null,
           h('form', { class: 'hb-search', onsubmit: e => { e.preventDefault(); go(q.value); } }, q, h('button', { class: 'btn primary', type: 'submit' }, '開く')),
           marks,
-          h('p', null, 'ページが真っ白なときは、ツールバーかタイトルバーの「プロキシ」をオンにすると表示できることがあります（iframeへの埋め込みを拒否しているサイト向け）。検索はプロキシ経由の DuckDuckGo を使います。'),
+          h('p', null, 'ホームページと検索: DuckDuckGo'),
+          iwaOn() ? h('p', null, 'IWA モード（Nightly・試験中）: Web のページは htmlOS Shell の Controlled Frame で表示します。プロキシは使いません。')
+            : h('p', null, 'ページが真っ白なときは、ツールバーかタイトルバーの「プロキシ」をオンにすると表示できることがあります（iframeへの埋め込みを拒否しているサイト向け）。'),
           h('p', null, 'ダウンロードしたファイルは hFS の ~/Downloads に保存されます。')));
       }
 
       function addMark() {
-        if (cur === 'about:home') { ui.toast('ホーム画面はブックマークできません'); return; }
+        if (cur === 'about:home' || cur === 'about:hbrowser') { ui.toast('このページはブックマークできません'); return; }
         if (cfg.marks.some(m => m.url === cur)) { ui.toast('すでにブックマークされています'); return; }
         ui.prompt('ブックマークの名前', cur.replace(/^https?:\/\/(www\.)?/, '').split(/[/?#]/)[0] || cur, { title: 'ブックマークに追加' }).then(t => { if (t) { cfg.marks.push({ title: t, url: cur }); saveCfg(); ui.toast('ブックマークに追加しました'); } });
       }
       const dlDir = () => { fsx.mkdir(home + '/Downloads', { parents: true }); return home + '/Downloads'; };
       async function savePage() {
         try {
-          if (cur === 'about:home') throw new Error('保存するページがありません');
+          if (cur === 'about:home' || cur === 'about:hbrowser') throw new Error('このページは保存できません');
           let html = wv.lastHtml;
+          if (html == null && iwaOn() && iv && /^https?:/i.test(cur)) html = await iv.html();
           if (html == null) { status.textContent = 'ページを取得しています…'; html = await (await OS.net.get(cur)).text(); }
           let name = 'page.html';
           try { const U = new URL(cur); name = (U.pathname.split('/').filter(Boolean).pop() || U.hostname).replace(/\.[a-z0-9]+$/i, '') + '.html'; } catch (e) { name = path.base(cur.slice(4)); }
@@ -7675,8 +7736,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
         return;
       }
       if (/^(data|blob):/i.test(u)) { mkFrame('allow-scripts').src = u; emit('load', u); return; }
-      const forceProxy = /(^|\.)duckduckgo\.com$/.test(new URL(u).hostname);
-      if (!wv.proxy && !forceProxy) {
+      if (!wv.proxy) { // DuckDuckGo も直接（7.4。埋め込みを拒否されたら、アプリがプロキシを案内する）
         mkFrame('allow-scripts allow-same-origin allow-forms allow-popups').src = u;
         setTitle(u.replace(/^https?:\/\//, ''));
         status('直接モードで表示中。真っ白のままなら、サイトが埋め込みを拒否しています。プロキシをオンにしてください。');
@@ -7707,7 +7767,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
       } catch (e) {
         if (my !== seq || wv.destroyed) return;
         status('');
-        if (emit('error', e, u, forceProxy) === true) return; // アプリが自分で表示した
+        if (emit('error', e, u) === true) return; // アプリが自分で表示した
         page('ページを取得できませんでした', [u, e.message, 'プロキシは外部の無料サービスです。止まっている場合は、設定 → ネットワーク で別のプロキシに変更できます。'],
           [h('button', { class: 'btn', type: 'button', onclick: () => wv.reload() }, '再試行')]);
       }
@@ -9513,6 +9573,121 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
   }, 'ログインセッション（HTUi）');
 
   if (OS.journal) OS.journal.log('kernel', 'メッセージバスを用意しました（名前 ' + names.size + ' 個）', { prio: 6 });
+})();
+</script>
+<script type="text/x-htmlos" data-path="/sys/iwa.js">
+/* htmlOS IWA ブリッジ（Nightly 0.0.0n から・試験中）— OS.iwa
+   htmlOS Nightly を Isolated Web App（IWA）の外枠「htmlOS Shell」の中で動かしたときに、外枠とやり取りする。
+   外枠は htmlOS を 1 枚目の Controlled Frame に表示していて、hBrowser のページは 2 枚目以降の Controlled Frame を
+   hBrowser のウインドウの上に重ねて表示する（埋め込みを拒否するサイトもプロキシなしで表示できる）。
+   ・htmlOS → 外枠: 印を付けた console.log（外枠は Controlled Frame の consolemessage イベントで受け取る）
+   ・外枠 → htmlOS: 外枠が executeScript で document に「htmlos-iwa」イベントを送る（detail は JSON の文字列）
+   外枠の中でないとき（URL に ?iwa-shell=1 がないとき）は何もしない */
+(function () {
+  'use strict';
+  const OS = window.OS;
+  const MARK = '\u0001htmlos-iwa:';
+  const inShell = /[?&]iwa-shell=1(&|$)/.test(location.search);
+  const handlers = {}, views = {}, waits = {};
+  let seq = 0, hello = null;
+  const send = msg => { if (inShell) console.log(MARK + JSON.stringify(msg)); };
+  const emit = (type, m) => (handlers[type] || []).slice().forEach(f => { try { f(m); } catch (e) { console.error(e); } });
+
+  document.addEventListener('htmlos-iwa', e => {
+    let m; try { m = JSON.parse(e.detail); } catch (x) { return; }
+    if (!m || typeof m.type !== 'string') return;
+    if (m.type === 'hello') { hello = m; I.available = true; I.shell = m; emit('hello', m); return; }
+    if (m.type === 'result' && waits[m.req]) { const w = waits[m.req]; delete waits[m.req]; m.error ? w.reject(new Error(m.error)) : w.resolve(m.value); return; }
+    if (m.id && views[m.id]) views[m.id].event(m);
+    emit(m.type, m);
+  });
+
+  // 外枠に聞いて答えを待つ（10 秒で諦める）
+  function ask(msg) {
+    return new Promise((resolve, reject) => {
+      const req = 'q' + (++seq); waits[req] = { resolve: resolve, reject: reject };
+      send(Object.assign({ req: req }, msg));
+      setTimeout(() => { if (waits[req]) { delete waits[req]; reject(new Error('htmlOS Shell から返事がありません')); } }, 10000);
+    });
+  }
+
+  // hBrowser などが使う「重ねて表示するページ」。host は htmlOS の中の要素で、その上に外枠が Controlled Frame を重ねる
+  //   const v = OS.iwa.View(要素, { root: ウインドウの要素, onstate(s) {…}, onnewwindow(url) {…} });  v.load(url) / v.back() / v.forward() / v.reload() / v.stop() / v.html() / v.destroy()
+  function View(host, cb) {
+    cb = cb || {};
+    const root = cb.root || null; // host が入っているウインドウ（その中のつまみは重なりに数えない）
+    const id = 'v' + (++seq) + '-' + Date.now().toString(36);
+    let opened = false, last = '', timer = 0, gone = false;
+    // 見えているか: host の上を約 60px おきの格子で調べて、どこかがほかの要素（ほかのウインドウ・メニュー・ダイアログ・ロック画面）に
+    // 隠れていたら「見えていない」にする（外枠の Controlled Frame は htmlOS の上に出るので、一部でも重なったら隠す）
+    function geom() {
+      const r = host.getBoundingClientRect();
+      const g = { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height), visible: false };
+      if (document.hidden || !host.isConnected || g.w < 8 || g.h < 8) return g;
+      const cols = Math.min(24, Math.max(2, Math.ceil(r.width / 60))), rows = Math.min(16, Math.max(2, Math.ceil(r.height / 60)));
+      for (let i = 0; i <= cols; i++) for (let j = 0; j <= rows; j++) {
+        const el = document.elementFromPoint(r.left + 3 + (r.width - 6) * i / cols, r.top + 3 + (r.height - 6) * j / rows);
+        if (!el || (el !== host && !host.contains(el) && !(root && root.contains(el) && el.classList.contains('rz')))) return g; // 自分のウインドウの端の「大きさを変えるつまみ」は数えない
+      }
+      g.visible = true;
+      return g;
+    }
+    function tick() {
+      if (gone || !opened) return;
+      const g = geom(), key = [g.x, g.y, g.w, g.h, g.visible].join(',');
+      if (key !== last) { last = key; send({ type: 'view.update', id: id, rect: g }); host.classList.toggle('iwa-covered', !g.visible); }
+    }
+    const v = views[id] = {
+      id: id,
+      event(m) {
+        if (m.type === 'view.state' && cb.onstate) cb.onstate(m);
+        else if (m.type === 'view.newwindow' && cb.onnewwindow) cb.onnewwindow(m.url);
+      },
+      load(url) {
+        const g = geom(); last = [g.x, g.y, g.w, g.h, g.visible].join(',');
+        send({ type: opened ? 'view.nav' : 'view.open', id: id, action: 'load', url: String(url), rect: g });
+        opened = true;
+        if (!timer) timer = setInterval(tick, 80);
+      },
+      back() { send({ type: 'view.nav', id: id, action: 'back' }); },
+      forward() { send({ type: 'view.nav', id: id, action: 'forward' }); },
+      reload() { send({ type: 'view.nav', id: id, action: 'reload' }); },
+      stop() { send({ type: 'view.nav', id: id, action: 'stop' }); },
+      html() { return ask({ type: 'view.html', id: id }); },
+      // いまは使わない（ほかのページを表示するあいだ隠す）
+      hide() { if (!opened) return; clearInterval(timer); timer = 0; last = ''; send({ type: 'view.update', id: id, rect: { x: 0, y: 0, w: 0, h: 0, visible: false } }); },
+      show() { if (opened && !timer) { timer = setInterval(tick, 80); tick(); } },
+      destroy() { if (gone) return; gone = true; clearInterval(timer); delete views[id]; if (opened) send({ type: 'view.close', id: id }); }
+    };
+    return v;
+  }
+
+  const I = OS.iwa = {
+    inShell: inShell, available: false, shell: null, mark: MARK,
+    send: send, ask: ask, View: View,
+    on(type, fn) { (handlers[type] || (handlers[type] = [])).push(fn); return () => { handlers[type] = (handlers[type] || []).filter(f => f !== fn); }; },
+    settings() { send({ type: 'shell.settings' }); }
+  };
+
+  if (inShell) {
+    // 外枠に「起動した」と知らせる。外枠が聞き始める前だと届かないので、返事（hello）が来るまで何回か送る
+    let n = 0;
+    const t = setInterval(() => { if (hello || ++n > 40) { clearInterval(t); return; } send({ type: 'ready', version: OS.version || '' }); }, 500);
+    send({ type: 'ready', version: OS.version || '' });
+    // ページを離れるとき（再起動など）は重ねていたページを全部片付けてもらう
+    window.addEventListener('pagehide', () => send({ type: 'view.closeAll' }));
+  }
+
+  // jsh: iwa — 外枠とのつながりを確かめる・外枠の設定を開く
+  if (OS.registerCommand) OS.registerCommand({
+    name: 'iwa', usage: 'iwa [settings]', desc: 'IWA（htmlOS Shell）とのつながり（Nightly の試験機能）',
+    run(args) {
+      if (args[0] === 'settings') { if (!I.available) throw new Error('htmlOS Shell の中ではありません'); I.settings(); return '外枠の設定を開きました'; }
+      if (!inShell) return 'htmlOS Shell（IWA）の中ではありません。hBrowser はいつもどおりプロキシと iframe で表示します';
+      if (!I.available) return 'htmlOS Shell の中のはずですが、まだ返事がありません';
+      return 'htmlOS Shell ' + (I.shell.version || '?') + ' につながっています（使える機能: ' + (I.shell.features || []).join('、') + '）\n重ねて表示しているページ: ' + Object.keys(views).length + ' 個';
+    }
+  });
 })();
 </script>
 <script type="text/x-htmlos" data-path="/sys/jsh.js">
@@ -12852,7 +13027,7 @@ body{background:#000;color:#d6d8dc;font:14px/1.5 ui-monospace,"DejaVu Sans Mono"
     if (OS.imode) apps = apps.filter(n => I_APPS.includes(n));
     const pkgs = OS.safe || OS.imode ? [] : OS.pkg.list();
     try { OS.build = (JSON.parse(store.get('meta')) || {}).build || BOOT.build || '?'; } catch (e) { OS.build = BOOT.build || '?'; }
-    const core = ['/sys/init.js', '/sys/ipc.js', '/sys/raid.js', '/sys/procfs.js', '/sys/fb.js', '/sys/cursor.js', '/sys/archive.js', '/sys/jsh.js', '/sys/nano.js', '/sys/htui.js', '/sys/hdm.js', '/sys/shells.js'];
+    const core = ['/sys/init.js', '/sys/ipc.js', '/sys/raid.js', '/sys/procfs.js', '/sys/fb.js', '/sys/cursor.js', '/sys/archive.js', '/sys/iwa.js', '/sys/jsh.js', '/sys/nano.js', '/sys/htui.js', '/sys/hdm.js', '/sys/shells.js'];
     const total = 2 + core.length + apps.length + pkgs.length; let done = 0;
     const step = async (s, failed) => {
       if (OS.klog) OS.klog(s, failed ? 3 : 6); else (OS._klog = OS._klog || []).push({ t: Date.now(), msg: s, prio: failed ? 3 : 6 });
@@ -18368,6 +18543,17 @@ div.hk-al-main{cursor:default}
 .ha-busy .ha-view{opacity:.6;pointer-events:none}
 .ha-busy .toolbar{pointer-events:none}
 .ha-drop .ha-view{outline:3px dashed var(--accent);outline-offset:-6px}
+
+/* ---- hBrowser の IWA モード（Nightly・試験中）: この上に htmlOS Shell が Controlled Frame を重ねる */
+.hb-iwa{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:repeating-linear-gradient(45deg,#f6f5f4 0 12px,#efeeec 12px 24px)}
+.hb-iwa-msg{display:flex;flex-direction:column;align-items:center;gap:6px;max-width:80%;text-align:center;color:var(--ink-2)}
+.hb-iwa-t{margin:0;color:var(--ink);font-weight:600;overflow-wrap:anywhere}
+.hb-iwa:not(.iwa-covered) small{visibility:hidden}
+
+.hb-offline{display:flex;align-items:center;flex-wrap:wrap;gap:4px;padding:8px 12px;border-radius:8px;background:#fff1e6;color:#8f3b00!important;max-width:44em!important}
+.hb-hint{display:flex;align-items:center;gap:8px;padding:6px 10px;background:#fff1e6;color:#8f3b00;font-size:12.5px;border-bottom:1px solid var(--line);line-height:1.5}
+.hb-hint[hidden]{display:none}
+.hb-hint .tbtn{color:inherit}
 </script>
 <script>
 /* ============================================================
@@ -18379,7 +18565,7 @@ div.hk-al-main{cursor:default}
 (function () {
   'use strict';
   // コードネーム: htmlOS は恒星の名前（3.2 = Sirius、4.0 = Vega）、描画エンジン HTUi SDK は惑星の名前（2 = Jupiter、3.0 = Venus）
-  var MEDIA_VERSION = '7.3.1', MEDIA_BUILD = '68', MEDIA_CODENAME = 'Polaris';
+  var MEDIA_VERSION = '7.4.0', MEDIA_BUILD = '69', MEDIA_CODENAME = 'Polaris';
   var BOOT = window.BOOT = {};
   var P = 'htmlos:';
 

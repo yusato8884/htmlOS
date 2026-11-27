@@ -1680,8 +1680,7 @@
         return;
       }
       if (/^(data|blob):/i.test(u)) { mkFrame('allow-scripts').src = u; emit('load', u); return; }
-      const forceProxy = /(^|\.)duckduckgo\.com$/.test(new URL(u).hostname);
-      if (!wv.proxy && !forceProxy) {
+      if (!wv.proxy) { // DuckDuckGo も直接（7.4。埋め込みを拒否されたら、アプリがプロキシを案内する）
         mkFrame('allow-scripts allow-same-origin allow-forms allow-popups').src = u;
         setTitle(u.replace(/^https?:\/\//, ''));
         status('直接モードで表示中。真っ白のままなら、サイトが埋め込みを拒否しています。プロキシをオンにしてください。');
@@ -1712,7 +1711,7 @@
       } catch (e) {
         if (my !== seq || wv.destroyed) return;
         status('');
-        if (emit('error', e, u, forceProxy) === true) return; // アプリが自分で表示した
+        if (emit('error', e, u) === true) return; // アプリが自分で表示した
         page('ページを取得できませんでした', [u, e.message, 'プロキシは外部の無料サービスです。止まっている場合は、設定 → ネットワーク で別のプロキシに変更できます。'],
           [h('button', { class: 'btn', type: 'button', onclick: () => wv.reload() }, '再試行')]);
       }

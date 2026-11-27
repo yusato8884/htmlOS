@@ -21,6 +21,9 @@
       let cfg = { marks: DEFAULT_MARKS, proxy: false };
       try { cfg = Object.assign(cfg, JSON.parse(fsx.read(cfgPath))); } catch (e) { /* 初回 */ }
       const saveCfg = () => { try { fsx.mkdir(home + '/.config', { parents: true }); fsx.write(cfgPath, JSON.stringify(cfg, null, 1)); } catch (e) { /* 保存できなくても続行 */ } };
+      // ホームページ（7.4）: ネットにつながっていれば DuckDuckGo、つながっていなければ hBrowser のホーム（about:hbrowser、ブックマーク一覧）
+      const DDG_HOME = 'https://html.duckduckgo.com/html/', DDG_HOME_IWA = 'https://duckduckgo.com/';
+      let homeTry = false; // いま DuckDuckGo のホームを開こうとしているところか（失敗したら hBrowser のホームにする）
 
       // キャプションボタン（HTUi SDK 3.0）: ブックマークとプロキシをタイトルバーにも置く
       const win = OS.htui.open({ title: 'hBrowser', icon: 'globe', w: 860, h: 540, app: 'hbrowser', buttons: [
@@ -35,10 +38,11 @@
         onstatus: t => { status.textContent = t; },
         onnavigate: u => go(u),
         ondownload: u => download(u),
-        onerror: (e, u, forced) => {
+        onerror: (e, u) => {
+          if (homeTry && cur === 'about:home') { homeTry = false; homePage(true); return true; } // DuckDuckGo のホームを開けなかった
           showMsg('ページを取得できませんでした', [u, e.message, 'プロキシは外部の無料サービスです。止まっている場合は、設定 → ネットワーク で別のプロキシに変更できます。'],
             [h('button', { class: 'btn', type: 'button', onclick: () => go(cur, false) }, '再試行'),
-              u.startsWith('hfs:') || forced ? null : h('button', { class: 'btn', type: 'button', onclick: () => setProxy(false) }, '直接モードに切り替え')]);
+              u.startsWith('hfs:') ? null : h('button', { class: 'btn', type: 'button', onclick: () => setProxy(false) }, '直接モードに切り替え')]);
           return true;
         }
       });
@@ -50,13 +54,24 @@
         h('form', { class: 'toolbar', onsubmit: e => { e.preventDefault(); go(url.value); } },
           bBack, bFwd, tb('reload', '再読み込み', () => go(cur, false)), tb('home', 'ホーム', () => go('about:home')),
           h('span', { class: 'grow' }, url), bProxy,
-          tb('star', 'このページをブックマーク', addMark),
+          h('button', { class: 'tbtn', type: 'button', title: 'ブックマーク', 'aria-label': 'ブックマーク', onclick: e => OS.htui.menu(e.currentTarget, [
+            { label: 'このページをブックマーク', icon: 'star', act: addMark },
+            { label: 'hBrowser のホーム（ブックマーク一覧）', icon: 'home', act: () => go('about:hbrowser') }
+          ].concat(cfg.marks.length ? [{ sep: true }] : [], cfg.marks.slice(0, 15).map(m => ({ label: m.title, icon: 'globe', act: () => go(m.url) }))), true) }, OS.icon('star', 16)),
           h('button', { class: 'tbtn', type: 'button', title: 'ダウンロード', 'aria-label': 'ダウンロード', onclick: e => OS.htui.menu(e.currentTarget, [
             { label: 'このページのHTMLを保存', icon: 'save', act: savePage },
             { label: 'URLを指定してダウンロード', icon: 'download', act: async () => { const u = await ui.prompt('ダウンロードするURL', /^https?:/.test(cur) ? cur : 'https://', { title: 'ダウンロード' }); if (u) download(u); } },
             { label: 'Downloads フォルダを開く', icon: 'folder', act: () => OS.htui.run('hfile', home + '/Downloads') }
           ], true) }, OS.icon('download', 16))));
       wv.attach(win);
+      // DuckDuckGo はプロキシなしで開く（7.4）。DuckDuckGo は埋め込みを拒否することがあり、そのときは真っ白になるので案内を出す
+      let ddgHintOff = false;
+      const ddgHint = h('div', { class: 'hb-hint', hidden: true }, OS.icon('shield', 14),
+        h('span', { class: 'grow' }, 'DuckDuckGo が真っ白なときや「接続が拒否されました」と出るときは、プロキシをオンにしてください（DuckDuckGo はほかのページへの埋め込みを断っています）。'),
+        h('button', { class: 'btn small primary', type: 'button', onclick: () => setProxy(true) }, 'プロキシをオンにする'),
+        h('button', { class: 'tbtn', type: 'button', title: '閉じる', 'aria-label': '案内を閉じる', onclick: () => { ddgHintOff = true; ddgHint.hidden = true; } }, OS.icon('x', 14)));
+      wv.el.before(ddgHint);
+      const isDdg = u => { try { return /(^|\.)duckduckgo\.com$/.test(new URL(u).hostname); } catch (e) { return false; } };
       win.body.append(h('div', { class: 'statusbar' }, status));
 
       // ---- IWA モード（htmlOS Shell の中だけ）
@@ -76,6 +91,7 @@
         if (s.title != null) win.setTitle((s.title || cur.replace(/^https?:\/\//, '')) + ' — hBrowser');
         ivHost.querySelector('.hb-iwa-t').textContent = s.title || cur;
         status.textContent = s.error ? '読み込めませんでした: ' + s.error : s.loading ? '読み込み中… （IWA）' : 'IWA（Controlled Frame）で表示中';
+        if (s.error && homeTry && cur === 'about:home') { homeTry = false; iv.hide(); homePage(true); }
       }
       function ivLoad(u) {
         if (!iv) iv = OS.iwa.View(ivHost, { root: win.el, onstate: ivState, onnewwindow: nu => OS.launch('hbrowser', nu) });
@@ -100,40 +116,52 @@
 
       function go(u, push) {
         u = String(u || '').trim();
-        u = !u || u === 'about:home' ? 'about:home' : wv.resolve(u);
+        u = !u || u === 'about:home' ? 'about:home' : u === 'about:hbrowser' ? u : wv.resolve(u);
         if (push !== false) { hist.splice(hi + 1); hist.push(u); hi = hist.length - 1; }
-        cur = u; url.value = u === 'about:home' ? '' : u;
+        cur = u; url.value = u === 'about:home' || u === 'about:hbrowser' ? '' : u;
         paint(); status.textContent = '';
-        win.setTitle((u === 'about:home' ? 'ホーム' : u.replace(/^https?:\/\//, '').replace(/^hfs:/, '')) + ' — hBrowser');
+        homeTry = false;
+        ddgHint.hidden = ddgHintOff || cfg.proxy || iwaOn() || !(u === 'about:home' ? navigator.onLine !== false : isDdg(u));
+        win.setTitle((u === 'about:home' || u === 'about:hbrowser' ? 'ホーム' : u.replace(/^https?:\/\//, '').replace(/^hfs:/, '')) + ' — hBrowser');
+        if (u === 'about:home' && navigator.onLine !== false) { // ホームは DuckDuckGo（開けなければ hBrowser のホーム）
+          homeTry = true;
+          if (iwaOn()) return ivLoad(DDG_HOME_IWA);
+          if (iv) iv.hide();
+          return wv.load(DDG_HOME).then(() => { if (homeTry && cur === 'about:home' && wv.url && wv.url !== DDG_HOME) { cur = wv.url; url.value = cur; } homeTry = false; });
+        }
         if (iwaOn() && /^https?:/i.test(u)) return ivLoad(u);
         if (iv) iv.hide();
-        if (u === 'about:home') return homePage();
+        if (u === 'about:home') return homePage(true); // ネットにつながっていない
+        if (u === 'about:hbrowser') return homePage();
         return wv.load(u).then(() => { if (wv.url && wv.url !== cur) { cur = wv.url; url.value = cur; } });
       }
 
-      function homePage() {
+      function homePage(offline) {
         const q = h('input', { class: 'inp', id: 'hb-q-' + win.pid, placeholder: 'URL または検索語', 'aria-label': 'URL または検索語' });
         const marks = h('div', { class: 'hb-marks' });
         cfg.marks.forEach((m, i) => marks.append(h('span', { class: 'hb-mark' },
           h('button', { class: 'btn', type: 'button', title: m.url, onclick: () => go(m.url) }, m.title),
           h('button', { class: 'del', type: 'button', title: 'ブックマークを削除', 'aria-label': m.title + ' を削除', onclick: () => { cfg.marks.splice(i, 1); saveCfg(); homePage(); } }, OS.icon('x', 12)))));
+        win.setTitle('ホーム — hBrowser');
         wv.show(h('div', { class: 'hb-page' }, h('h1', null, 'hBrowser'),
+          offline ? h('p', { class: 'hb-offline' }, OS.icon('globe', 14), ' インターネット（またはプロキシ）につながらないため、hBrowser のホームを表示しています。 ', h('button', { class: 'btn small', type: 'button', onclick: () => go('about:home', false) }, 'もう一度 DuckDuckGo を開く')) : null,
           h('form', { class: 'hb-search', onsubmit: e => { e.preventDefault(); go(q.value); } }, q, h('button', { class: 'btn primary', type: 'submit' }, '開く')),
           marks,
+          h('p', null, 'ホームページと検索: DuckDuckGo'),
           iwaOn() ? h('p', null, 'IWA モード（Nightly・試験中）: Web のページは htmlOS Shell の Controlled Frame で表示します。プロキシは使いません。')
-            : h('p', null, 'ページが真っ白なときは、ツールバーかタイトルバーの「プロキシ」をオンにすると表示できることがあります（iframeへの埋め込みを拒否しているサイト向け）。検索はプロキシ経由の DuckDuckGo を使います。'),
+            : h('p', null, 'ページが真っ白なときは、ツールバーかタイトルバーの「プロキシ」をオンにすると表示できることがあります（iframeへの埋め込みを拒否しているサイト向け）。'),
           h('p', null, 'ダウンロードしたファイルは hFS の ~/Downloads に保存されます。')));
       }
 
       function addMark() {
-        if (cur === 'about:home') { ui.toast('ホーム画面はブックマークできません'); return; }
+        if (cur === 'about:home' || cur === 'about:hbrowser') { ui.toast('このページはブックマークできません'); return; }
         if (cfg.marks.some(m => m.url === cur)) { ui.toast('すでにブックマークされています'); return; }
         ui.prompt('ブックマークの名前', cur.replace(/^https?:\/\/(www\.)?/, '').split(/[/?#]/)[0] || cur, { title: 'ブックマークに追加' }).then(t => { if (t) { cfg.marks.push({ title: t, url: cur }); saveCfg(); ui.toast('ブックマークに追加しました'); } });
       }
       const dlDir = () => { fsx.mkdir(home + '/Downloads', { parents: true }); return home + '/Downloads'; };
       async function savePage() {
         try {
-          if (cur === 'about:home') throw new Error('保存するページがありません');
+          if (cur === 'about:home' || cur === 'about:hbrowser') throw new Error('このページは保存できません');
           let html = wv.lastHtml;
           if (html == null && iwaOn() && iv && /^https?:/i.test(cur)) html = await iv.html();
           if (html == null) { status.textContent = 'ページを取得しています…'; html = await (await OS.net.get(cur)).text(); }
