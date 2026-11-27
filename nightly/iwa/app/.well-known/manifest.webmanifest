@@ -1,0 +1,20 @@
+{
+  "name": "htmlOS Shell Nightly",
+  "short_name": "htmlOS Nightly",
+  "description": "htmlOS Nightly を動かす外枠（Isolated Web App）。hBrowser のページを Controlled Frame で表示する試験版です",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "version": "0.0.0",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ],
+  "permissions_policy": {
+    "controlled-frame": ["self"],
+    "cross-origin-isolated": ["self"]
+  }
+}

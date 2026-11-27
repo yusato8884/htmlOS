@@ -1,0 +1,13 @@
+{
+  "name": "htmlos-shell-nightly",
+  "private": true,
+  "type": "module",
+  "description": "htmlOS Shell（Isolated Web App）Nightly のビルド用",
+  "scripts": {
+    "build": "node build_iwa.mjs"
+  },
+  "dependencies": {
+    "wbn": "^0.0.10",
+    "wbn-sign": "^0.3.3"
+  }
+}

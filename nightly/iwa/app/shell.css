@@ -1,0 +1,20 @@
+/* htmlOS Shell Nightly — 外枠 */
+html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font: 14px/1.6 system-ui, "Noto Sans JP", sans-serif; }
+#stage { position: fixed; inset: 0; }
+controlledframe { position: absolute; border: 0; display: block; }
+controlledframe.os { inset: 0; width: 100%; height: 100%; }
+controlledframe.view { z-index: 10; background: #fff; }
+controlledframe[hidden] { display: none; }
+.panel { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, .55); }
+.panel[hidden] { display: none; }
+.card { width: min(520px, calc(100vw - 32px)); background: #fff; color: #241f31; border-radius: 14px; padding: 20px 22px; box-shadow: 0 12px 40px rgba(0, 0, 0, .4); }
+.card h1 { margin: 0 0 4px; font-size: 19px; }
+.card .ver { margin: 0 0 12px; color: #5e5c64; font-size: 13px; }
+.card .msg { margin: 0 0 12px; padding: 8px 10px; border-radius: 8px; background: #fff1e6; color: #8f3b00; }
+.card .msg:empty { display: none; }
+.card label { display: block; margin: 8px 0 4px; font-weight: 600; font-size: 13px; }
+.card input { box-sizing: border-box; width: 100%; padding: 7px 9px; border: 1px solid #c0bfbc; border-radius: 7px; font: inherit; }
+.card small { display: block; margin-top: 4px; color: #5e5c64; }
+.btns { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; margin-top: 16px; }
+.btns button { padding: 7px 14px; border: 1px solid #c0bfbc; border-radius: 8px; background: #fff; font: inherit; cursor: pointer; }
+.btns button.primary { background: #1c71d8; border-color: transparent; color: #fff; }

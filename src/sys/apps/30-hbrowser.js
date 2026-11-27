@@ -2,6 +2,8 @@
    ページの表示には HTUi SDK 3.0 の WebView（OS.htui.WebView）を使います。
    直接モード: iframe にそのまま表示（速いが、埋め込みを拒否するサイトは真っ白になる）
    プロキシモード: CORSプロキシ経由でHTMLを取得して表示（埋め込み拒否のサイトも読める。スクリプトの多いサイトは崩れる）
+   IWA モード（Nightly・試験中）: htmlOS Shell（IWA）の中では、http(s) のページを外枠の Controlled Frame に任せて
+   このウインドウの上に重ねて表示する（プロキシなしで、埋め込みを拒否するサイトも表示できる。OS.iwa）
    ダウンロードは hFS の ~/Downloads に保存します。 */
 (function () {
   const OS = window.OS, h = OS.h, path = OS.path, ui = OS.ui;
@@ -57,12 +59,39 @@
       wv.attach(win);
       win.body.append(h('div', { class: 'statusbar' }, status));
 
+      // ---- IWA モード（htmlOS Shell の中だけ）
+      const iwaOn = () => !!(OS.iwa && OS.iwa.available);
+      let iv = null, ivUrl = null, ivFresh = false; // 重ねて表示しているページ、いまのURL、こちらから開いた直後か（転送は履歴を増やさない）
+      const ivHost = h('div', { class: 'hb-iwa' }, h('div', { class: 'hb-iwa-msg' }, OS.icon('globe', 28), h('p', { class: 'hb-iwa-t' }, ''), h('small', null, 'ほかのウインドウやメニューが重なっているあいだは、ページを隠しています')));
+      function ivState(s) {
+        if (s.url && /^https?:/i.test(s.url) && s.url !== ivUrl) {
+          ivUrl = s.url;
+          if (s.url !== cur) {
+            if (ivFresh) hist[hi] = s.url; // 開いた直後の転送（http → https など）は置き換える
+            else { hist.splice(hi + 1); hist.push(s.url); hi = hist.length - 1; } // ページの中のリンクで移動した
+            cur = s.url; url.value = s.url; paint();
+          }
+        }
+        if (s.loading === false) ivFresh = false;
+        if (s.title != null) win.setTitle((s.title || cur.replace(/^https?:\/\//, '')) + ' — hBrowser');
+        ivHost.querySelector('.hb-iwa-t').textContent = s.title || cur;
+        status.textContent = s.error ? '読み込めませんでした: ' + s.error : s.loading ? '読み込み中… （IWA）' : 'IWA（Controlled Frame）で表示中';
+      }
+      function ivLoad(u) {
+        if (!iv) iv = OS.iwa.View(ivHost, { root: win.el, onstate: ivState, onnewwindow: nu => OS.launch('hbrowser', nu) });
+        wv.show(ivHost); ivHost.querySelector('.hb-iwa-t').textContent = u;
+        ivUrl = u; ivFresh = true; iv.load(u); iv.show();
+        status.textContent = '読み込み中… （IWA）';
+      }
+      win.onDispose = () => { if (iv) iv.destroy(); };
+
       function setProxy(on) {
         cfg.proxy = !!on; wv.proxy = cfg.proxy; saveCfg(); paint(); go(cur, false);
       }
       function paint() {
         bBack.disabled = hi <= 0; bFwd.disabled = hi >= hist.length - 1;
         bProxy.classList.toggle('on', !!cfg.proxy);
+        bProxy.hidden = iwaOn(); // IWA モードではプロキシは使わない
         if (win.captionButtons && win.captionButtons[1]) win.captionButtons[1].active = !!cfg.proxy;
       }
       function showMsg(title, lines, actions) {
@@ -76,6 +105,8 @@
         cur = u; url.value = u === 'about:home' ? '' : u;
         paint(); status.textContent = '';
         win.setTitle((u === 'about:home' ? 'ホーム' : u.replace(/^https?:\/\//, '').replace(/^hfs:/, '')) + ' — hBrowser');
+        if (iwaOn() && /^https?:/i.test(u)) return ivLoad(u);
+        if (iv) iv.hide();
         if (u === 'about:home') return homePage();
         return wv.load(u).then(() => { if (wv.url && wv.url !== cur) { cur = wv.url; url.value = cur; } });
       }
@@ -89,7 +120,8 @@
         wv.show(h('div', { class: 'hb-page' }, h('h1', null, 'hBrowser'),
           h('form', { class: 'hb-search', onsubmit: e => { e.preventDefault(); go(q.value); } }, q, h('button', { class: 'btn primary', type: 'submit' }, '開く')),
           marks,
-          h('p', null, 'ページが真っ白なときは、ツールバーかタイトルバーの「プロキシ」をオンにすると表示できることがあります（iframeへの埋め込みを拒否しているサイト向け）。検索はプロキシ経由の DuckDuckGo を使います。'),
+          iwaOn() ? h('p', null, 'IWA モード（Nightly・試験中）: Web のページは htmlOS Shell の Controlled Frame で表示します。プロキシは使いません。')
+            : h('p', null, 'ページが真っ白なときは、ツールバーかタイトルバーの「プロキシ」をオンにすると表示できることがあります（iframeへの埋め込みを拒否しているサイト向け）。検索はプロキシ経由の DuckDuckGo を使います。'),
           h('p', null, 'ダウンロードしたファイルは hFS の ~/Downloads に保存されます。')));
       }
 
@@ -103,6 +135,7 @@
         try {
           if (cur === 'about:home') throw new Error('保存するページがありません');
           let html = wv.lastHtml;
+          if (html == null && iwaOn() && iv && /^https?:/i.test(cur)) html = await iv.html();
           if (html == null) { status.textContent = 'ページを取得しています…'; html = await (await OS.net.get(cur)).text(); }
           let name = 'page.html';
           try { const U = new URL(cur); name = (U.pathname.split('/').filter(Boolean).pop() || U.hostname).replace(/\.[a-z0-9]+$/i, '') + '.html'; } catch (e) { name = path.base(cur.slice(4)); }
